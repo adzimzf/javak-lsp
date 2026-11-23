@@ -1,0 +1,21 @@
+//- /src/main/java/org/jsoup/parser/Parser.java
+package org.jsoup.parser;
+public class Parser {
+  public String defaultNamespace() { return ""; }
+}
+//- /src/main/java/org/jsoup/azim/Zamzam.java
+package org.jsoup.azim;
+import org.jsoup.parser.Parser;
+
+public class Za$0mzam {
+  public static String parse(String html, Parser parser) {
+    return parser.defaultNamespace();
+  }
+
+  private String name(String test) {
+    parse(test);
+    return "";
+  }
+}
+//= expected (pending)
+/src/main/java/org/jsoup/azim/Zamzam.java:10:5  The method parse(String, Parser) in the type Zamzam is not applicable for the arguments (String)

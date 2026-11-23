@@ -203,6 +203,10 @@ impl DependencySync {
 #[derive(Default)]
 struct Indexed {
     types: usize,
+    /// The Java level the project's build files declare, and the Kotlin
+    /// version its manifest depends on.
+    java_version: Option<String>,
+    kotlin_version: Option<String>,
     jdk: Option<PathBuf>,
     kotlin_stdlib: Option<PathBuf>,
     /// Whether the workspace has Kotlin sources, so the standard library
@@ -216,6 +220,16 @@ impl Indexed {
             .log_message(
                 MessageType::INFO,
                 format!("javak-lsp: library indexing done, {} library types", self.types),
+            )
+            .await;
+        client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "javak-lsp: project Java {}, Kotlin {}",
+                    self.java_version.as_deref().unwrap_or("not declared (build tool default)"),
+                    self.kotlin_version.as_deref().unwrap_or("none")
+                ),
             )
             .await;
         match &self.jdk {
@@ -283,6 +297,8 @@ async fn index_libraries(
         let (mut jars, stdlib) = manifest_sources(manifest.as_ref());
         let mut indexed = Indexed {
             wants_kotlin: stdlib.listed || root.as_deref().is_none_or(has_kotlin_sources),
+            java_version: root.as_deref().and_then(dependency_sync::declared_java_version),
+            kotlin_version: stdlib.version.clone(),
             ..Indexed::default()
         };
         if indexed.wants_kotlin {

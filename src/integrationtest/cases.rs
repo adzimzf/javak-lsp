@@ -14,6 +14,10 @@
 //! /com/demo/Greeter.java:2:24  class Greeter { String greet() { return ""; } }
 //! ```
 //!
+//! `//= expected (pending)` marks a case whose answer the server does not
+//! give yet: it passes while they differ and fails once it agrees, so the
+//! marker comes off the day the check lands.
+//!
 //! The directory a case sits in says which request is asked of it and which
 //! language it is written in, so a new case is a new file and no Rust: the
 //! set scales to thousands of them. One `#[test]` per language and kind runs
@@ -33,6 +37,12 @@ use super::server::Session;
 
 const EXTENSION: &str = "case";
 const SEPARATOR: &str = "//= expected";
+/// A case whose expectation the server does not meet yet, written as
+/// `//= expected (pending)`: the answer below is what the case asks for,
+/// and the suite passes while the server answers something else. It fails
+/// once the server does answer it — the marker has to come off then, so a
+/// pending case cannot sit there once it holds.
+const PENDING: &str = "(pending)";
 const INTEGRATION_VARIABLE: &str = "INTEGRATION";
 /// How many cases of one suite are in flight; what runs is capped by the
 /// budget they share with every other suite.
@@ -174,8 +184,15 @@ async fn run_case(file: &Path, kind: Kind) -> Option<String> {
     let actual = kind
         .ask(&mut session, &fixture, &case.expected, case.settles())
         .await;
-    if actual == case.expected {
+    let agrees = actual == case.expected;
+    if agrees != case.pending {
         return None;
+    }
+    if case.pending {
+        return Some(format!(
+            "{}\n  answers what it asks for now; remove the `{PENDING}` marker",
+            file.display()
+        ));
     }
     Some(format!(
         "{}\n  expected:\n{}  answered:\n{}",
@@ -200,6 +217,8 @@ fn asked_for(variable: &str) -> bool {
 struct Case {
     fixture: String,
     expected: String,
+    /// Marked `(pending)`: the expectation is a wish, not yet the answer.
+    pending: bool,
 }
 
 impl Case {
@@ -209,9 +228,13 @@ impl Case {
         let (fixture, expected) = text.split_once(SEPARATOR).unwrap_or_else(|| {
             panic!("{} has a `{SEPARATOR}` line", file.display());
         });
+        let (marker, expected) = expected
+            .split_once('\n')
+            .map_or(("", expected), |(first, rest)| (first.trim(), rest));
         Self {
             fixture: fixture.to_owned(),
             expected: normalized(expected),
+            pending: marker == PENDING,
         }
     }
 

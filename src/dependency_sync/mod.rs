@@ -557,6 +557,68 @@ pub(crate) fn is_build_file_name(file_name: &str) -> bool {
     ) || file_name.ends_with(".versions.toml")
 }
 
+pub(crate) fn declared_java_version(root: &Path) -> Option<String> {
+    let text = ["pom.xml", "build.gradle.kts", "build.gradle"]
+        .iter()
+        .find_map(|name| std::fs::read_to_string(root.join(name)).ok())?;
+    // Maven keeps its levels in `<properties>` *and* inside each
+    // `maven-compiler-plugin` execution (jsoup: `<release>8</release>`,
+    // `<release>11</release>`); Gradle in a toolchain or compatibility.
+    const TAGS: &[&str] = &["release", "source", "target"];
+    const KEYS: &[&str] = &[
+        "maven.compiler.release",
+        "maven.compiler.source",
+        "maven.compiler.target",
+        "java.version",
+        "JavaLanguageVersion.of",
+        "sourceCompatibility",
+        "targetCompatibility",
+        "jvmTarget",
+    ];
+    // ponytail: the root build file only, and the highest level in it — the
+    // level whose language features the whole project may use. Parse per
+    // module and per source root when answers become module-specific.
+    let tags = TAGS
+        .iter()
+        .flat_map(|tag| xml_values(&text, tag))
+        .filter_map(|value| java_level(&value));
+    KEYS.iter()
+        .filter_map(|key| version_after(&text, key).as_deref().and_then(java_level))
+        .chain(tags)
+        .max_by(|left, right| platform::compare_versions(left, right))
+}
+
+/// The text of every `<tag>…</tag>` of `text`.
+fn xml_values(text: &str, tag: &str) -> Vec<String> {
+    text.split(&format!("<{tag}>"))
+        .skip(1)
+        .filter_map(|rest| rest.split_once(&format!("</{tag}>")))
+        .map(|(value, _)| value.trim().to_owned())
+        .collect()
+}
+
+/// A Java level as the number it names: `1.8` and `8` are both `8`;
+/// anything that isn't a level (a path, a property reference) is `None`.
+fn java_level(value: &str) -> Option<String> {
+    let level = value.strip_prefix("1.").unwrap_or(value);
+    (!level.is_empty() && level.chars().all(|character| character.is_ascii_digit()))
+        .then(|| level.to_owned())
+}
+
+/// The `1.8`/`17`-shaped number following `key` on the same line.
+fn version_after(text: &str, key: &str) -> Option<String> {
+    let rest = text.split_once(key)?.1;
+    let start = rest.find(|character: char| character.is_ascii_digit())?;
+    if rest[..start].contains('\n') {
+        return None;
+    }
+    let number: String = rest[start..]
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect();
+    Some(number.trim_end_matches('.').to_owned())
+}
+
 fn collect_build_files(directory: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
