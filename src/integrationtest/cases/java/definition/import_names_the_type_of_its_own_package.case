@@ -1,0 +1,20 @@
+//- /javax/swing/text/html/parser/Parser.java
+package javax.swing.text.html.parser;
+
+public class Parser {
+}
+//- /org/jsoup/parser/Parser.java
+package org.jsoup.parser;
+
+public class Parser {
+}
+//- /org/jsoup/azim/Zamzam.java
+package org.jsoup.azim;
+
+import org.jsoup.parser.Par$0ser;
+
+class Zamzam {
+    Parser parser;
+}
+//= expected
+/org/jsoup/parser/Parser.java:3:14  public class Parser {
