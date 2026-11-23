@@ -49,6 +49,11 @@ Notes on how an answer is written down:
   the package out of the path, so those cases live under `/src/main/java/`.
 - **signature_help** cases that end in a syntax error do so on purpose, as
   the jdtls tests do: help is asked while a call is being typed.
+- A case marked `//= expected (pending)` writes down what jdtls answers
+  where javak-lsp has no such check yet: it passes while the two differ and
+  fails the day the server answers it, so the marker comes off then. The
+  pending diagnostics cases below ask for checks javak-lsp does not have
+  (a type checker, a source level read from the build file).
 
 ## definition
 
@@ -353,6 +358,7 @@ jdtls: none — javak-lsp's own checks (syntax errors, missing `package`).
 | `a_body_that_is_never_closed` | the unclosed brace of a method body |
 | `a_brace_with_nothing_left_to_close` | a `}` past the end of the class |
 | `a_call_whose_parenthesis_is_never_closed` | the `)` a call never gets |
+| `a_call_missing_an_argument_is_reported` | the call `parse(test)` has no applicable overload of `parse(String, Parser)` — **pending** |
 | `a_class_declared_without_a_body` | a class header with no `{}` after it |
 | `a_deeply_nested_package_is_named_in_full` | `com.demo.data.local`, every segment of the path |
 | `a_directory_that_is_not_an_identifier_names_no_package` | nothing: `my-demo` is no package segment |
@@ -375,6 +381,7 @@ jdtls: none — javak-lsp's own checks (syntax errors, missing `package`).
 | `a_switch_statement_with_fall_through_and_a_default_parses` | nothing |
 | `a_test_source_root_is_read_the_same_way` | the missing package of a `src/test/java` file |
 | `a_text_block_containing_quotes_and_braces_parses` | nothing: `"""` is not an unclosed string |
+| `a_text_block_under_source_level_15_is_reported` | a text block in a project whose `pom.xml` says source level 11 — **pending** |
 | `a_type_annotated_generic_field_parses` | nothing: nested generics and a `? super` bound |
 | `a_unicode_identifier_parses` | nothing: `café` is a name |
 | `an_annotation_declaration_with_elements_parses` | nothing: `@interface` with `default` values |

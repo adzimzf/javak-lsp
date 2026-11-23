@@ -450,6 +450,14 @@ fn function(node: &Syn) -> Syn {
             }
             "function_body" => lowered.children.push(function_body(child)),
             "type_parameters" => lowered.children.push(type_parameters(child)),
+            // The type an extension extends: `String` of `fun String.shout()`.
+            "user_type" | "nullable_type" | "non_nullable_type" | "parenthesized_type"
+                if lowered.child("name").is_none() && !after_parameters =>
+            {
+                lowered
+                    .children
+                    .push(with_field(written_type(child), "receiver"));
+            }
             "identifier" if lowered.child("name").is_none() => {
                 lowered.children.push(with_field(leaf(child, "identifier"), "name"));
             }

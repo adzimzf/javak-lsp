@@ -1,0 +1,19 @@
+//- /pom.xml
+<project>
+  <properties>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+  </properties>
+</project>
+//- /src/main/java/org/jsoup/azim/Zamzam.java
+package org.jsoup.azim;
+
+public class Za$0mzam {
+  String text() {
+    return """
+        hello
+        """;
+  }
+}
+//= expected (pending)
+/src/main/java/org/jsoup/azim/Zamzam.java:5:12  The Java feature 'Text Blocks' is only available with source level 15 and above

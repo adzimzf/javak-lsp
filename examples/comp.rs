@@ -40,7 +40,7 @@ fn main() {
             }
         })
         .collect();
-    let snapshot = Snapshot { files: views };
+    let snapshot = Snapshot::new(views);
     let (uri, at) = cursor.expect("a case has a cursor");
     let file = snapshot.file(&uri).unwrap();
     for view in &snapshot.files {

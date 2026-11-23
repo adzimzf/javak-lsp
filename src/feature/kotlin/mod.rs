@@ -2,7 +2,8 @@
 //! answer of the reference server they were taken from, this follows it.
 
 use super::semantic::{members_of, Bindings, Found, Snapshot};
-use super::{LanguageFeatures, MethodShape, Parameter};
+use crate::parser::Syn;
+use super::{LanguageFeatures, Literal, MethodShape, Parameter};
 
 pub struct Kotlin;
 
@@ -82,5 +83,42 @@ impl LanguageFeatures for Kotlin {
                 bindings: Bindings::new(),
             })
             .collect()
+    }
+
+    /// Kotlin's default imports on the JVM; `kotlin.String` before
+    /// `java.lang.String`.
+    fn implicit_packages(&self) -> &'static [&'static str] {
+        &[
+            "kotlin",
+            "kotlin.annotation",
+            "kotlin.collections",
+            "kotlin.comparisons",
+            "kotlin.io",
+            "kotlin.ranges",
+            "kotlin.sequences",
+            "kotlin.text",
+            "kotlin.jvm",
+            "java.lang",
+        ]
+    }
+
+    fn has_top_level_functions(&self) -> bool {
+        true
+    }
+
+    /// Kotlin's default visibility is `public`.
+    fn public_by_default(&self, _owner: &Syn) -> bool {
+        true
+    }
+
+    fn literal_type(&self, kind: &str, text: &str) -> &'static str {
+        match Literal::of(kind, text) {
+            Literal::Int => "Int",
+            Literal::Long => "Long",
+            Literal::Float => "Float",
+            Literal::Double => "Double",
+            Literal::Char => "Char",
+            Literal::Boolean => "Boolean",
+        }
     }
 }

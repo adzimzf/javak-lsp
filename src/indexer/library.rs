@@ -1,5 +1,7 @@
 //! The sources of the project's libraries: the `-sources.jar`s (or the
-//! decompiled ones) dependency sync resolves.
+//! decompiled ones) dependency sync resolves, and the platform's own — the
+//! JDK's `src.zip` and the Kotlin standard library's sources jar
+//! ([`crate::dependency_sync::platform`]).
 //!
 //! Each jar is listed once, by the types its files declare. A file is
 //! extracted into the cache and parsed only when a workspace file names one
@@ -26,6 +28,11 @@ pub struct LibraryFile {
     /// The file's path inside the jar.
     pub entry: String,
     pub language: Language,
+    /// The package the file declares, `""` for the unnamed one.
+    pub package: String,
+    /// Which of several files declaring the same name is read first:
+    /// lower first ([`rank`]).
+    pub rank: u8,
 }
 
 /// A library file, extracted and parsed.
@@ -34,11 +41,21 @@ pub struct Loaded {
     pub language: Language,
     pub text: Arc<String>,
     pub tree: Arc<Syn>,
+    /// The types its declarations extend, by simple name.
+    pub supertypes: Vec<String>,
+}
+
+/// What the indexed jars declare, by simple name.
+#[derive(Default)]
+struct Listing {
+    /// Type name → the files declaring a type of that name, best first.
+    types: HashMap<String, Vec<LibraryFile>>,
+    /// Name of a top-level function (Kotlin) → the files declaring one.
+    functions: HashMap<String, Vec<LibraryFile>>,
 }
 
 pub struct Libraries {
-    /// Simple type name → the library files declaring a type of that name.
-    by_type: RwLock<HashMap<String, Vec<LibraryFile>>>,
+    by_name: RwLock<Listing>,
     loaded: DashMap<LibraryFile, Arc<Loaded>>,
     /// Where library files are extracted.
     extracted: PathBuf,
@@ -58,35 +75,65 @@ impl Default for Libraries {
 impl Libraries {
     pub fn extracting_into(directory: PathBuf) -> Self {
         Self {
-            by_type: RwLock::default(),
+            by_name: RwLock::default(),
             loaded: DashMap::new(),
             extracted: directory,
         }
     }
 
     /// Index these sources jars, replacing what was indexed before.
+    /// Returns how many type declarations were listed.
     pub fn replace(&self, jars: &[PathBuf]) -> usize {
-        let mut by_type: HashMap<String, Vec<LibraryFile>> = HashMap::new();
+        let mut listing = Listing::default();
         for jar in jars {
-            if let Err(error) = list_jar(jar, &mut by_type) {
+            if let Err(error) = list_jar(jar, &mut listing) {
                 log::warn!("libraries: cannot read {}: {error}", jar.display());
             }
         }
-        let count = by_type.values().map(Vec::len).sum();
-        if let Ok(mut indexed) = self.by_type.write() {
-            *indexed = by_type;
+        for files in listing.types.values_mut().chain(listing.functions.values_mut()) {
+            files.sort_by_key(|file| file.rank);
+        }
+        let count = listing.types.values().map(Vec::len).sum();
+        if let Ok(mut indexed) = self.by_name.write() {
+            *indexed = listing;
         }
         self.loaded.clear();
         count
     }
 
-    /// The library files that declare a type called `name`.
+    /// The library files that declare a type called `name`, best first.
     pub fn declaring(&self, name: &str) -> Vec<LibraryFile> {
-        self.by_type
+        self.by_name
             .read()
             .ok()
-            .and_then(|indexed| indexed.get(name).cloned())
+            .and_then(|indexed| indexed.types.get(name).cloned())
             .unwrap_or_default()
+    }
+
+    /// The library files that declare a top-level function called `name`,
+    /// best first.
+    pub fn declaring_function(&self, name: &str) -> Vec<LibraryFile> {
+        self.by_name
+            .read()
+            .ok()
+            .and_then(|indexed| indexed.functions.get(name).cloned())
+            .unwrap_or_default()
+    }
+
+    /// The top-level functions whose key ([`super::SourceLayout::library_functions`])
+    /// starts with `prefix`, each with the files declaring it.
+    pub fn functions_starting(&self, prefix: &str) -> Vec<(String, Vec<LibraryFile>)> {
+        let Ok(indexed) = self.by_name.read() else {
+            return Vec::new();
+        };
+        let mut found: Vec<(String, Vec<LibraryFile>)> = indexed
+            .functions
+            .iter()
+            .filter(|(key, _)| key.starts_with(prefix))
+            .map(|(key, files)| (key.clone(), files.clone()))
+            .collect();
+        found.sort_by(|left, right| left.0.cmp(&right.0));
+        found
     }
 
     /// A library file extracted into the cache and parsed, once.
@@ -105,6 +152,7 @@ impl Libraries {
         let loaded = Arc::new(Loaded {
             uri,
             language: file.language,
+            supertypes: super::type_names(&tree, true),
             text: Arc::new(text),
             tree: Arc::new(tree),
         });
@@ -113,8 +161,11 @@ impl Libraries {
     }
 }
 
-/// Every Java/Kotlin file of a jar, by the types it declares.
-fn list_jar(jar: &Path, by_type: &mut HashMap<String, Vec<LibraryFile>>) -> Result<(), String> {
+/// Files that declare no type a name can stand for.
+const NOT_DECLARING: &[&str] = &["module-info", "package-info"];
+
+/// Every Java/Kotlin file of a jar, by the types and functions it declares.
+fn list_jar(jar: &Path, listing: &mut Listing) -> Result<(), String> {
     let file = std::fs::File::open(jar).map_err(|error| error.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
     for index in 0..archive.len() {
@@ -129,20 +180,76 @@ fn list_jar(jar: &Path, by_type: &mut HashMap<String, Vec<LibraryFile>>) -> Resu
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if NOT_DECLARING.contains(&stem.as_str()) {
+            continue;
+        }
         let layout = layout(language);
         let mut text = String::new();
         if layout.reads_library_text() && entry.read_to_string(&mut text).is_err() {
             continue;
         }
+        let file = LibraryFile {
+            jar: jar.to_path_buf(),
+            entry: name.clone(),
+            language,
+            package: layout.library_package(&name, &text),
+            rank: rank(&name),
+        };
         for declared in layout.library_types(&stem, &text) {
-            by_type.entry(declared).or_default().push(LibraryFile {
-                jar: jar.to_path_buf(),
-                entry: name.clone(),
-                language,
-            });
+            listing.types.entry(declared).or_default().push(file.clone());
+        }
+        for declared in layout.library_functions(&text) {
+            let files = listing.functions.entry(declared).or_default();
+            if !files.contains(&file) {
+                files.push(file.clone());
+            }
         }
     }
     Ok(())
+}
+
+/// The path of an entry below its module directory: the JDK's `src.zip`
+/// keeps `java/lang/String.java` under `java.base/`.
+pub fn below_module(entry: &str) -> (Option<&str>, &str) {
+    match entry.split_once('/') {
+        Some((first, rest)) if first.contains('.') => (Some(first), rest),
+        _ => (None, entry),
+    }
+}
+
+/// Which of the files declaring the same simple name is read first, lower
+/// first: the platform's public API (`java.util.List`, `kotlin.String`)
+/// before the rest of a library, the JDK's base module before its desktop
+/// ones (`java.awt.List`), the JVM's `actual` declarations of the Kotlin
+/// standard library before their common `expect`s, and internals last.
+fn rank(entry: &str) -> u8 {
+    let (module, path) = below_module(entry);
+    let internal = ["sun/", "com/sun/", "jdk/", "kotlin/internal/"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+        || path.contains("/internal/")
+        || path.contains("/impl/");
+    if internal {
+        return 9;
+    }
+    let source_set = path.split_once('/').map(|(first, _)| first);
+    let in_source_set = source_set.is_some_and(|set| set.ends_with("Main"));
+    let path = if in_source_set {
+        path.split_once('/').map_or(path, |(_, rest)| rest)
+    } else {
+        path
+    };
+    let platform = ["java/", "javax/", "kotlin/"]
+        .iter()
+        .any(|prefix| path.starts_with(prefix));
+    let mut rank = if platform { 0 } else { 2 };
+    if module.is_some_and(|module| module != "java.base") {
+        rank += 1;
+    }
+    if source_set.is_some_and(|set| set != "jvmMain" && in_source_set) {
+        rank += 1;
+    }
+    rank
 }
 
 fn read_entry(jar: &Path, entry: &str) -> Result<String, String> {
@@ -196,7 +303,11 @@ pub(super) mod tests {
     use std::io::Write;
 
     pub fn jar(directory: &Path, files: &[(&str, &str)]) -> PathBuf {
-        let path = directory.join("greeter-1.0-sources.jar");
+        jar_named(directory, "greeter-1.0-sources.jar", files)
+    }
+
+    pub fn jar_named(directory: &Path, name: &str, files: &[(&str, &str)]) -> PathBuf {
+        let path = directory.join(name);
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
         for (name, text) in files {
             zip.start_file(*name, zip::write::SimpleFileOptions::default())
@@ -223,5 +334,56 @@ pub(super) mod tests {
         assert_eq!(libraries.declaring("Greeter")[0].entry, "com/acme/Greeter.java");
         assert_eq!(libraries.declaring("Registry")[0].language, Language::Kotlin);
         assert!(libraries.declaring("Shapes").is_empty());
+    }
+
+    #[test]
+    fn the_platforms_public_api_is_read_first() {
+        let directory = tempfile::tempdir().unwrap();
+        let jdk = jar_named(
+            directory.path(),
+            "src.zip",
+            &[
+                ("jdk.compiler/com/sun/tools/javac/util/List.java", "package com.sun.tools.javac.util;\n"),
+                ("java.desktop/java/awt/List.java", "package java.awt;\n"),
+                ("java.base/java/util/List.java", "package java.util;\n"),
+                ("java.base/module-info.java", "module java.base {}\n"),
+                ("java.base/java/util/package-info.java", "package java.util;\n"),
+            ],
+        );
+        let stdlib = jar_named(
+            directory.path(),
+            "kotlin-stdlib-2.2.20-sources.jar",
+            &[
+                ("commonMain/kotlin/String.kt", "package kotlin\npublic expect class String\n"),
+                ("jvmMain/kotlin/String.kt", "package kotlin\npublic actual class String\n"),
+                (
+                    "commonMain/generated/_Collections.kt",
+                    "package kotlin.collections\npublic fun <T> List<T>.first(): T = this[0]\n\
+                     internal fun <T> List<T>.secret(): T = this[0]\n",
+                ),
+            ],
+        );
+        let libraries = Libraries::default();
+        libraries.replace(&[jdk, stdlib]);
+        let lists: Vec<(String, String)> = libraries
+            .declaring("List")
+            .into_iter()
+            .map(|file| (file.entry, file.package))
+            .collect();
+        assert_eq!(lists[0], ("java.base/java/util/List.java".to_owned(), "java.util".to_owned()));
+        assert_eq!(lists[1].1, "java.awt");
+        assert_eq!(lists[2].1, "com.sun.tools.javac.util");
+        assert!(libraries.declaring("module-info").is_empty());
+        assert!(libraries.declaring("package-info").is_empty());
+        assert_eq!(libraries.declaring("String")[0].entry, "jvmMain/kotlin/String.kt");
+        let first = libraries.declaring_function("List.first");
+        assert_eq!(first[0].package, "kotlin.collections");
+        assert!(libraries.declaring_function("List.secret").is_empty());
+        let started: Vec<String> = libraries
+            .functions_starting("List.fi")
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect();
+        assert_eq!(started, vec!["List.first"]);
     }
 }

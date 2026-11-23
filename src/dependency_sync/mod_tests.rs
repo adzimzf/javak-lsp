@@ -553,3 +553,56 @@ fn maven_reactor_retry_runs_the_compile_phase_without_compiling() {
         .any(|argument| argument == "-Dmaven.main.skip=true"));
     assert!(reactor.iter().any(|argument| argument == "--fail-at-end"));
 }
+
+#[test]
+fn the_declared_java_version_is_read_from_the_root_build_file() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "pom.xml",
+        "<project><properties><maven.compiler.release>17</maven.compiler.release>\
+         </properties></project>",
+    );
+    assert_eq!(declared_java_version(dir.path()).as_deref(), Some("17"));
+
+    let gradle = tempfile::tempdir().unwrap();
+    write(
+        gradle.path(),
+        "build.gradle.kts",
+        "java {\n  toolchain { languageVersion = JavaLanguageVersion.of(21) }\n}\n",
+    );
+    assert_eq!(declared_java_version(gradle.path()).as_deref(), Some("21"));
+
+    let old = tempfile::tempdir().unwrap();
+    // `1.8` is Java 8.
+    write(old.path(), "build.gradle", "sourceCompatibility = 1.8\n");
+    assert_eq!(declared_java_version(old.path()).as_deref(), Some("8"));
+
+    // A key whose value is on the next line names no version.
+    let empty = tempfile::tempdir().unwrap();
+    write(empty.path(), "build.gradle", "sourceCompatibility =\n\n17\n");
+    assert_eq!(declared_java_version(empty.path()), None);
+}
+
+#[test]
+fn maven_compiler_plugin_executions_name_the_level_too() {
+    // jsoup declares nothing in `<properties>`: the levels are inside the
+    // compiler plugin's executions, and the highest one is the project's.
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "pom.xml",
+        "<project><properties><project.build.sourceEncoding>UTF-8\
+         </project.build.sourceEncoding></properties><build><plugins><plugin>\
+         <artifactId>maven-compiler-plugin</artifactId><executions>\
+         <execution><configuration><source>8</source><target>8</target>\
+         </configuration></execution>\
+         <execution><configuration><release>8</release></configuration></execution>\
+         <execution><configuration><release>11</release></configuration></execution>\
+         <execution><configuration><source>1.8</source></configuration></execution>\
+         </executions></plugin><plugin><configuration><sources><source>\
+         ${project.basedir}/src/test/java11</source></sources></configuration>\
+         </plugin></plugins></build></project>",
+    );
+    assert_eq!(declared_java_version(dir.path()).as_deref(), Some("11"));
+}

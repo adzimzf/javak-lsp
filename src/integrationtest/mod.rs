@@ -36,6 +36,7 @@
 //! or Kotlin stdlib the machine has.
 
 mod cases;
+mod compat;
 mod fixture;
 mod request;
 mod server;

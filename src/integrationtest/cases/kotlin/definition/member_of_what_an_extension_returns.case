@@ -1,0 +1,24 @@
+//- /com/demo/Shapes.kt
+package com.demo
+
+class Box<T>(val item: T)
+
+fun <T> Box<T>.unwrap(): T {
+    return item
+}
+
+class Circle {
+    fun area(): Double {
+        return 3.14
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun measure(box: Box<Circle>): Double {
+        return box.unwrap().ar$0ea()
+    }
+}
+//= expected
+/com/demo/Shapes.kt:10:9  fun area(): Double {

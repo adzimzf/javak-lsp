@@ -8,16 +8,36 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::Url;
 
 use crate::feature::{features, MethodShape, Parameter};
+use crate::indexer::kotlin::extension_key;
+use crate::indexer::library::{Libraries, LibraryFile};
 use crate::language::Language;
 use crate::parser::{Position, Syn};
 
-/// The open files, each parsed.
+/// How many library files declaring one name are read to find it.
+const LIBRARY_FILES_PER_NAME: usize = 4;
+
+/// The open files, each parsed, and the library files they name.
+///
+/// A library file nothing named when the snapshot was taken is read when
+/// an answer needs it — the `PrintStream` of `System.out`, the `String` a
+/// literal is — and kept for the rest of the request.
 pub struct Snapshot {
     pub files: Vec<FileView>,
+    libraries: Option<Arc<Libraries>>,
+    /// Library files read while answering.
+    read: elsa::sync::FrozenVec<Box<FileView>>,
+    /// The types each file declares, by the address of its tree, listed
+    /// once per snapshot: a library file is large, and asked often.
+    declared_types: elsa::sync::FrozenMap<usize, Vec<TypePath>>,
 }
+
+/// A type a file declares: its name, and the child indices that lead to
+/// its declaration from the file's root.
+type TypePath = (String, Vec<u32>);
 
 /// One parsed file. Text and tree are shared, so a snapshot of many files
 /// is cheap to take.
+#[derive(Clone)]
 pub struct FileView {
     pub uri: Url,
     pub language: Language,
@@ -75,8 +95,86 @@ impl Found<'_> {
 }
 
 impl Snapshot {
+    /// These files, and no library to read more from.
+    pub fn new(files: Vec<FileView>) -> Self {
+        Self {
+            files,
+            libraries: None,
+            read: elsa::sync::FrozenVec::new(),
+            declared_types: elsa::sync::FrozenMap::new(),
+        }
+    }
+
+    /// The type declared in `file` called `name`, if any: [`types_of`],
+    /// listed once.
+    fn declared_type<'a>(&self, file: &'a FileView, name: &str) -> Option<&'a Syn> {
+        let key = Arc::as_ptr(&file.tree) as usize;
+        let listed = match self.declared_types.get(&key) {
+            Some(listed) => listed,
+            None => {
+                let mut listed = Vec::new();
+                type_paths(&file.tree, &mut Vec::new(), &mut listed);
+                self.declared_types.insert(key, listed)
+            }
+        };
+        let (_, path) = listed.iter().find(|(declared, _)| declared == name)?;
+        let mut node: &'a Syn = &file.tree;
+        for index in path {
+            node = node.children.get(*index as usize)?;
+        }
+        Some(node)
+    }
+
+    /// The same, reading what else it needs from `libraries`.
+    pub fn reading(mut self, libraries: Option<Arc<Libraries>>) -> Self {
+        self.libraries = libraries;
+        self
+    }
+
+    /// The libraries this snapshot reads from.
+    pub fn libraries(&self) -> Option<Arc<Libraries>> {
+        self.libraries.clone()
+    }
+
     pub fn file(&self, uri: &Url) -> Option<&FileView> {
-        self.files.iter().find(|file| &file.uri == uri)
+        self.every_file().find(|file| &file.uri == uri)
+    }
+
+    /// The files the snapshot was taken with, then the library files read
+    /// since.
+    fn every_file(&self) -> impl Iterator<Item = &FileView> {
+        self.files.iter().chain(self.read.iter())
+    }
+
+    /// A library file, read now unless it already is.
+    fn library_file(&self, file: &LibraryFile) -> Option<&FileView> {
+        let loaded = self.libraries.as_ref()?.load(file)?;
+        if let Some(known) = self.every_file().find(|known| known.uri == loaded.uri) {
+            return Some(known);
+        }
+        Some(self.read.push_get(Box::new(FileView {
+            uri: loaded.uri.clone(),
+            language: loaded.language,
+            text: loaded.text.clone(),
+            tree: loaded.tree.clone(),
+            library: true,
+        })))
+    }
+
+    /// Library files declaring `name` in `package` (in any package when
+    /// none is asked for), files of `prefer`'s language first, each read.
+    fn library_files<'a>(
+        &'a self,
+        mut candidates: Vec<LibraryFile>,
+        package: Option<&str>,
+        prefer: Language,
+    ) -> impl Iterator<Item = &'a FileView> {
+        candidates.retain(|candidate| package.is_none_or(|wanted| candidate.package == wanted));
+        candidates.sort_by_key(|candidate| (candidate.language != prefer, candidate.rank));
+        candidates
+            .into_iter()
+            .take(LIBRARY_FILES_PER_NAME)
+            .filter_map(move |candidate| self.library_file(&candidate))
     }
 
     /// The package a file declares.
@@ -94,7 +192,9 @@ impl Snapshot {
 
     /// The declaration of the type called `name`, as the file at `from`
     /// sees it: its own types first, then what it imports by name, then
-    /// its package, then anything else the workspace declares.
+    /// its package, what it imports on demand, what its language imports
+    /// on its own (`java.lang`, `kotlin.collections`), then anything else
+    /// the workspace or its libraries declare.
     pub fn type_named<'a>(&'a self, name: &str, from: &'a FileView) -> Option<Found<'a>> {
         if let Some((qualifier, last)) = name.rsplit_once('.') {
             return self.type_qualified(qualifier, last, from);
@@ -105,22 +205,29 @@ impl Snapshot {
         let imported = imports(from)
             .into_iter()
             .find(|import| !import.wildcard && import.last_segment() == name);
+        let prefer = from.language;
         if let Some(import) = imported {
-            if let Some(found) = self.type_in_package(name, Some(import.qualifier())) {
+            if let Some(found) = self.type_in_package(name, Some(import.qualifier()), prefer) {
                 return Some(found);
             }
         }
         let package = self.package(from);
-        if let Some(found) = self.type_in_package(name, package.as_deref()) {
+        let own = package.as_deref().unwrap_or("");
+        if let Some(found) = self.type_in_package(name, Some(own), prefer) {
             return Some(found);
         }
         let on_demand = imports(from).into_iter().filter(|import| import.wildcard);
         for import in on_demand {
-            if let Some(found) = self.type_in_package(name, Some(&import.name)) {
+            if let Some(found) = self.type_in_package(name, Some(&import.name), prefer) {
                 return Some(found);
             }
         }
-        self.type_in_package(name, None)
+        for implicit in features(prefer).implicit_packages() {
+            if let Some(found) = self.type_in_package(name, Some(implicit), prefer) {
+                return Some(found);
+            }
+        }
+        self.type_in_package(name, None, prefer)
     }
 
     /// `com.demo.shapes.Circle` is the `Circle` of that package;
@@ -131,7 +238,7 @@ impl Snapshot {
         name: &str,
         from: &'a FileView,
     ) -> Option<Found<'a>> {
-        if let Some(found) = self.type_in_package(name, Some(qualifier)) {
+        if let Some(found) = self.type_in_package(name, Some(qualifier), from.language) {
             return Some(found);
         }
         let outer = self.type_named(qualifier, from)?;
@@ -144,18 +251,30 @@ impl Snapshot {
         self.declared(outer.file, nested)
     }
 
-    /// The type called `name` declared in `package`, or in any package
-    /// when none is asked for.
-    fn type_in_package<'a>(&'a self, name: &str, package: Option<&str>) -> Option<Found<'a>> {
-        self.files
-            .iter()
-            .filter(|file| package.is_none_or(|wanted| self.package(file).as_deref() == Some(wanted)))
-            .find_map(|file| {
-                let (_, declaration) = types_of(file)
-                    .into_iter()
-                    .find(|(declared, _)| *declared == name)?;
-                self.declared(file, declaration)
-            })
+    /// The type called `name` declared in `package` (`""` for the unnamed
+    /// one), or in any package when none is asked for: in the snapshot's
+    /// files, else in a library file of `prefer`'s language, else of the
+    /// other.
+    fn type_in_package<'a>(
+        &'a self,
+        name: &str,
+        package: Option<&str>,
+        prefer: Language,
+    ) -> Option<Found<'a>> {
+        let declaring = |file: &'a FileView| {
+            let declaration = self.declared_type(file, name)?;
+            self.declared(file, declaration)
+        };
+        let in_package = |file: &&FileView| {
+            package.is_none_or(|wanted| self.package(file).as_deref().unwrap_or("") == wanted)
+        };
+        if let Some(found) = self.every_file().filter(in_package).find_map(declaring) {
+            return Some(found);
+        }
+        let candidates = self.libraries.as_ref()?.declaring(name);
+        self.library_files(candidates, package, prefer)
+            .filter(in_package)
+            .find_map(declaring)
     }
 
     fn declared<'a>(&self, file: &'a FileView, node: &'a Syn) -> Option<Found<'a>> {
@@ -191,7 +310,7 @@ impl Snapshot {
                 if !is_type {
                     continue;
                 }
-                let written = type_of_node(named);
+                let written = substituted(type_of_node(named), &of.bindings);
                 if let Some(mut supertype) = self.type_named(&written.name, of.file) {
                     supertype.bindings = bound(supertype.node, &written.arguments);
                     found.push(supertype);
@@ -248,7 +367,9 @@ impl Snapshot {
     }
 
     /// The overload a call picks: the one with as many parameters as the
-    /// call has arguments, and whose parameter types the arguments are.
+    /// call has arguments, and whose parameter types the arguments are —
+    /// else the one whose parameter types the arguments' types extend
+    /// (`println(Any?)` for a `String`).
     fn overload<'a>(
         &'a self,
         candidates: &[Found<'a>],
@@ -265,19 +386,53 @@ impl Snapshot {
             .iter()
             .filter(|candidate| parameters_of(candidate.node).len() == passed.len())
             .collect();
-        let fits = same_count.iter().find(|candidate| {
+        // Each argument is typed once, however many overloads there are.
+        let given: Vec<std::cell::OnceCell<Option<Type>>> =
+            passed.iter().map(|_| std::cell::OnceCell::new()).collect();
+        let given_at = |index: usize| {
+            given[index]
+                .get_or_init(|| self.type_of_expression(passed[index], from))
+                .as_ref()
+        };
+        let accepted: Vec<std::cell::OnceCell<Vec<String>>> =
+            passed.iter().map(|_| std::cell::OnceCell::new()).collect();
+        let accepted_at = |index: usize| {
+            accepted[index].get_or_init(|| {
+                let mut names = vec!["Any".to_owned(), "Object".to_owned()];
+                let family = given_at(index)
+                    .and_then(|given| self.of_type(given, from))
+                    .map(|declaration| self.with_supertypes(&declaration))
+                    .unwrap_or_default();
+                names.extend(family.iter().map(|member| member.name.text.clone()));
+                names
+            })
+        };
+        let wanted = |candidate: &Found<'_>| -> Vec<Option<Type>> {
             parameters_of(candidate.node)
                 .iter()
-                .zip(&passed)
-                .all(|(parameter, argument)| {
-                    let wanted = parameter.child("type").map(type_of_node);
-                    let given = self.type_of_expression(argument, from);
-                    match (wanted, given) {
-                        (Some(wanted), Some(given)) => wanted.name == given.name,
-                        _ => false,
-                    }
-                })
+                .map(|parameter| parameter.child("type").map(type_of_node))
+                .collect()
+        };
+        let exact = same_count.iter().find(|candidate| {
+            wanted(candidate).iter().enumerate().all(|(index, wanted)| {
+                match (wanted, given_at(index)) {
+                    (Some(wanted), Some(given)) => wanted.name == given.name,
+                    _ => false,
+                }
+            })
         });
+        let wider = || {
+            same_count.iter().find(|candidate| {
+                wanted(candidate).iter().enumerate().all(|(index, wanted)| {
+                    let Some(wanted) = wanted else {
+                        return false;
+                    };
+                    let exactly = given_at(index).is_some_and(|given| given.name == wanted.name);
+                    exactly || accepted_at(index).contains(&wanted.name)
+                })
+            })
+        };
+        let fits = exact.or_else(wider);
         let chosen = fits.or_else(|| same_count.first().filter(|_| same_count.len() == 1))?;
         Some(Found {
             file: chosen.file,
@@ -308,15 +463,10 @@ impl Snapshot {
                 self.type_of_declaration(&member)
             }
             "method_invocation" => {
-                let name = expression.child("name")?;
-                let owner = match expression.child("object") {
-                    Some(object) => {
-                        let receiver = self.type_of_expression(object, from)?;
-                        self.of_type(&receiver, from)?
-                    }
-                    None => self.enclosing(from, at)?,
-                };
-                let method = self.member(&owner, &name.text, expression.child("arguments"))?;
+                let method = self.invoked(expression, from)?;
+                if is_type_declaration(method.node) || is_constructor(method.node) {
+                    return Some(Type::named(&method.name.text));
+                }
                 let returned = self.type_of_declaration(&method)?;
                 Some(
                     self.inferred_from_arguments(&method, &returned, expression, from)
@@ -341,10 +491,11 @@ impl Snapshot {
             }
             "string_literal" => Some(Type::named("String")),
             "decimal_integer_literal" | "hex_integer_literal" | "binary_integer_literal"
-            | "octal_integer_literal" => Some(Type::named("int")),
-            "decimal_floating_point_literal" => Some(Type::named("double")),
-            "character_literal" => Some(Type::named("char")),
-            "true" | "false" => Some(Type::named("boolean")),
+            | "octal_integer_literal" | "decimal_floating_point_literal" | "character_literal"
+            | "true" | "false" => Some(Type::named(features(from.language).literal_type(
+                &expression.kind,
+                &expression.text,
+            ))),
             "binary_expression" => {
                 let left = expression.child("left")?;
                 self.type_of_expression(left, from)
@@ -359,9 +510,9 @@ impl Snapshot {
         }
     }
 
-    /// What a generic method returns when it returns its own type
-    /// parameter: the type of the argument passed for a parameter of that
-    /// type (`<T> T unwrap(T value)` called with a `Dog` returns a `Dog`).
+    /// What a generic method returns once its type parameters are bound
+    /// by the arguments of the call: `<T> T unwrap(T value)` called with a
+    /// `Dog` returns a `Dog`, `listOf("a")` a `List<String>`.
     fn inferred_from_arguments(
         &self,
         method: &Found<'_>,
@@ -370,23 +521,31 @@ impl Snapshot {
         from: &FileView,
     ) -> Option<Type> {
         let introduced = type_parameter_names(method.node);
-        if !introduced.contains(&returned.name) {
+        if !mentions(returned, &introduced) {
             return None;
         }
-        let at = parameters_of(method.node).iter().position(|parameter| {
-            parameter
-                .child("type")
-                .is_some_and(|written| type_of_node(written) == Type::named(&returned.name))
-        })?;
-        let argument = call
+        let passed: Vec<&Syn> = call
             .child("arguments")?
             .children
             .iter()
             .filter(|child| !matches!(child.kind.as_str(), "(" | ")" | ","))
-            .nth(at)?;
-        let mut given = self.type_of_expression(argument, from)?;
-        given.dimensions += returned.dimensions;
-        Some(given)
+            .collect();
+        let mut bindings = Bindings::new();
+        for (parameter, argument) in parameters_of(method.node).iter().zip(&passed) {
+            let Some(written) = parameter.child("type").map(type_of_node) else {
+                continue;
+            };
+            if !mentions(&written, &introduced) {
+                continue;
+            }
+            if let Some(given) = self.type_of_expression(argument, from) {
+                unify(&written, &given, &introduced, &mut bindings);
+            }
+        }
+        if bindings.is_empty() {
+            return None;
+        }
+        Some(substituted(returned.clone(), &bindings))
     }
 
     /// The type of what a declaration declares: a field's or a local's
@@ -599,6 +758,342 @@ impl Snapshot {
                 self.member(&declaration, name, None)
             })
     }
+
+    /// What a call calls. With a receiver, a member of its type or, where
+    /// the language has them, an extension of it (`list.first()`); without
+    /// one, a member of the class around it, else a top-level function
+    /// (`println(…)`), else — where the language calls a class to create
+    /// one — that class's constructor.
+    pub fn invoked<'a>(&'a self, call: &'a Syn, file: &'a FileView) -> Option<Found<'a>> {
+        let name = call.child("name")?;
+        let arguments = call.child("arguments");
+        if let Some(object) = call.child("object") {
+            let receiver = self.type_of_expression(object, file)?;
+            let member = self
+                .of_type(&receiver, file)
+                .and_then(|owner| self.member(&owner, &name.text, arguments));
+            return member.or_else(|| self.extension(&receiver, &name.text, arguments, file));
+        }
+        let member = self
+            .enclosing(file, name.start)
+            .and_then(|owner| self.member(&owner, &name.text, arguments));
+        if member.is_some() || !features(file.language).has_top_level_functions() {
+            return member;
+        }
+        let candidates = self.functions_named(&name.text, file, None);
+        if let Some(function) = self.chosen(candidates, arguments, file) {
+            return Some(function);
+        }
+        let class = self.type_named(&name.text, file)?;
+        let constructor = self.member(&class, &class.name.text, arguments);
+        constructor.or(Some(class))
+    }
+
+    /// The one of several declarations a call's arguments pick, else the
+    /// first.
+    fn chosen<'a>(
+        &'a self,
+        candidates: Vec<Found<'a>>,
+        arguments: Option<&Syn>,
+        from: &FileView,
+    ) -> Option<Found<'a>> {
+        let mut candidates = candidates;
+        // A Kotlin `expect` declaration stands for the platform's `actual`.
+        candidates.sort_by_key(|candidate| is_expected(candidate.node));
+        if candidates.len() > 1
+            && let Some(chosen) = self.overload(&candidates, arguments, from)
+        {
+            return Some(chosen);
+        }
+        candidates.into_iter().next()
+    }
+
+    /// The extension called `name` a value of type `receiver` has: one
+    /// declared on its type before one declared on a supertype, and that
+    /// before one declared on any type (`fun <T> T.also(…)`). Its type
+    /// parameters are bound by the receiver: `first` of a `List<String>`
+    /// returns a `String`.
+    fn extension<'a>(
+        &'a self,
+        receiver: &Type,
+        name: &str,
+        arguments: Option<&Syn>,
+        from: &'a FileView,
+    ) -> Option<Found<'a>> {
+        if !features(from.language).has_top_level_functions() {
+            return None;
+        }
+        let family = self
+            .of_type(receiver, from)
+            .map(|owner| self.with_supertypes(&owner))
+            .unwrap_or_default();
+        let anywhere = family.len() + 1;
+        let mut receivers: Vec<String> = family.iter().map(|member| member.name.text.clone()).collect();
+        receivers.extend([receiver.name.clone(), "Any".to_owned(), "*".to_owned()]);
+        let mut ranked: Vec<(usize, Found<'a>)> = Vec::new();
+        for candidate in self.functions_named(name, from, Some(&receivers)) {
+            let Some(written) = candidate.node.child("receiver").map(type_of_node) else {
+                continue;
+            };
+            let introduced = type_parameter_names(candidate.node);
+            let mut bindings = Bindings::new();
+            let distance = if introduced.contains(&written.name) {
+                bindings.insert(written.name.clone(), receiver.clone());
+                anywhere
+            } else if written.name == "Any" {
+                anywhere
+            } else if let Some(at) = family
+                .iter()
+                .position(|member| member.name.text == written.name)
+            {
+                let declared = type_parameter_names(family[at].node);
+                for (index, argument) in written.arguments.iter().enumerate() {
+                    let bound = declared
+                        .get(index)
+                        .and_then(|parameter| family[at].bindings.get(parameter));
+                    if let Some(bound) = bound.filter(|_| introduced.contains(&argument.name)) {
+                        bindings.insert(argument.name.clone(), bound.clone());
+                    }
+                }
+                at
+            } else if family.is_empty() && written.name == receiver.name {
+                0
+            } else {
+                continue;
+            };
+            ranked.push((distance, Found { bindings, ..candidate }));
+        }
+        let nearest = ranked.iter().map(|(distance, _)| *distance).min()?;
+        let candidates = ranked
+            .into_iter()
+            .filter(|(distance, _)| *distance == nearest)
+            .map(|(_, found)| found)
+            .collect();
+        self.chosen(candidates, arguments, from)
+    }
+
+    /// The top-level functions called `name` the file at `from` sees: its
+    /// own, then those of its package, of what it imports and of its
+    /// language's default imports, in the workspace and in its libraries.
+    /// With `receivers`, the extensions of those types (`*` for one
+    /// declared on its own type parameter), else the functions that extend
+    /// nothing.
+    fn functions_named<'a>(
+        &'a self,
+        name: &str,
+        from: &'a FileView,
+        receivers: Option<&[String]>,
+    ) -> Vec<Found<'a>> {
+        let extensions = receivers.is_some();
+        let packages = self.packages_seen(from, Some(name));
+        let mut found = Vec::new();
+        let mut read: Vec<&Url> = Vec::new();
+        let mut collect = |file: &'a FileView, found: &mut Vec<Found<'a>>| {
+            if read.contains(&&file.uri) {
+                return;
+            }
+            read.push(&file.uri);
+            for function in top_level_functions(file) {
+                if function.child("receiver").is_some() != extensions {
+                    continue;
+                }
+                if let Some(named) = function.child("name").filter(|named| named.text == name) {
+                    found.push(Found {
+                        file,
+                        node: function,
+                        name: named,
+                        bindings: Bindings::new(),
+                    });
+                }
+            }
+        };
+        collect(from, &mut found);
+        for file in self.every_file() {
+            let package = self.package(file).unwrap_or_default();
+            if file.language == from.language && packages.contains(&package) {
+                collect(file, &mut found);
+            }
+        }
+        if let Some(libraries) = &self.libraries {
+            let candidates: Vec<LibraryFile> = match receivers {
+                Some(receivers) => receivers
+                    .iter()
+                    .flat_map(|receiver| libraries.declaring_function(&extension_key(receiver, name)))
+                    .collect(),
+                None => libraries.declaring_function(name),
+            };
+            for package in &packages {
+                let wanted: Vec<LibraryFile> = candidates
+                    .iter()
+                    .filter(|candidate| candidate.package == *package)
+                    .cloned()
+                    .collect();
+                for candidate in wanted {
+                    if let Some(file) = self.library_file(&candidate) {
+                        collect(file, &mut found);
+                    }
+                }
+            }
+        }
+        found
+    }
+}
+
+impl Snapshot {
+    /// The packages whose top-level declarations the file at `from` sees
+    /// without qualifying them: its own, those it imports on demand, its
+    /// language's default imports and, for `name`, the package an import
+    /// of that name imports it from. Every import counts when no name is
+    /// asked for.
+    fn packages_seen(&self, from: &FileView, name: Option<&str>) -> Vec<String> {
+        let mut packages = vec![self.package(from).unwrap_or_default()];
+        for import in imports(from) {
+            let names_it = name.is_none_or(|name| import.last_segment() == name);
+            if import.wildcard {
+                packages.push(import.name.clone());
+            } else if names_it {
+                packages.push(import.qualifier().to_owned());
+            }
+        }
+        packages.extend(
+            features(from.language)
+                .implicit_packages()
+                .iter()
+                .map(|package| (*package).to_owned()),
+        );
+        packages
+    }
+
+    /// The names of the extensions starting with `prefix` a value of type
+    /// `receiver` has, where the file at `from` sees them: `first`, `map`
+    /// of a `List`.
+    pub fn extension_names(&self, receiver: &Type, prefix: &str, from: &FileView) -> Vec<String> {
+        if !features(from.language).has_top_level_functions() {
+            return Vec::new();
+        }
+        let mut receivers: Vec<String> = self
+            .of_type(receiver, from)
+            .map(|owner| {
+                self.with_supertypes(&owner)
+                    .iter()
+                    .map(|member| member.name.text.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        receivers.extend([receiver.name.clone(), "Any".to_owned(), "*".to_owned()]);
+        let packages = self.packages_seen(from, None);
+        let mut names: Vec<String> = Vec::new();
+        for file in self.every_file() {
+            let seen = file.uri == from.uri
+                || packages.contains(&self.package(file).unwrap_or_default());
+            if !seen || file.library {
+                continue;
+            }
+            for function in top_level_functions(file) {
+                let (Some(written), Some(named)) = (function.child("receiver"), function.child("name"))
+                else {
+                    continue;
+                };
+                let written = type_of_node(written);
+                let key = if type_parameter_names(function).contains(&written.name) {
+                    "*".to_owned()
+                } else {
+                    written.name
+                };
+                if receivers.contains(&key) && named.text.starts_with(prefix) && !names.contains(&named.text) {
+                    names.push(named.text.clone());
+                }
+            }
+        }
+        if let Some(libraries) = &self.libraries {
+            for receiver in &receivers {
+                for (key, files) in libraries.functions_starting(&extension_key(receiver, prefix)) {
+                    let name = key.split_once('.').map_or(key.as_str(), |(_, name)| name);
+                    let seen = files.iter().any(|file| packages.contains(&file.package));
+                    if seen && !names.iter().any(|known| known == name) {
+                        names.push(name.to_owned());
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    /// The names of the top-level functions starting with `prefix` the
+    /// file at `from` sees in its libraries: `println` of `prin`. Nothing
+    /// is offered before a name is begun.
+    pub fn function_names(&self, prefix: &str, from: &FileView) -> Vec<String> {
+        let libraries = self.libraries.as_ref();
+        if prefix.is_empty() || !features(from.language).has_top_level_functions() {
+            return Vec::new();
+        }
+        let packages = self.packages_seen(from, None);
+        let mut names: Vec<String> = Vec::new();
+        for file in self.every_file().filter(|file| !file.library) {
+            if !packages.contains(&self.package(file).unwrap_or_default()) {
+                continue;
+            }
+            for function in top_level_functions(file).filter(|function| function.child("receiver").is_none()) {
+                if let Some(named) = function.child("name").filter(|named| named.text.starts_with(prefix))
+                    && !names.contains(&named.text)
+                {
+                    names.push(named.text.clone());
+                }
+            }
+        }
+        for (key, files) in libraries.map(|libraries| libraries.functions_starting(prefix)).unwrap_or_default() {
+            let seen = files.iter().any(|file| packages.contains(&file.package));
+            if !key.contains('.') && seen && !names.contains(&key) {
+                names.push(key);
+            }
+        }
+        names
+    }
+}
+
+/// Whether a declaration is a Kotlin `expect` one, whose body is its
+/// platform's `actual` declaration.
+fn is_expected(declaration: &Syn) -> bool {
+    declaration
+        .children
+        .iter()
+        .filter(|child| child.kind == "modifiers")
+        .any(|modifiers| modifiers.text.split_whitespace().any(|word| word == "expect"))
+}
+
+/// The functions declared at the top of a file, outside any type.
+fn top_level_functions(file: &FileView) -> impl Iterator<Item = &Syn> {
+    file.tree
+        .children
+        .iter()
+        .filter(|node| node.kind == "method_declaration")
+}
+
+/// Whether a type is or has among its arguments one of `parameters`.
+fn mentions(written: &Type, parameters: &[String]) -> bool {
+    parameters.contains(&written.name)
+        || written
+            .arguments
+            .iter()
+            .any(|argument| mentions(argument, parameters))
+}
+
+/// Binds the `parameters` a written type has to what stands in their place
+/// in the type given for it: `List<T>` given `List<String>` binds `T`.
+fn unify(written: &Type, given: &Type, parameters: &[String], bindings: &mut Bindings) {
+    if parameters.contains(&written.name) {
+        if given.dimensions >= written.dimensions && !bindings.contains_key(&written.name) {
+            let mut bound = given.clone();
+            bound.dimensions -= written.dimensions;
+            bindings.insert(written.name.clone(), bound);
+        }
+        return;
+    }
+    if written.name == given.name {
+        for (written, given) in written.arguments.iter().zip(&given.arguments) {
+            unify(written, given, parameters, bindings);
+        }
+    }
 }
 
 /// `T` of `Box<T>` bound to `String` of `Box<String>`.
@@ -682,6 +1177,21 @@ pub fn type_of_node(node: &Syn) -> Type {
 
 fn last_segment(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
+}
+
+/// Every type below `node`, nested ones included, by name and by the
+/// child indices that lead to it, in the order [`types_of`] lists them.
+fn type_paths(node: &Syn, path: &mut Vec<u32>, found: &mut Vec<TypePath>) {
+    if is_type_declaration(node)
+        && let Some(name) = node.child("name")
+    {
+        found.push((name.text.clone(), path.clone()));
+    }
+    for (index, child) in node.children.iter().enumerate() {
+        path.push(index as u32);
+        type_paths(child, path, found);
+        path.pop();
+    }
 }
 
 /// Every type `file` declares, nested ones included, by name.
@@ -1111,16 +1621,7 @@ impl Snapshot {
                 .is_some_and(|child| child.start == name.start)
         };
         match parent.kind.as_str() {
-            "method_invocation" if names_it("name") => {
-                let owner = match parent.child("object") {
-                    Some(object) => {
-                        let receiver = self.type_of_expression(object, file)?;
-                        self.of_type(&receiver, file)?
-                    }
-                    None => self.enclosing(file, name.start)?,
-                };
-                self.member(&owner, &name.text, parent.child("arguments"))
-            }
+            "method_invocation" if names_it("name") => self.invoked(parent, file),
             "field_access" if names_it("field") => {
                 let object = parent.child("object")?;
                 let member = self

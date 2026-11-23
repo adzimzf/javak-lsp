@@ -1,0 +1,27 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    fun area(): Double {
+        return 3.14
+    }
+}
+
+fun Circle.doubled(): Double {
+    return area() * 2.0
+}
+
+fun String.shout(): String {
+    return this
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun measure(circle: Circle): Double {
+        return circle.$0
+    }
+}
+//= expected
+area
+doubled

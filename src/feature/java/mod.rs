@@ -1,7 +1,8 @@
 //! How Java writes and offers things.
 
 use super::semantic::{Found, Snapshot};
-use super::{LanguageFeatures, MethodShape, Parameter};
+use crate::parser::Syn;
+use super::{LanguageFeatures, Literal, MethodShape, Parameter};
 
 pub struct Java;
 
@@ -64,5 +65,32 @@ impl LanguageFeatures for Java {
 
     fn also_referenced<'a>(&self, _snapshot: &'a Snapshot, _found: &Found<'a>) -> Vec<Found<'a>> {
         Vec::new()
+    }
+
+    fn implicit_packages(&self) -> &'static [&'static str] {
+        &["java.lang"]
+    }
+
+    fn has_top_level_functions(&self) -> bool {
+        false
+    }
+
+    /// An interface's members are public.
+    fn public_by_default(&self, owner: &Syn) -> bool {
+        matches!(
+            owner.kind.as_str(),
+            "interface_declaration" | "annotation_type_declaration"
+        )
+    }
+
+    fn literal_type(&self, kind: &str, text: &str) -> &'static str {
+        match Literal::of(kind, text) {
+            Literal::Int => "int",
+            Literal::Long => "long",
+            Literal::Float => "float",
+            Literal::Double => "double",
+            Literal::Char => "char",
+            Literal::Boolean => "boolean",
+        }
     }
 }

@@ -1,0 +1,15 @@
+//- /javax/swing/text/html/parser/Parser.java
+package javax.swing.text.html.parser;
+
+public class Parser {
+}
+//- /org/demo/Main.java
+package org.demo;
+
+import org.other.parser.Par$0ser;
+
+class Main {
+    Parser parser;
+}
+//= expected
+(nothing)
