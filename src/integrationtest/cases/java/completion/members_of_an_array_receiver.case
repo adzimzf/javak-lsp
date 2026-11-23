@@ -1,0 +1,18 @@
+//- /java/lang/Object.java
+package java.lang;
+
+public class Object {
+    public native int hashCode();
+
+    protected native Object clone();
+}
+//- /com/demo/Arr.java
+package com.demo;
+
+public class Arr {
+    int count(String[] names) {
+        return names.leng$0
+    }
+}
+//= expected
+length
