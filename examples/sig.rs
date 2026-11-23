@@ -13,15 +13,13 @@ fn main() {
     let language = Language::of_path(&path).unwrap_or(Language::Java);
     let uri = Url::parse(if language == Language::Kotlin { "file:///x/E.kt" } else { "file:///x/E.java" })
         .unwrap();
-    let snapshot = Snapshot {
-        files: vec![FileView {
-            uri: uri.clone(),
-            language,
-            tree: Arc::new(syntax(language).tree(&text)),
-            text: Arc::new(text),
-            library: false,
-        }],
-    };
+    let snapshot = Snapshot::new(vec![FileView {
+        uri: uri.clone(),
+        language,
+        tree: Arc::new(syntax(language).tree(&text)),
+        text: Arc::new(text),
+        library: false,
+    }]);
     let at = Position { line, column };
     let file = snapshot.file(&uri).unwrap();
     match javak_lsp::feature::signature::help_at(&snapshot, file, at) {

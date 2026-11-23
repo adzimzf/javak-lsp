@@ -231,6 +231,21 @@ pub fn at(offset: usize, text: &str) -> Position {
     position_of(text, offset)
 }
 
+/// The position of a byte of `text` tree-sitter has placed at `point`:
+/// only its own line is read, so a whole tree's positions take a time in
+/// proportion to the file, not to its square.
+fn at_point(offset: usize, point: tree_sitter::Point, text: &str) -> Position {
+    let offset = offset.min(text.len());
+    let line_start = offset.saturating_sub(point.column);
+    let column = text
+        .get(line_start..offset)
+        .map_or(point.column, |line| line.encode_utf16().count());
+    Position {
+        line: point.row as u32,
+        column: column as u32,
+    }
+}
+
 pub fn first_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
     node.children(&mut cursor).find(|child| child.kind() == kind)
@@ -365,8 +380,8 @@ pub fn snapshot(node: Node, field: Option<&str>, text: &str) -> Syn {
         kind: node.kind().to_owned(),
         field: field.map(str::to_owned),
         text: node.utf8_text(text.as_bytes()).unwrap_or_default().to_owned(),
-        start: at(node.start_byte(), text),
-        end: at(node.end_byte(), text),
+        start: at_point(node.start_byte(), node.start_position(), text),
+        end: at_point(node.end_byte(), node.end_position(), text),
         children,
     }
 }

@@ -21,6 +21,7 @@
 pub(crate) mod decompile;
 pub(crate) mod gradle;
 pub(crate) mod maven;
+pub(crate) mod platform;
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

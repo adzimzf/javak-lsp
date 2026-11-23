@@ -117,6 +117,15 @@ fn contextual(
         return offers;
     }
     let mut offers = scope(snapshot, file, name.start);
+    offers.extend(
+        snapshot
+            .function_names(prefix, file)
+            .into_iter()
+            .map(|name| Offer {
+                rank: format!("2{name}"),
+                name,
+            }),
+    );
     offers.extend(types_matching_prefix(snapshot, prefix));
     offers.extend(keywords(file, path));
     offers
@@ -257,10 +266,21 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
     let declaration = snapshot
         .of_type(&written, file)
         .or_else(|| bound_of(snapshot, file, receiver, &written));
-    let Some(declaration) = declaration else {
-        return Vec::new();
-    };
-    visible(snapshot, file, &declaration, Wanted::Instance)
+    let mut offers = declaration
+        .map(|declaration| visible(snapshot, file, &declaration, Wanted::Instance))
+        .unwrap_or_default();
+    let depth = offers.len();
+    for (index, name) in snapshot
+        .extension_names(&written, prefix, file)
+        .into_iter()
+        .enumerate()
+    {
+        if !offers.iter().any(|offer| offer.name == name) {
+            let rank = features(file.language).member_rank(depth + 1, index, &name);
+            offers.push(Offer { name, rank });
+        }
+    }
+    offers
 }
 
 /// The bound a type parameter is declared with: `T extends Animal` is
@@ -383,16 +403,26 @@ fn reachable(
     owner: &Found<'_>,
     member: &Syn,
 ) -> bool {
-    let modifiers = member.text.lines().next().unwrap_or_default();
+    let modifiers: Vec<&str> = member
+        .children
+        .iter()
+        .filter(|child| child.kind == "modifiers")
+        .flat_map(|modifiers| modifiers.text.split_whitespace())
+        .collect();
+    let says = |word: &str| modifiers.contains(&word);
     let same_file = owner.file.uri == from.uri;
     let same_package = package_of(snapshot, owner.file) == package_of(snapshot, from);
-    if modifiers.contains("private") {
+    if says("private") {
         return same_file;
     }
-    if modifiers.contains("protected") {
+    if says("protected") {
         return same_package || inherits_from(snapshot, from, owner);
     }
-    if modifiers.contains("public") {
+    // `internal` is the module's: a library's internals are not offered.
+    if says("internal") {
+        return !owner.file.library;
+    }
+    if says("public") || features(owner.file.language).public_by_default(owner.node) {
         return true;
     }
     same_package
@@ -576,16 +606,10 @@ fn replaced(snapshot: &Snapshot, probed: FileView) -> Snapshot {
         .files
         .iter()
         .filter(|file| file.uri != probed_uri)
-        .map(|file| FileView {
-            uri: file.uri.clone(),
-            language: file.language,
-            text: file.text.clone(),
-            tree: file.tree.clone(),
-            library: file.library,
-        })
+        .cloned()
         .chain(std::iter::once(probed))
         .collect();
-    Snapshot { files }
+    Snapshot::new(files).reading(snapshot.libraries())
 }
 
 /// Whether the cursor is in a comment or in a string: nothing is offered

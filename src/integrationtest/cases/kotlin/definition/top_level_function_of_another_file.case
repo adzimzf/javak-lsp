@@ -1,0 +1,22 @@
+//- /com/demo/Shapes.kt
+package com.demo
+
+fun unitCircle(): Circle {
+    return Circle()
+}
+
+class Circle {
+    fun area(): Double {
+        return 3.14
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun measure(): Double {
+        return unitCi$0rcle().area()
+    }
+}
+//= expected
+/com/demo/Shapes.kt:3:5  fun unitCircle(): Circle {
