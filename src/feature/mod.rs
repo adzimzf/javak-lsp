@@ -46,8 +46,8 @@ pub trait LanguageFeatures: Send + Sync {
     /// A parameter as hover and signature help show it.
     fn parameter(&self, parameter: &Parameter) -> String;
     /// How completion sorts a member of a type `depth` supertypes up, the
-    /// `index`th its type declares.
-    fn member_rank(&self, depth: usize, index: usize, name: &str) -> String;
+    /// `index`th its type declares; `kind` is its declaration's node kind.
+    fn member_rank(&self, depth: usize, index: usize, name: &str, kind: &str) -> String;
     /// The keywords offered where a member can start.
     fn member_keywords(&self) -> &'static [&'static str];
     /// The keywords offered where a top-level declaration can start.

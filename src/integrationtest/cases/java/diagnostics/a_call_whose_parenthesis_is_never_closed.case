@@ -6,4 +6,4 @@ class Ma$0in {
   }
 }
 //= expected
-/src/main/java/com/demo/Main.java:4:28  missing `)`
+/src/main/java/com/demo/Main.java:4:24  Syntax error, insert ")" to complete Expression

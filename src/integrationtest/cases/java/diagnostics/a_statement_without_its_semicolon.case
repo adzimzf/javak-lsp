@@ -6,4 +6,4 @@ class Ma$0in {
   }
 }
 //= expected
-/src/main/java/com/demo/Main.java:4:14  missing `;`
+/src/main/java/com/demo/Main.java:4:13  Syntax error, insert ";" to complete BlockStatements

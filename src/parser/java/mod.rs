@@ -3,6 +3,8 @@
 
 use tree_sitter::Node;
 
+mod errors;
+
 use super::treesitter::{at, empty_tree, first_of_kind, FoldKinds, Grammar};
 use super::{Finding, Fold, Kind, Name, Outline, Position, Syn, Syntax};
 
@@ -32,7 +34,7 @@ pub static GRAMMAR: Grammar = Grammar {
 
 impl Syntax for Java {
     fn syntax_errors(&self, text: &str) -> Vec<Finding> {
-        GRAMMAR.syntax_errors(text)
+        errors::syntax_errors(text)
     }
 
     fn package(&self, text: &str) -> Option<String> {

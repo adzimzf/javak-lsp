@@ -207,9 +207,12 @@ impl Snapshot {
             .find(|import| !import.wildcard && import.last_segment() == name);
         let prefer = from.language;
         if let Some(import) = imported {
-            if let Some(found) = self.type_in_package(name, Some(import.qualifier()), prefer) {
-                return Some(found);
-            }
+            // A single-type import decides what the name is: where it names
+            // nothing, the name is nothing, not a type of the same name in
+            // some other package.
+            return self
+                .type_in_package(name, Some(import.qualifier()), prefer)
+                .or_else(|| self.type_qualified_without_fallback(import.qualifier(), name, from));
         }
         let package = self.package(from);
         let own = package.as_deref().unwrap_or("");
@@ -242,6 +245,24 @@ impl Snapshot {
             return Some(found);
         }
         let outer = self.type_named(qualifier, from)?;
+        let nested = outer
+            .node
+            .walk()
+            .into_iter()
+            .filter(|node| is_type_declaration(node))
+            .find(|node| node.child("name").is_some_and(|named| named.text == name))?;
+        self.declared(outer.file, nested)
+    }
+
+    /// `Outer.Inner` of an import, where `Outer` is itself named in full.
+    fn type_qualified_without_fallback<'a>(
+        &'a self,
+        qualifier: &str,
+        name: &str,
+        from: &'a FileView,
+    ) -> Option<Found<'a>> {
+        let (package, outer) = qualifier.rsplit_once('.').unwrap_or(("", qualifier));
+        let outer = self.type_in_package(outer, Some(package), from.language)?;
         let nested = outer
             .node
             .walk()

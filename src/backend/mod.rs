@@ -61,12 +61,13 @@ impl Backend {
         let syntax = self.indexer.syntax(language);
         let mut diagnostics = Vec::new();
         if let Some(expected) = self.indexer.package_of_path(uri) {
-            if syntax.package(&text).is_none() {
-                diagnostics.push(reported(
-                    Position { line: 0, column: 0 },
-                    format!("Missing package declaration (`{expected}`)"),
-                ));
-            }
+            diagnostics.extend(package_mismatch(
+                language,
+                &text,
+                syntax.package(&text),
+                &expected,
+                syntax.outline(&text).is_empty(),
+            ));
         }
         diagnostics.extend(
             syntax
@@ -83,6 +84,95 @@ impl Backend {
             .publish_diagnostics(uri, diagnostics, None)
             .await;
     }
+}
+
+/// References as jdtls lists them: a type named in an import is found at
+/// the start of the import's qualified name (`org.jsoup.parser.Parser`),
+/// and the variable of an enhanced `for` is not listed at its own
+/// declaration.
+fn as_jdtls_reports<'a>(
+    snapshot: &'a crate::feature::semantic::Snapshot,
+    found: &crate::feature::semantic::Found<'_>,
+    uses: Vec<(&'a Url, Position)>,
+) -> Vec<(&'a Url, Position)> {
+    let declared_by_for = found.node.kind == "enhanced_for_statement";
+    uses.into_iter()
+        .filter(|(uri, at)| {
+            !(declared_by_for && **uri == found.file.uri && *at == found.selection())
+        })
+        .map(|(uri, at)| {
+            let Some(file) = snapshot.file(uri) else {
+                return (uri, at);
+            };
+            let path = crate::feature::semantic::path_to(&file.tree, at);
+            let import = path.iter().find(|node| node.kind == "import_declaration");
+            let name = import.and_then(|import| {
+                import.children.iter().find(|child| {
+                    matches!(child.kind.as_str(), "scoped_identifier" | "identifier")
+                })
+            });
+            (uri, name.map_or(at, |name| name.start))
+        })
+        .collect()
+}
+
+/// What is said of a file whose package is not the one its folder names.
+///
+/// Java says it as the Eclipse compiler (jdtls) does: a file without a
+/// package declares `""`, reported at the start of the file, and a
+/// different package at its name. A file that declares nothing is not
+/// compiled, so nothing is said of it. Kotlin keeps its own wording, and
+/// only a missing declaration is reported there.
+fn package_mismatch(
+    language: Language,
+    text: &str,
+    declared: Option<String>,
+    expected: &str,
+    declares_nothing: bool,
+) -> Option<Diagnostic> {
+    match language {
+        Language::Kotlin => declared.is_none().then(|| {
+            reported(
+                Position { line: 0, column: 0 },
+                format!("Missing package declaration (`{expected}`)"),
+            )
+        }),
+        Language::Java => {
+            let declared_name = declared.unwrap_or_default();
+            if declared_name == expected || (declared_name.is_empty() && declares_nothing) {
+                return None;
+            }
+            let at = package_name_offset(text, &declared_name)
+                .map_or(Position { line: 0, column: 0 }, |offset| {
+                    crate::parser::position_of(text, offset)
+                });
+            Some(reported(
+                at,
+                format!(
+                    "The declared package \"{declared_name}\" does not match the expected package \"{expected}\""
+                ),
+            ))
+        }
+    }
+}
+
+/// Where the name of the package declaration starts.
+fn package_name_offset(text: &str, name: &str) -> Option<usize> {
+    if name.is_empty() {
+        return None;
+    }
+    let mut from = 0;
+    while let Some(found) = text[from..].find("package") {
+        let keyword = from + found;
+        let after = keyword + "package".len();
+        let rest = &text[after..];
+        let gap = rest.len() - rest.trim_start().len();
+        if gap > 0 && rest.trim_start().starts_with(name) {
+            return Some(after + gap);
+        }
+        from = after;
+    }
+    None
 }
 
 fn reported(at: Position, message: String) -> Diagnostic {
@@ -403,6 +493,9 @@ impl LanguageServer for Backend {
         let mut uses = snapshot.uses_of(&found);
         for also in features(found.file.language).also_referenced(&snapshot, &found) {
             uses.extend(snapshot.uses_of(&also));
+        }
+        if found.file.language == Language::Java {
+            uses = as_jdtls_reports(&snapshot, &found, uses);
         }
         uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         uses.dedup();

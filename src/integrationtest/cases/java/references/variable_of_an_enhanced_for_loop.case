@@ -11,5 +11,4 @@ class Names {
     }
 }
 //= expected
-/com/demo/Names.java:6:21  for (String name : names) {
 /com/demo/Names.java:7:29  total = total + name.length();
