@@ -13,7 +13,7 @@ the fixture — so this file says where each one comes from.
 - A case listed without one asks the same jdtls handler about a kind of name
   its tests leave out; its answer follows from how that handler is written.
 - The expectations are what jdtls answers, written without looking at what
-  kmp-lsp answers. A case that fails is a difference from jdtls: fix the
+  javak-lsp answers. A case that fails is a difference from jdtls: fix the
   server, or show with a jdtls run that the expectation is wrong.
 
 Notes on how an answer is written down:
@@ -42,7 +42,7 @@ Notes on how an answer is written down:
   unqualified.
 - **diagnostics** is the whole file's report (`textDocument/diagnostic`),
   written as `path:line:column  message` — not jdtls's: the two servers word
-  and number their checks differently. kmp-lsp reports a Java file's syntax
+  and number their checks differently. javak-lsp reports a Java file's syntax
   errors and its missing `package` declaration, so a case either names those
   or expects `(nothing)`; a `(nothing)` case is the regression guard that a
   shape the parser handles stays unflagged. The missing-package check reads
@@ -346,7 +346,7 @@ jdtls: `WorkspaceSymbolHandlerTest`.
 
 ## diagnostics
 
-jdtls: none — kmp-lsp's own checks (syntax errors, missing `package`).
+jdtls: none — javak-lsp's own checks (syntax errors, missing `package`).
 
 | case | what it asks |
 | --- | --- |

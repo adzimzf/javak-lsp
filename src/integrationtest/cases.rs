@@ -247,7 +247,7 @@ fn indented(text: &str) -> String {
 }
 
 fn cases_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/itest/cases")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("src/integrationtest/cases")
 }
 
 /// The subdirectories of `directory`, in name order.

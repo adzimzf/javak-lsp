@@ -1,18 +1,18 @@
-// kmp-lsp dependency sync — Gradle init script.
+// javak-lsp dependency sync — Gradle init script.
 //
-// Registers `kmpLspDependencies` on the root project. It resolves every
+// Registers `javakLspDependencies` on the root project. It resolves every
 // project's compile/runtime classpaths (lenient: an unresolvable dependency is
 // skipped, never fails the run), then asks Gradle for each external module's
 // sources JAR, which downloads it into the Gradle cache like an IDE's
 // "Download Sources". One JSON object per dependency is written to the file
-// named by the `kmpLsp.output` system property:
+// named by the `javakLsp.output` system property:
 //
 //   {"coordinate":"group:name:version","jar":"/abs/x.jar","sources":"/abs/x-sources.jar"|null}
 //
 // followed by one {"incompleteSources":true} line when some sources jar
 // failed to download for a reason other than "not published" (network,
 // rate limiting, auth), so the caller knows to retry later, and — when the
-// `kmpLsp.decompiler` property names a coordinate and some dependency has no
+// `javakLsp.decompiler` property names a coordinate and some dependency has no
 // sources jar — one {"decompiler":"/abs/decompiler.jar"} line: the
 // decompiler resolved through the project's own repositories (mirrors,
 // credentials and all). A decompiler that can't be resolved is only logged.
@@ -26,7 +26,7 @@ import org.gradle.api.attributes.Attribute
 import org.gradle.jvm.JvmLibrary
 import org.gradle.language.base.artifact.SourcesArtifact
 
-def kmpLspIsClasspath = { String name ->
+def javakLspIsClasspath = { String name ->
     def lower = name.toLowerCase()
     lower.endsWith("compileclasspath") || lower.endsWith("runtimeclasspath")
 }
@@ -34,7 +34,7 @@ def kmpLspIsClasspath = { String name ->
 // Android classpaths offer several artifact variants (aar, classes jar, …);
 // asking for `artifactType=jar` picks the compiled classes. Plain JVM
 // classpaths satisfy it as-is. Falls back to the default variant.
-def kmpLspArtifacts = { configuration ->
+def javakLspArtifacts = { configuration ->
     def artifactType = Attribute.of("artifactType", String)
     try {
         return configuration.incoming.artifactView { view ->
@@ -51,16 +51,16 @@ def kmpLspArtifacts = { configuration ->
 }
 
 rootProject {
-    tasks.register("kmpLspDependencies") { task ->
+    tasks.register("javakLspDependencies") { task ->
         task.doLast {
-            def outputPath = System.getProperty("kmpLsp.output")
+            def outputPath = System.getProperty("javakLsp.output")
             if (outputPath == null) {
-                throw new GradleException("kmpLsp.output system property is required")
+                throw new GradleException("javakLsp.output system property is required")
             }
             def byCoordinate = new LinkedHashMap<String, Map>()
             rootProject.allprojects.each { project ->
-                project.configurations.findAll { it.canBeResolved && kmpLspIsClasspath(it.name) }.each { configuration ->
-                    kmpLspArtifacts(configuration).each { artifact ->
+                project.configurations.findAll { it.canBeResolved && javakLspIsClasspath(it.name) }.each { configuration ->
+                    javakLspArtifacts(configuration).each { artifact ->
                         def id = artifact.id.componentIdentifier
                         if (id instanceof ModuleComponentIdentifier) {
                             def coordinate = "${id.group}:${id.module}:${id.version}".toString()
@@ -94,14 +94,14 @@ rootProject {
                                 if (!notPublished) {
                                     incompleteSources = true
                                 }
-                                rootProject.logger.info("kmp-lsp: no sources for ${coordinate}: ${sources.failure.message}")
+                                rootProject.logger.info("javak-lsp: no sources for ${coordinate}: ${sources.failure.message}")
                             }
                         }
                     }
                 }
             }
 
-            def decompilerCoordinate = System.getProperty("kmpLsp.decompiler")
+            def decompilerCoordinate = System.getProperty("javakLsp.decompiler")
             def anyWithoutSources = byCoordinate.keySet().any { !sourcesByCoordinate.containsKey(it) }
             def decompilerPath = null
             if (decompilerCoordinate != null && anyWithoutSources) {
@@ -111,7 +111,7 @@ rootProject {
                     detached.transitive = false
                     decompilerPath = detached.singleFile.absolutePath
                 } catch (Exception failure) {
-                    rootProject.logger.warn("kmp-lsp: cannot resolve the decompiler ${decompilerCoordinate}: ${failure.message}")
+                    rootProject.logger.warn("javak-lsp: cannot resolve the decompiler ${decompilerCoordinate}: ${failure.message}")
                 }
             }
 

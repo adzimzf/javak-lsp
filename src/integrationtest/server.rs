@@ -258,7 +258,7 @@ fn in_memory() -> (Reader, Writer, Url, Host) {
     (Box::new(reader), Box::new(writer), root, Host(server))
 }
 
-/// An indexer that never looks for a workspace: with a root pinned to
+/// An src/indexer that never looks for a workspace: with a root pinned to
 /// nowhere, opening a file indexes its text and nothing else — no directory
 /// scan, no Gradle cache, no JDK sources. The root is still the fixture's,
 /// so what the server derives from it (a file's package from its directory)
@@ -267,7 +267,7 @@ fn in_memory() -> (Reader, Writer, Url, Host) {
 fn rootless_indexer() -> Indexer {
     let indexer = Indexer::new();
     indexer.workspace_pinned.store(true, Ordering::Relaxed);
-    indexer.workspace_root.set(PathBuf::from(MEMORY_ROOT));
+    let _ = indexer.workspace_root.set(PathBuf::from(MEMORY_ROOT));
     indexer
 }
 
