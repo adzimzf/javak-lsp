@@ -26,6 +26,12 @@ const PIPE_CAPACITY: usize = 1 << 20;
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How long a case waits for an answer before it takes "nothing" for one.
 const PATIENCE: Duration = Duration::from_secs(5);
+/// The same, for a server in another process: a JVM answers its first
+/// requests while it is still warming up.
+const CHILD_PATIENCE: Duration = Duration::from_secs(30);
+/// `FileChangeType` of `workspace/didChangeWatchedFiles`.
+const CREATED: u8 = 1;
+const DELETED: u8 = 3;
 
 type Reader = Box<dyn AsyncRead + Send + Unpin>;
 type Writer = Box<dyn AsyncWrite + Send + Unpin>;
@@ -55,8 +61,18 @@ pub(super) struct Session {
     next_id: u64,
     /// The URIs the server has published diagnostics for.
     diagnosed: HashSet<String>,
+    /// Where the fixture's files live, as the server sees them.
     root: Url,
-    _host: Host,
+    /// What `initialize` is told the workspace is: the same as [`Self::root`]
+    /// in memory, the project above it on disk.
+    project: Url,
+    /// Where [`Self::load`] writes the fixture, when the server reads files
+    /// from a disk rather than from `didOpen` text.
+    disk: Option<PathBuf>,
+    /// How long one request may take. A JVM needs longer than a thread.
+    patience: Duration,
+    _host: Option<Host>,
+    _child: Option<tokio::process::Child>,
 }
 
 impl Session {
@@ -67,15 +83,105 @@ impl Session {
             incoming: frames(reader),
             next_id: 0,
             diagnosed: HashSet::new(),
+            project: root.clone(),
             root,
-            _host: host,
+            disk: None,
+            patience: PATIENCE,
+            _host: Some(host),
+            _child: None,
         };
         session.initialize().await;
-        for file in &fixture.files {
-            session.did_open(&file.path, &file.text).await;
-        }
-        session.wait_until_read(fixture).await;
+        session.load(fixture).await;
         session
+    }
+
+    /// Another server, run as `program args…`, reading the fixture from
+    /// `source_root` inside the project at `project_root`.
+    ///
+    /// The process outlives one case: its JVM, its JDK scan and its index
+    /// cost more than every case put together, so one session is loaded
+    /// and unloaded ([`Self::load`]) once per case instead.
+    pub(super) async fn spawn(
+        program: &str,
+        arguments: &[String],
+        project_root: &Path,
+        source_root: &Path,
+    ) -> Self {
+        let mut child = tokio::process::Command::new(program)
+            .args(arguments)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap_or_else(|error| panic!("{program} starts: {error}"));
+        let reader = child.stdout.take().expect("a piped stdout");
+        let writer = child.stdin.take().expect("a piped stdin");
+        let mut session = Self {
+            writer: Box::new(writer),
+            incoming: frames(Box::new(reader)),
+            next_id: 0,
+            diagnosed: HashSet::new(),
+            root: directory_url(source_root),
+            project: directory_url(project_root),
+            disk: Some(source_root.to_owned()),
+            patience: CHILD_PATIENCE,
+            _host: None,
+            _child: Some(child),
+        };
+        session.initialize().await;
+        session
+    }
+
+    /// Puts the fixture in front of the server and waits until it has read
+    /// it: on disk where there is one, and open either way.
+    pub(super) async fn load(&mut self, fixture: &Fixture) {
+        if let Some(disk) = self.disk.clone() {
+            for file in &fixture.files {
+                let path = disk.join(&file.path);
+                let parent = path.parent().expect("a fixture path has a directory");
+                std::fs::create_dir_all(parent).expect("the fixture directory is writable");
+                std::fs::write(&path, &file.text).expect("the fixture file is writable");
+            }
+            self.watched(fixture, CREATED).await;
+        }
+        for file in &fixture.files {
+            self.did_open(&file.path, &file.text).await;
+        }
+        self.wait_until_read(fixture).await;
+    }
+
+    /// Takes the fixture away again, so the next case's `com.demo.Main` is
+    /// the only one the server knows.
+    pub(super) async fn unload(&mut self, fixture: &Fixture) {
+        for file in &fixture.files {
+            let document = json!({"uri": self.uri(&file.path)});
+            self.notify("textDocument/didClose", json!({"textDocument": document}))
+                .await;
+        }
+        if let Some(disk) = self.disk.clone() {
+            for file in &fixture.files {
+                let _ = std::fs::remove_file(disk.join(&file.path));
+            }
+            self.watched(fixture, DELETED).await;
+        }
+        self.diagnosed.clear();
+    }
+
+    /// Tells the server the fixture's files appeared or went away, the way
+    /// an editor would: a server that reads a disk indexes what it is told
+    /// about, not what it is handed.
+    async fn watched(&mut self, fixture: &Fixture, change: u8) {
+        let changes: Vec<Value> = fixture
+            .files
+            .iter()
+            .map(|file| json!({"uri": self.uri(&file.path), "type": change}))
+            .collect();
+        self.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": changes}),
+        )
+        .await;
     }
 
     pub(super) fn uri(&self, path: &str) -> Url {
@@ -101,7 +207,7 @@ impl Session {
         on_error: OnError,
         settled: impl Fn(&Value) -> bool,
     ) -> Value {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + self.patience;
         loop {
             let result = self
                 .request(method, params.clone(), on_error, deadline)
@@ -117,7 +223,7 @@ impl Session {
     /// and reports the file's diagnostics once it has. Waits for those, for
     /// every file, or until patience runs out.
     async fn wait_until_read(&mut self, fixture: &Fixture) {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + self.patience;
         let all_read = |session: &Self| {
             fixture
                 .files
@@ -207,10 +313,14 @@ impl Session {
     }
 
     async fn initialize(&mut self) {
-        let deadline = Instant::now() + PATIENCE;
+        let deadline = Instant::now() + self.patience;
         let params = json!({
             "processId": std::process::id(),
-            "rootUri": self.root.as_str().trim_end_matches('/'),
+            "rootUri": self.project.as_str().trim_end_matches('/'),
+            "workspaceFolders": [{
+                "uri": self.project.as_str().trim_end_matches('/'),
+                "name": "fixture",
+            }],
             "capabilities": {
                 "textDocument": {
                     "hover": {"contentFormat": ["markdown", "plaintext"]},
@@ -218,7 +328,13 @@ impl Session {
                     "rename": {"prepareSupport": true},
                     "signatureHelp": {},
                 },
-                "workspace": {"workspaceEdit": {"documentChanges": true}},
+                "workspace": {
+                    "workspaceEdit": {"documentChanges": true},
+                    "symbol": {},
+                    "configuration": true,
+                    "didChangeWatchedFiles": {"dynamicRegistration": true},
+                    "workspaceFolders": true,
+                },
             },
         });
         self.request("initialize", params, OnError::Panic, deadline)
@@ -244,6 +360,12 @@ impl Session {
         self.notify("textDocument/didOpen", json!({"textDocument": document}))
             .await;
     }
+}
+
+/// `directory` as a `file://` URL ending in `/`, so a fixture path joins
+/// onto it.
+fn directory_url(directory: &Path) -> Url {
+    Url::from_directory_path(directory).expect("an absolute directory")
 }
 
 /// This crate's server on the other end of an in-memory pipe.

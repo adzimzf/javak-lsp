@@ -1240,22 +1240,6 @@ impl Import {
     }
 }
 
-/// The dotted name of the `import` the cursor is in, where it imports a
-/// type by name: `import a.b.C;` resolves as `a.b.C`, so the `C` of
-/// another package is not an answer. A static or on-demand import writes
-/// no type name, and is none.
-fn type_import_at<'a>(path: &[&'a Syn]) -> Option<&'a Syn> {
-    let declaration = path.iter().find(|node| node.kind == "import_declaration")?;
-    let written = declaration.text.trim_start_matches("import").trim();
-    if written.starts_with("static") || written.trim_end_matches(';').trim().ends_with('*') {
-        return None;
-    }
-    declaration
-        .children
-        .iter()
-        .find(|child| child.kind == "scoped_identifier")
-}
-
 fn imports(file: &FileView) -> Vec<Import> {
     file.tree
         .all("import_declaration")
@@ -1519,14 +1503,6 @@ impl Snapshot {
             return Some(declared);
         }
         let path = path_to(&file.tree, name.start);
-        // An `import` writes the type's package out: it means that exact
-        // type, never a same-named one of another package.
-        if let Some(written) = type_import_at(&path) {
-            if written.end != name.end {
-                return None;
-            }
-            return self.type_named(&written.text, file);
-        }
         // `com.demo.shapes.Circle` names one type, not four.
         let dotted = path
             .iter()

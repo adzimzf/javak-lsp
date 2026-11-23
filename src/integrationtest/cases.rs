@@ -14,6 +14,10 @@
 //! /com/demo/Greeter.java:2:24  class Greeter { String greet() { return ""; } }
 //! ```
 //!
+//! A `//= <name>` line below it starts another block: `//= jdtls` is what
+//! that server was recorded answering ([`super::compat`]). The case is the
+//! first block alone, so those are notes a normal run never reads.
+//!
 //! `//= expected (pending)` marks a case whose answer the server does not
 //! give yet: it passes while they differ and fails once it agrees, so the
 //! marker comes off the day the check lands.
@@ -35,8 +39,13 @@ use super::fixture::Fixture;
 use super::request::{Kind, Settles, NOTHING};
 use super::server::Session;
 
-const EXTENSION: &str = "case";
+pub(super) const EXTENSION: &str = "case";
 const SEPARATOR: &str = "//= expected";
+/// What starts any answer block: `//= expected` is the one the case asks
+/// for, and `//= jdtls` what another server was recorded answering
+/// ([`super::compat`]). The first block is the case; the rest are notes,
+/// and a run without those servers never looks at them.
+pub(super) const ANSWER_HEADER: &str = "//=";
 /// A case whose expectation the server does not meet yet, written as
 /// `//= expected (pending)`: the answer below is what the case asks for,
 /// and the suite passes while the server answers something else. It fails
@@ -77,9 +86,10 @@ macro_rules! suites {
             })*
         })*
 
-        /// Every `<language>/<request>` a suite above runs.
-        const RUN_DIRECTORIES: &[(&str, &str)] = &[
-            $($((stringify!($language), stringify!($case_test)),)*)*
+        /// Every `<language>/<request>` a suite above runs, and the
+        /// request it asks.
+        pub(super) const RUN_DIRECTORIES: &[(&str, &str, Kind)] = &[
+            $($((stringify!($language), stringify!($case_test), Kind::$kind),)*)*
         ];
     };
 }
@@ -124,7 +134,7 @@ fn every_case_directory_is_run_by_a_suite() {
     for language in read_directory(&cases_root()) {
         for request in read_directory(&language) {
             let pair = (directory_name(&language), directory_name(&request));
-            let listed = RUN_DIRECTORIES.iter().any(|(run_language, run_request)| {
+            let listed = RUN_DIRECTORIES.iter().any(|(run_language, run_request, _)| {
                 (*run_language, *run_request) == (&pair.0[..], &pair.1[..])
             });
             if !listed {
@@ -209,20 +219,20 @@ fn requested() -> bool {
     asked_for(INTEGRATION_VARIABLE)
 }
 
-fn asked_for(variable: &str) -> bool {
+pub(super) fn asked_for(variable: &str) -> bool {
     std::env::var(variable).is_ok_and(|value| value != "0")
 }
 
 /// A case file split at its `//= expected` line.
-struct Case {
-    fixture: String,
-    expected: String,
+pub(super) struct Case {
+    pub(super) fixture: String,
+    pub(super) expected: String,
     /// Marked `(pending)`: the expectation is a wish, not yet the answer.
     pending: bool,
 }
 
 impl Case {
-    fn read(file: &Path) -> Self {
+    pub(super) fn read(file: &Path) -> Self {
         let text = std::fs::read_to_string(file)
             .unwrap_or_else(|error| panic!("{} is readable: {error}", file.display()));
         let (fixture, expected) = text.split_once(SEPARATOR).unwrap_or_else(|| {
@@ -233,20 +243,76 @@ impl Case {
             .map_or(("", expected), |(first, rest)| (first.trim(), rest));
         Self {
             fixture: fixture.to_owned(),
-            expected: normalized(expected),
+            expected: normalized(first_block(expected)),
             pending: marker == PENDING,
         }
     }
 
     /// A case whose answer is nothing is asked once; any other waits for
     /// the server to have something to say.
-    fn settles(&self) -> Settles {
+    pub(super) fn settles(&self) -> Settles {
         if self.expected.trim() == NOTHING {
             Settles::Immediately
         } else {
             Settles::WhenAnswered
         }
     }
+}
+
+/// The lines of `text` before the next `//=` line: the answer the case
+/// asks for, without the recorded answers of other servers that may follow
+/// it. A case with none of those is the whole of `text`.
+fn first_block(text: &str) -> &str {
+    let mut end = text.len();
+    for (offset, line) in line_offsets(text) {
+        if line.trim_start().starts_with(ANSWER_HEADER) {
+            end = offset;
+            break;
+        }
+    }
+    &text[..end]
+}
+
+/// Each line of `text` with where it starts.
+fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut offset = 0;
+    text.split_inclusive('\n').map(move |line| {
+        let start = offset;
+        offset += line.len();
+        (start, line.trim_end_matches('\n'))
+    })
+}
+
+/// Replaces the `//= <name>` block of `file` with `answer`, adding it at
+/// the end when the case has none. The case's own `//= expected` block and
+/// every other server's are left alone, so one case file holds what each
+/// server answers and `git diff` shows which of them moved.
+pub(super) fn write_answer_block(file: &Path, name: &str, answer: &str) {
+    let text = std::fs::read_to_string(file)
+        .unwrap_or_else(|error| panic!("{} is readable: {error}", file.display()));
+    let header = format!("{ANSWER_HEADER} {name}");
+    let block = format!("{header}\n{answer}");
+    let rewritten = match block_span(&text, &header) {
+        Some((start, end)) => format!("{}{block}{}", &text[..start], &text[end..]),
+        None => format!("{}\n{block}", text.trim_end()),
+    };
+    std::fs::write(file, rewritten)
+        .unwrap_or_else(|error| panic!("{} is writable: {error}", file.display()));
+}
+
+/// Where the `header` block of `text` starts and ends: from its header
+/// line to the next `//=` line, or the end of the file.
+fn block_span(text: &str, header: &str) -> Option<(usize, usize)> {
+    let lines: Vec<(usize, &str)> = line_offsets(text).collect();
+    let start = lines
+        .iter()
+        .position(|(_, line)| line.trim() == header)
+        .map(|index| lines[index].0)?;
+    let end = lines
+        .iter()
+        .find(|(offset, line)| *offset > start && line.trim_start().starts_with(ANSWER_HEADER))
+        .map_or(text.len(), |(offset, _)| *offset);
+    Some((start, end))
 }
 
 /// An expectation as [`Kind::ask`] renders an answer: lines with no blank
@@ -260,7 +326,7 @@ fn normalized(expected: &str) -> String {
     body.to_owned() + "\n"
 }
 
-fn indented(text: &str) -> String {
+pub(super) fn indented(text: &str) -> String {
     if text.is_empty() {
         return "    (nothing written down yet)\n".to_owned();
     }
@@ -269,7 +335,7 @@ fn indented(text: &str) -> String {
         .collect::<String>()
 }
 
-fn cases_root() -> PathBuf {
+pub(super) fn cases_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/integrationtest/cases")
 }
 
@@ -287,6 +353,41 @@ fn read_directory(directory: &Path) -> Vec<PathBuf> {
     directories
 }
 
+/// A recorded answer is a note, not the case: reading one back gives the
+/// `//= expected` block alone, and recording one leaves it and the other
+/// servers' blocks where they were.
+#[test]
+fn a_recorded_answer_is_not_the_case() {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let file = directory.path().join("a.case");
+    std::fs::write(
+        &file,
+        "//- /A.java\nclass A { int f$0; }\n//= expected\n/A.java:1:15\n",
+    )
+    .expect("the case is writable");
+
+    write_answer_block(&file, "jdtls", "/A.java:1:99\n");
+    write_answer_block(&file, "kotlinlsp", "(nothing)\n");
+    assert_eq!(Case::read(&file).expected, "/A.java:1:15\n");
+
+    // Recording again replaces that block alone, and keeps the order.
+    write_answer_block(&file, "jdtls", "/A.java:1:15\n");
+    assert_eq!(Case::read(&file).expected, "/A.java:1:15\n");
+    let text = std::fs::read_to_string(&file).expect("the case is readable");
+    assert_eq!(
+        text,
+        "//- /A.java\nclass A { int f$0; }\n//= expected\n/A.java:1:15\n\
+         //= jdtls\n/A.java:1:15\n//= kotlinlsp\n(nothing)\n",
+        "the recorded blocks stay beside the case, in the order written"
+    );
+
+    // A case with no recorded answer is unchanged by reading it.
+    let pristine = directory.path().join("b.case");
+    std::fs::write(&pristine, "//- /B.java\nclass B$0 {}\n//= expected\n(nothing)\n")
+        .expect("the case is writable");
+    assert_eq!(Case::read(&pristine).expected, "(nothing)\n");
+}
+
 fn directory_name(directory: &Path) -> String {
     directory
         .file_name()
@@ -297,7 +398,7 @@ fn directory_name(directory: &Path) -> String {
 
 /// The case files of `directory`, in name order, so a failure list reads
 /// the same on every machine.
-fn case_files(directory: &Path) -> Vec<PathBuf> {
+pub(super) fn case_files(directory: &Path) -> Vec<PathBuf> {
     let entries = std::fs::read_dir(directory)
         .unwrap_or_else(|error| panic!("{} is a directory: {error}", directory.display()));
     let mut files: Vec<PathBuf> = entries
