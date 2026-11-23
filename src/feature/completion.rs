@@ -5,9 +5,12 @@
 //! the user is about to have, and the rest of the server reads it as
 //! usual.
 
-use crate::parser::{Position, Syn, Syntax};
-use crate::semantic::{
-    components_of, is_identifier, is_type_declaration, members_of, package_of, path_to,
+use std::sync::Arc;
+
+use crate::parser::{syntax, Position, Syn};
+use crate::feature::features;
+use crate::feature::semantic::{
+    type_of_node, is_identifier, is_type_declaration, members_of, package_of, path_to,
     types_of, FileView, Found, Snapshot, Type,
 };
 
@@ -20,29 +23,27 @@ pub struct Offer {
     pub rank: String,
 }
 
-/// The keywords offered where a declaration can start.
-const MEMBER_KEYWORDS: &[&str] = &["private", "protected", "public", "static", "final", "class"];
-const FILE_KEYWORDS: &[&str] = &["package", "import", "public", "class", "interface", "enum"];
-
 /// What to offer at `at`, in the order to offer it.
 pub fn offers(
     snapshot: &Snapshot,
-    syntax: &dyn Syntax,
     file: &FileView,
     at: Position,
+    implied_package: Option<&str>,
 ) -> Vec<Offer> {
     let prefix = typed_prefix(&file.text, at);
     if in_comment_or_string(&file.text, at) {
         return Vec::new();
     }
     let probed = probe(&file.text, at, &prefix);
-    let tree = syntax.tree(&probed);
+    let tree = syntax(file.language).tree(&probed);
     let world = replaced(
         snapshot,
         FileView {
             uri: file.uri.clone(),
-            text: probed,
-            tree,
+            language: file.language,
+            text: Arc::new(probed),
+            tree: Arc::new(tree),
+            library: file.library,
         },
     );
     let probe_file = world.file(&file.uri).expect("the probed file is in the world");
@@ -50,8 +51,29 @@ pub fn offers(
         return Vec::new();
     };
     let path = path_to(&probe_file.tree, name.start);
-    let mut offers = contextual(&world, probe_file, &path, name, &prefix);
-    offers.retain(|offer| offer.name.starts_with(&prefix) || prefix.is_empty());
+    let dotted = dotted_prefix(&path, &prefix);
+    let mut offers = if enclosing_kind(&path, "package_declaration").is_some() {
+        let mut offers = packages(&world, dotted.as_deref().unwrap_or(&prefix));
+        let implied = implied_package
+            .filter(|implied| implied.starts_with(dotted.as_deref().unwrap_or(&prefix)));
+        if let Some(implied) = implied.filter(|implied| !offers.iter().any(|offer| offer.name == *implied)) {
+            offers.insert(
+                0,
+                Offer {
+                    name: implied.to_owned(),
+                    rank: format!("0{implied}"),
+                },
+            );
+        }
+        offers
+    } else {
+        contextual(&world, probe_file, &path, name, &prefix, dotted.as_deref())
+    };
+    offers.retain(|offer| {
+        prefix.is_empty()
+            || offer.name.starts_with(&prefix)
+            || dotted.as_deref().is_some_and(|dotted| offer.name.starts_with(dotted))
+    });
     offers.dedup_by(|left, right| left.name == right.name);
     offers
 }
@@ -63,13 +85,10 @@ fn contextual(
     path: &[&Syn],
     name: &Syn,
     prefix: &str,
+    dotted: Option<&str>,
 ) -> Vec<Offer> {
-    if let Some(declaration) = enclosing_kind(path, "package_declaration") {
-        let _ = declaration;
-        return packages(snapshot, prefix);
-    }
     if enclosing_kind(path, "import_declaration").is_some() {
-        let mut offers = packages(snapshot, prefix);
+        let mut offers = packages(snapshot, dotted.unwrap_or(prefix));
         offers.extend(types_matching_prefix(snapshot, prefix));
         return offers;
     }
@@ -90,14 +109,59 @@ fn contextual(
     if after_new {
         return types_matching_prefix(snapshot, prefix);
     }
+    // Where a member starts, a name is a type or a modifier: nothing in
+    // scope is read there.
+    if starts_a_member(path, name) {
+        let mut offers = types_matching_prefix(snapshot, prefix);
+        offers.extend(keywords(file, path));
+        return offers;
+    }
     let mut offers = scope(snapshot, file, name.start);
     offers.extend(types_matching_prefix(snapshot, prefix));
-    offers.extend(keywords(path));
+    offers.extend(keywords(file, path));
     offers
 }
 
+/// In a `package` or `import` declaration, the dotted name written up to
+/// the cursor: `com.dem` of `import com.dem|`.
+fn dotted_prefix(path: &[&Syn], prefix: &str) -> Option<String> {
+    let declaration = path.iter().position(|node| {
+        matches!(node.kind.as_str(), "package_declaration" | "import_declaration")
+    })?;
+    let dotted = path[declaration + 1..]
+        .iter()
+        .find(|node| node.kind == "scoped_identifier")?;
+    let before = dotted.text.split(PROBE).next()?;
+    Some(format!("{before}{prefix}"))
+}
+
+/// Whether the name stands alone in a type's body, where a member is
+/// being declared.
+fn starts_a_member(path: &[&Syn], name: &Syn) -> bool {
+    let is_body = |node: &Syn| {
+        matches!(
+            node.kind.as_str(),
+            "class_body" | "interface_body" | "enum_body"
+        )
+    };
+    let Some(at) = path
+        .iter()
+        .rposition(|node| node.start == name.start && node.kind == name.kind)
+    else {
+        return false;
+    };
+    match at.checked_sub(1).map(|parent| path[parent]) {
+        Some(parent) if is_body(parent) => true,
+        Some(parent) if parent.kind == "ERROR" && parent.children.len() == 1 => at
+            .checked_sub(2)
+            .is_some_and(|grandparent| is_body(path[grandparent])),
+        _ => false,
+    }
+}
+
 /// `package` and the rest, where a declaration or a member can start.
-fn keywords(path: &[&Syn]) -> Vec<Offer> {
+fn keywords(file: &FileView, path: &[&Syn]) -> Vec<Offer> {
+    let language = features(file.language);
     let in_a_body = path
         .iter()
         .any(|node| matches!(node.kind.as_str(), "class_body" | "interface_body" | "enum_body"));
@@ -105,9 +169,9 @@ fn keywords(path: &[&Syn]) -> Vec<Offer> {
     let words = if in_a_block {
         &[][..]
     } else if in_a_body {
-        MEMBER_KEYWORDS
+        language.member_keywords()
     } else {
-        FILE_KEYWORDS
+        language.file_keywords()
     };
     words
         .iter()
@@ -139,7 +203,8 @@ fn receiver_of<'a>(path: &[&'a Syn], name: &Syn) -> Option<&'a Syn> {
 
 /// The type a receiver has. A receiver written next to a name the parser
 /// could not place is read as a type name rather than as a variable, so a
-/// name in scope is looked up before the expression rules are tried.
+/// name in scope is looked up before the expression rules are tried; a
+/// dotted name is a member of the type its qualifier names.
 fn type_of_receiver(snapshot: &Snapshot, file: &FileView, receiver: &Syn) -> Option<Type> {
     if is_identifier(receiver) {
         if let Some(found) = snapshot.name_in_scope(&receiver.text, file, receiver.start) {
@@ -148,12 +213,22 @@ fn type_of_receiver(snapshot: &Snapshot, file: &FileView, receiver: &Syn) -> Opt
             }
         }
     }
+    if is_dotted_name(receiver) {
+        let (qualifier, last) = receiver.text.rsplit_once('.')?;
+        let owner = snapshot.type_named(qualifier.trim(), file)?;
+        let member = snapshot.member(&owner, last.trim(), None)?;
+        return snapshot.type_of_declaration(&member);
+    }
     snapshot.type_of_expression(receiver, file)
+}
+
+/// `a.b.c` the parser read as a name rather than as an expression.
+fn is_dotted_name(node: &Syn) -> bool {
+    matches!(node.kind.as_str(), "scoped_type_identifier" | "scoped_identifier")
 }
 
 /// The members of a receiver's type that are visible here.
 fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -> Vec<Offer> {
-    let _ = prefix;
     // `names.length` of an array, and nothing else an array has.
     if let Some(written) = type_of_receiver(snapshot, file, receiver) {
         if written.dimensions > 0 {
@@ -163,25 +238,89 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
             }];
         }
     }
+    let is_value = names_a_value(snapshot, file, receiver);
     // A type's own name as a receiver offers what one asks of the type:
     // its constants and its static members.
     let as_a_type = snapshot
         .type_named(receiver.text.trim(), file)
-        .filter(|_| !names_a_value(snapshot, file, receiver));
+        .filter(|_| !is_value);
     if let Some(declaration) = as_a_type {
         return visible(snapshot, file, &declaration, Wanted::Static);
+    }
+    // A package as a receiver offers the types it holds.
+    if !is_value && is_package(snapshot, receiver.text.trim()) {
+        return types_in_package(snapshot, receiver.text.trim(), prefix);
     }
     let Some(written) = type_of_receiver(snapshot, file, receiver) else {
         return Vec::new();
     };
-    let Some(declaration) = snapshot.of_type(&written, file) else {
+    let declaration = snapshot
+        .of_type(&written, file)
+        .or_else(|| bound_of(snapshot, file, receiver, &written));
+    let Some(declaration) = declaration else {
         return Vec::new();
     };
-    visible(snapshot, file, &declaration, Wanted::Everything)
+    visible(snapshot, file, &declaration, Wanted::Instance)
+}
+
+/// The bound a type parameter is declared with: `T extends Animal` is
+/// an `Animal` as far as its members go.
+fn bound_of<'a>(
+    snapshot: &'a Snapshot,
+    file: &'a FileView,
+    receiver: &Syn,
+    written: &Type,
+) -> Option<Found<'a>> {
+    let parameter = snapshot.name_in_scope(&written.name, file, receiver.start)?;
+    if parameter.node.kind != "type_parameter" {
+        return None;
+    }
+    let bound = parameter.node.first("type_bound")?;
+    let first = bound.children.iter().find(|child| {
+        matches!(
+            child.kind.as_str(),
+            "type_identifier" | "generic_type" | "scoped_type_identifier"
+        )
+    })?;
+    snapshot.of_type(&type_of_node(first), file)
+}
+
+/// Whether some file of the workspace declares `name` as its package.
+fn is_package(snapshot: &Snapshot, name: &str) -> bool {
+    snapshot
+        .files
+        .iter()
+        .any(|file| package_of(snapshot, file).as_deref() == Some(name))
+}
+
+/// The types a package declares, by name.
+fn types_in_package(snapshot: &Snapshot, package: &str, prefix: &str) -> Vec<Offer> {
+    let mut names: Vec<String> = Vec::new();
+    for file in &snapshot.files {
+        if package_of(snapshot, file).as_deref() != Some(package) {
+            continue;
+        }
+        for (name, _) in types_of(file) {
+            if name.starts_with(prefix) && !names.contains(&name.to_owned()) {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| Offer {
+            rank: format!("0{name}"),
+            name,
+        })
+        .collect()
 }
 
 /// Whether a receiver names a variable rather than a type.
 fn names_a_value(snapshot: &Snapshot, file: &FileView, receiver: &Syn) -> bool {
+    if is_dotted_name(receiver) {
+        return false;
+    }
     if !is_identifier(receiver) {
         return true;
     }
@@ -194,6 +333,8 @@ fn names_a_value(snapshot: &Snapshot, file: &FileView, receiver: &Syn) -> bool {
 enum Wanted {
     /// What a type's own name offers: its constants and static members.
     Static,
+    /// What a value offers: what each instance has.
+    Instance,
     Everything,
 }
 
@@ -208,17 +349,13 @@ fn visible(
     let mut offers = Vec::new();
     let mut seen = Vec::new();
     for (depth, type_of) in snapshot.with_supertypes(of).into_iter().enumerate() {
-        let is_record = type_of.node.kind == "record_declaration";
-        let components = components_of(type_of.node);
         let members = members_of(type_of.node);
         for (index, (member, named)) in members.iter().enumerate() {
-            let is_component = components
-                .iter()
-                .any(|(_, component)| component.start == named.start);
             let is_static = member.text.contains("static") || member.kind == "enum_constant";
             let offered = match wanted {
                 Wanted::Static => is_static,
-                Wanted::Everything => !is_record || !is_component || true,
+                Wanted::Instance => member.kind != "enum_constant",
+                Wanted::Everything => true,
             };
             if !offered || !reachable(snapshot, from, &type_of, member) {
                 continue;
@@ -227,9 +364,10 @@ fn visible(
                 continue;
             }
             seen.push(named.text.clone());
+            let rank = features(from.language).member_rank(depth, index, &named.text);
             offers.push(Offer {
                 name: named.text.clone(),
-                rank: format!("{depth}{index:04}"),
+                rank,
             });
         }
     }
@@ -252,12 +390,26 @@ fn reachable(
         return same_file;
     }
     if modifiers.contains("protected") {
-        return same_package || true;
+        return same_package || inherits_from(snapshot, from, owner);
     }
     if modifiers.contains("public") {
         return true;
     }
     same_package
+}
+
+/// Whether a type `from` declares extends `owner`: a protected member is
+/// theirs to name.
+fn inherits_from(snapshot: &Snapshot, from: &FileView, owner: &Found<'_>) -> bool {
+    types_of(from).into_iter().any(|(name, _)| {
+        snapshot.type_named(name, from).is_some_and(|declared| {
+            snapshot
+                .with_supertypes(&declared)
+                .iter()
+                .skip(1)
+                .any(|above| above.file.uri == owner.file.uri && above.name.start == owner.name.start)
+        })
+    })
 }
 
 /// The constants of the type a `switch` switches on.
@@ -358,6 +510,17 @@ fn scope(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Offer> {
     if let Some(enclosing) = snapshot.enclosing(file, at) {
         offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything));
     }
+    // An inner class reads the members of the classes around it too.
+    let outer = path_to(&file.tree, at)
+        .into_iter()
+        .rev()
+        .filter(|node| is_type_declaration(node))
+        .skip(1)
+        .filter_map(|node| snapshot.type_named(&node.child("name")?.text, file))
+        .collect::<Vec<_>>();
+    for enclosing in outer {
+        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything));
+    }
     offers
 }
 
@@ -415,8 +578,10 @@ fn replaced(snapshot: &Snapshot, probed: FileView) -> Snapshot {
         .filter(|file| file.uri != probed_uri)
         .map(|file| FileView {
             uri: file.uri.clone(),
+            language: file.language,
             text: file.text.clone(),
             tree: file.tree.clone(),
+            library: file.library,
         })
         .chain(std::iter::once(probed))
         .collect();

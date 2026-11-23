@@ -2,7 +2,7 @@
 //! the cursor is in, and which parameter it is at.
 
 use crate::parser::{Position, Syn};
-use crate::semantic::{
+use crate::feature::semantic::{
     is_identifier, members_of, parameters_of, path_to, FileView, Found, Snapshot,
 };
 
@@ -232,7 +232,7 @@ fn candidates_of<'a>(
         }
         "object_creation_expression" => {
             let created = call.child("type")?;
-            let written = crate::semantic::type_of_node(created);
+            let written = crate::feature::semantic::type_of_node(created);
             let declaration = snapshot.of_type(&written, file)?;
             let constructors = snapshot.constructors_of(&declaration);
             Some(constructors)
@@ -314,7 +314,7 @@ fn arguments_fit(
         let wanted = parameter
             .child("type")
             .or_else(|| parameter.children.first())
-            .map(crate::semantic::type_of_node);
+            .map(crate::feature::semantic::type_of_node);
         let given = snapshot.type_of_expression(argument, file);
         match (wanted, given) {
             (Some(wanted), Some(given)) => {

@@ -1,40 +1,53 @@
-//! The tree-sitter implementation of `Syntax`, one grammar per language.
+//! What every tree-sitter grammar shares: parsing, syntax errors, names
+//! at a position, folding and the `Syn` snapshot. A language describes
+//! its own node kinds in a [`Grammar`]; its module (`java`, `kotlin`)
+//! implements `Syntax` with these and with what only it knows.
 
 use tree_sitter::{Node, Parser, Tree};
 
-use super::{position_of, Finding, Fold, Kind, Name, Outline, Position, Syn, Syntax};
+use super::{position_of, Finding, Fold, Name, Position, Syn};
 
-/// A language the server reads. The grammar is behind `Syntax`, so the
-/// server never names tree-sitter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Language {
-    Java,
-    Kotlin,
+/// The node kinds of one grammar that the shared readers ask about.
+pub struct Grammar {
+    /// The tree-sitter grammar.
+    pub language: fn() -> tree_sitter::Language,
+    /// What an identifier is.
+    pub names: &'static [&'static str],
+    /// What a `package` or `import` declaration is: the names in it are
+    /// outside the file.
+    pub package_or_import: &'static [&'static str],
+    pub folds: FoldKinds,
 }
 
-pub struct TreeSitter {
-    language: Language,
+/// What folds, by node kind.
+pub struct FoldKinds {
+    /// Declarations whose body folds from the declaration's own line.
+    pub members: &'static [&'static str],
+    /// A node between a member and its block (Kotlin's `function_body`).
+    pub body_wrappers: &'static [&'static str],
+    /// Brace-delimited bodies that fold from their own brace.
+    pub blocks: &'static [&'static str],
+    /// A `switch` block, whose arms fold one by one.
+    pub switch_blocks: &'static [&'static str],
+    /// An arm of a `switch`: the block it wraps folds as the arm.
+    pub switch_arms: &'static [&'static str],
+    pub block_comments: &'static [&'static str],
 }
 
-impl TreeSitter {
-    pub fn new(language: Language) -> Self {
-        Self { language }
-    }
-
-    fn parse(&self, text: &str) -> Option<Tree> {
+impl Grammar {
+    pub fn parse(&self, text: &str) -> Option<Tree> {
         let mut parser = Parser::new();
-        let grammar = match self.language {
-            // ponytail: Kotlin reads as nothing until its grammar is wired
-            // up; Java is the iteration's language.
-            Language::Java | Language::Kotlin => tree_sitter_java::LANGUAGE,
-        };
-        parser.set_language(&grammar.into()).ok()?;
+        parser.set_language(&(self.language)()).ok()?;
         parser.parse(text, None)
     }
-}
 
-impl Syntax for TreeSitter {
-    fn syntax_errors(&self, text: &str) -> Vec<Finding> {
+    /// The whole file as a `Syn`, as the grammar parses it.
+    pub fn snapshot(&self, text: &str) -> Option<Syn> {
+        let tree = self.parse(text)?;
+        Some(snapshot(tree.root_node(), None, text))
+    }
+
+    pub fn syntax_errors(&self, text: &str) -> Vec<Finding> {
         let Some(tree) = self.parse(text) else {
             return Vec::new();
         };
@@ -45,76 +58,144 @@ impl Syntax for TreeSitter {
         findings
     }
 
-    fn package(&self, text: &str) -> Option<String> {
+    pub fn name_at(&self, text: &str, cursor: Position) -> Option<Name> {
         let tree = self.parse(text)?;
-        let mut cursor = tree.root_node().walk();
-        let declaration = tree
-            .root_node()
-            .children(&mut cursor)
-            .find(|child| child.kind() == "package_declaration")?;
-        let mut names = declaration.walk();
-        let name = declaration
-            .children(&mut names)
-            .find(|child| matches!(child.kind(), "scoped_identifier" | "identifier"))?;
-        Some(name.utf8_text(text.as_bytes()).ok()?.to_owned())
-    }
-
-    fn outline(&self, text: &str) -> Vec<Outline> {
-        let Some(tree) = self.parse(text) else {
-            return Vec::new();
-        };
-        let mut entries = Vec::new();
-        collect_outline(tree.root_node(), text, &mut entries);
-        entries.sort_by_key(|entry| entry.selection);
-        entries
-    }
-
-    fn tree(&self, text: &str) -> Syn {
-        match self.parse(text) {
-            Some(tree) => snapshot(tree.root_node(), None, text),
-            None => Syn {
-                kind: "program".to_owned(),
-                field: None,
-                text: String::new(),
-                start: Position { line: 0, column: 0 },
-                end: Position { line: 0, column: 0 },
-                children: Vec::new(),
-            },
-        }
-    }
-
-    fn name_at(&self, text: &str, cursor: Position) -> Option<Name> {
-        let tree = self.parse(text)?;
-        let node = identifier_at(tree.root_node(), text, cursor)?;
+        let node = self.identifier_at(tree.root_node(), text, cursor)?;
         Some(Name {
             text: node.utf8_text(text.as_bytes()).ok()?.to_owned(),
             start: at(node.start_byte(), text),
             end: at(node.end_byte(), text),
-            in_package_or_import: inside_package_or_import(node),
+            in_package_or_import: self.inside_package_or_import(node),
         })
     }
 
-    fn declared_names(&self, text: &str) -> Vec<String> {
-        let Some(tree) = self.parse(text) else {
-            return Vec::new();
-        };
-        let mut names = Vec::new();
-        names_declared(tree.root_node(), text, &mut names);
-        names.sort();
-        names.dedup();
-        names
-    }
-
-    fn folds(&self, text: &str) -> Vec<Fold> {
+    pub fn folds(&self, text: &str) -> Vec<Fold> {
         let Some(tree) = self.parse(text) else {
             return Vec::new();
         };
         let mut folds = Vec::new();
-        collect_folds(tree.root_node(), text, &mut folds, &mut Vec::new());
+        self.collect_folds(tree.root_node(), text, &mut folds, &mut Vec::new());
         folds.extend(line_runs(text));
         folds.sort_unstable();
         folds.dedup();
         folds
+    }
+
+    /// The identifier at `at`, or the one that ends there.
+    fn identifier_at<'tree>(&self, root: Node<'tree>, text: &str, at: Position) -> Option<Node<'tree>> {
+        let offset = offset_of(text, at)?;
+        let is_name = |node: &Node| self.names.contains(&node.kind());
+        root.named_descendant_for_byte_range(offset, offset)
+            .filter(is_name)
+            .or_else(|| {
+                let before = offset.saturating_sub(1);
+                root.named_descendant_for_byte_range(before, before)
+                    .filter(is_name)
+            })
+    }
+
+    fn inside_package_or_import(&self, node: Node) -> bool {
+        let mut current = Some(node);
+        while let Some(ancestor) = current {
+            if self.package_or_import.contains(&ancestor.kind()) {
+                return true;
+            }
+            current = ancestor.parent();
+        }
+        false
+    }
+
+    /// Every body, every block comment, every switch arm. A member's body
+    /// folds from the declaration (`static\n{` folds from the `static`); a
+    /// statement's block folds from its brace.
+    fn collect_folds(
+        &self,
+        node: Node,
+        text: &str,
+        folds: &mut Vec<Fold>,
+        inside_member: &mut Vec<usize>,
+    ) {
+        let kinds = &self.folds;
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(body) = self.member_body(child) {
+                inside_member.push(body.start_byte());
+                folds.extend(span(at(child.start_byte(), text).line, body, text));
+            }
+            let folded_by_its_arm = kinds.switch_arms.contains(&node.kind());
+            let is_block = kinds.blocks.contains(&child.kind());
+            if is_block && !folded_by_its_arm && !inside_member.contains(&child.start_byte()) {
+                folds.extend(span(at(child.start_byte(), text).line, child, text));
+            }
+            if kinds.switch_blocks.contains(&child.kind()) {
+                folds.extend(self.switch_arms(child, text));
+            }
+            if kinds.block_comments.contains(&child.kind()) {
+                let first = at(child.start_byte(), text).line;
+                let last = at(child.end_byte().saturating_sub(1), text).line;
+                if last > first {
+                    folds.push(Fold {
+                        first_line: first,
+                        last_line: last,
+                    });
+                }
+            }
+            self.collect_folds(child, text, folds, inside_member);
+        }
+    }
+
+    /// The body a declaration folds from its own first line.
+    fn member_body<'tree>(&self, node: Node<'tree>) -> Option<Node<'tree>> {
+        if !self.folds.members.contains(&node.kind()) {
+            return None;
+        }
+        let wrapped = self
+            .folds
+            .body_wrappers
+            .iter()
+            .find_map(|wrapper| first_of_kind(node, wrapper));
+        if let Some(wrapper) = wrapped {
+            return first_of_kind(wrapper, "block");
+        }
+        node.child_by_field_name("body")
+            .or_else(|| first_of_kind(node, "block"))
+            .or_else(|| first_of_kind(node, "constructor_body"))
+    }
+
+    /// One region per arm of a `switch` block, each reaching to the line
+    /// before the next arm: an arm's own statements stop earlier, and the
+    /// blank lines between two arms belong to the one above.
+    fn switch_arms(&self, block: Node, text: &str) -> Vec<Fold> {
+        let mut cursor = block.walk();
+        let arms: Vec<Node> = block
+            .children(&mut cursor)
+            .filter(|child| self.folds.switch_arms.contains(&child.kind()))
+            .collect();
+        let block_end = at(block.end_byte().saturating_sub(1), text).line;
+        arms.iter()
+            .enumerate()
+            .filter_map(|(index, arm)| {
+                let first_line = at(arm.start_byte(), text).line;
+                let next = arms.get(index + 1).map(|next| at(next.start_byte(), text).line);
+                let last_line = next.unwrap_or(block_end).checked_sub(1)?;
+                (last_line > first_line).then_some(Fold {
+                    first_line,
+                    last_line,
+                })
+            })
+            .collect()
+    }
+}
+
+/// A file that would not parse: an empty program.
+pub fn empty_tree() -> Syn {
+    Syn {
+        kind: "program".to_owned(),
+        field: None,
+        text: String::new(),
+        start: Position { line: 0, column: 0 },
+        end: Position { line: 0, column: 0 },
+        children: Vec::new(),
     }
 }
 
@@ -146,118 +227,13 @@ fn collect_errors(node: Node, text: &str, findings: &mut Vec<Finding>) {
     }
 }
 
-fn at(offset: usize, text: &str) -> Position {
+pub fn at(offset: usize, text: &str) -> Position {
     position_of(text, offset)
 }
 
-fn collect_outline(node: Node, text: &str, entries: &mut Vec<Outline>) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        entries.extend(outline_of(child, text));
-        collect_outline(child, text, entries);
-    }
-}
-
-/// A declaration is one entry, except a field declaration: `int a, b;`
-/// declares two.
-fn outline_of(node: Node, text: &str) -> Vec<Outline> {
-    if node.kind() == "field_declaration" {
-        return fields_of(node, text);
-    }
-    let kind = match node.kind() {
-        "class_declaration" | "record_declaration" => Kind::Class,
-        "interface_declaration" | "annotation_type_declaration" => Kind::Interface,
-        "enum_declaration" => Kind::Enum,
-        "enum_constant" => Kind::EnumMember,
-        "method_declaration" => Kind::Method,
-        "constructor_declaration" | "compact_constructor_declaration" => Kind::Constructor,
-        _ => return Vec::new(),
-    };
-    node.child_by_field_name("name")
-        .into_iter()
-        .filter_map(|name| named(node, name, kind, text))
-        .collect()
-}
-
-/// Each name a field declaration declares. A `static final` field is a
-/// constant; anything else is a field.
-fn fields_of(node: Node, text: &str) -> Vec<Outline> {
-    let modifiers = node
-        .child_by_field_name("modifiers")
-        .or_else(|| first_of_kind(node, "modifiers"))
-        .and_then(|node| node.utf8_text(text.as_bytes()).ok())
-        .unwrap_or_default();
-    let is_constant = modifiers.contains("static") && modifiers.contains("final");
-    let kind = if is_constant { Kind::Constant } else { Kind::Field };
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .filter(|child| child.kind() == "variable_declarator")
-        .filter_map(|declarator| {
-            let name = declarator.child_by_field_name("name")?;
-            named(node, name, kind, text)
-        })
-        .collect()
-}
-
-fn first_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+pub fn first_of_kind<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
     let mut cursor = node.walk();
     node.children(&mut cursor).find(|child| child.kind() == kind)
-}
-
-fn named(node: Node, name: Node, kind: Kind, text: &str) -> Option<Outline> {
-    Some(Outline {
-        name: name.utf8_text(text.as_bytes()).ok()?.to_owned(),
-        kind,
-        selection: at(name.start_byte(), text),
-        start: at(node.start_byte(), text),
-        end: at(node.end_byte(), text),
-    })
-}
-
-/// Every body, every block comment, every switch arm, and the runs of
-/// imports and line comments. A member's body folds from the declaration
-/// (`static\n{` folds from the `static`); a statement's block folds from
-/// its brace.
-fn collect_folds(node: Node, text: &str, folds: &mut Vec<Fold>, inside_member: &mut Vec<usize>) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if let Some(body) = member_body(child) {
-            inside_member.push(body.start_byte());
-            folds.extend(span(at(child.start_byte(), text).line, body, text));
-        }
-        let folded_by_its_arm = is_switch_arm(node);
-        if is_block(child) && !folded_by_its_arm && !inside_member.contains(&child.start_byte()) {
-            folds.extend(span(at(child.start_byte(), text).line, child, text));
-        }
-        if child.kind() == "switch_block" {
-            folds.extend(switch_arms(child, text));
-        }
-        if child.kind() == "block_comment" {
-            let first = at(child.start_byte(), text).line;
-            let last = at(child.end_byte().saturating_sub(1), text).line;
-            if last > first {
-                folds.push(Fold {
-                    first_line: first,
-                    last_line: last,
-                });
-            }
-        }
-        collect_folds(child, text, folds, inside_member);
-    }
-}
-
-/// The body a declaration folds from its own first line.
-fn member_body<'tree>(node: Node<'tree>) -> Option<Node<'tree>> {
-    let folds_from_its_declaration = matches!(
-        node.kind(),
-        "method_declaration" | "constructor_declaration" | "static_initializer"
-    );
-    if !folds_from_its_declaration {
-        return None;
-    }
-    node.child_by_field_name("body")
-        .or_else(|| first_of_kind(node, "block"))
-        .or_else(|| first_of_kind(node, "constructor_body"))
 }
 
 /// `first_line` to where `node` ends: the line of its last brace, or the
@@ -280,30 +256,6 @@ fn span(first_line: u32, node: Node, text: &str) -> Option<Fold> {
 /// Just past the last `}` of `line`.
 fn closing_column(line: &str) -> usize {
     line.rfind('}').map_or(line.len(), |brace| brace + 1)
-}
-
-/// One region per arm of a `switch` block, each reaching to the line
-/// before the next arm: an arm's own statements stop earlier, and the
-/// blank lines between two arms belong to the one above.
-fn switch_arms(block: Node, text: &str) -> Vec<Fold> {
-    let mut cursor = block.walk();
-    let arms: Vec<Node> = block
-        .children(&mut cursor)
-        .filter(|child| is_switch_arm(*child))
-        .collect();
-    let block_end = at(block.end_byte().saturating_sub(1), text).line;
-    arms.iter()
-        .enumerate()
-        .filter_map(|(index, arm)| {
-            let first_line = at(arm.start_byte(), text).line;
-            let next = arms.get(index + 1).map(|next| at(next.start_byte(), text).line);
-            let last_line = next.unwrap_or(block_end).checked_sub(1)?;
-            (last_line > first_line).then_some(Fold {
-                first_line,
-                last_line,
-            })
-        })
-        .collect()
 }
 
 /// What folds by line alone: a run of imports, a run of `//` comments,
@@ -377,107 +329,6 @@ fn close(run: Option<(u32, u32)>, folds: &mut Vec<Fold>) {
     }
 }
 
-/// A brace-delimited body: it folds from its own opening brace.
-fn is_block(node: Node) -> bool {
-    matches!(
-        node.kind(),
-        "class_body"
-            | "interface_body"
-            | "enum_body"
-            | "annotation_type_body"
-            | "block"
-            | "constructor_body"
-            | "switch_block"
-    )
-}
-
-/// An arm of a `switch`: the block it wraps folds as the arm, not twice.
-fn is_switch_arm(node: Node) -> bool {
-    matches!(node.kind(), "switch_block_statement_group" | "switch_rule")
-}
-
-/// The declarations whose `name` field names something the file declares.
-const DECLARES_A_NAME: &[&str] = &[
-    "class_declaration",
-    "record_declaration",
-    "interface_declaration",
-    "annotation_type_declaration",
-    "enum_declaration",
-    "enum_constant",
-    "method_declaration",
-    "constructor_declaration",
-    "compact_constructor_declaration",
-    "variable_declarator",
-    "formal_parameter",
-    "spread_parameter",
-    "catch_formal_parameter",
-    "type_parameter",
-    "record_pattern_component",
-    "type_pattern",
-    "inferred_parameter",
-    "lambda_expression",
-    "annotation_type_element_declaration",
-];
-
-fn names_declared(node: Node, text: &str, names: &mut Vec<String>) {
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if DECLARES_A_NAME.contains(&child.kind()) {
-            let named = match child.kind() {
-                // A lambda's parameters and a type parameter are named by
-                // position, not by a `name` field.
-                "lambda_expression" => child.child_by_field_name("parameters"),
-                "type_parameter" => first_of_kind(child, "type_identifier"),
-                _ => child.child_by_field_name("name"),
-            };
-            if let Some(name) = named {
-                names.extend(identifiers_of(name, text));
-            }
-        }
-        if child.kind() == "record_declaration" {
-            if let Some(parameters) = child.child_by_field_name("parameters") {
-                names.extend(identifiers_of(parameters, text));
-            }
-        }
-        names_declared(child, text, names);
-    }
-}
-
-/// Every identifier `node` is or holds: a name is one, a parameter list of
-/// a lambda is each of its names.
-fn identifiers_of(node: Node, text: &str) -> Vec<String> {
-    if is_name(node) {
-        return node
-            .utf8_text(text.as_bytes())
-            .ok()
-            .map(|name| vec![name.to_owned()])
-            .unwrap_or_default();
-    }
-    let mut names = Vec::new();
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        names.extend(identifiers_of(child, text));
-    }
-    names
-}
-
-/// The identifier at `at`, or the one that ends there.
-fn identifier_at<'tree>(root: Node<'tree>, text: &str, at: Position) -> Option<Node<'tree>> {
-    let offset = offset_of(text, at)?;
-    let found = root
-        .named_descendant_for_byte_range(offset, offset)
-        .filter(|node| is_name(*node))
-        .or_else(|| {
-            root.named_descendant_for_byte_range(offset.saturating_sub(1), offset.saturating_sub(1))
-                .filter(|node| is_name(*node))
-        })?;
-    Some(found)
-}
-
-fn is_name(node: Node) -> bool {
-    matches!(node.kind(), "identifier" | "type_identifier" | "field_identifier")
-}
-
 /// The byte offset of a UTF-16 position.
 fn offset_of(text: &str, at: Position) -> Option<usize> {
     let mut line = 0;
@@ -499,23 +350,8 @@ fn offset_of(text: &str, at: Position) -> Option<usize> {
     (line == at.line && column == at.column).then_some(text.len())
 }
 
-/// Whether `node` sits inside a `package` or `import` declaration.
-fn inside_package_or_import(node: Node) -> bool {
-    let mut current = Some(node);
-    while let Some(ancestor) = current {
-        if matches!(
-            ancestor.kind(),
-            "package_declaration" | "import_declaration"
-        ) {
-            return true;
-        }
-        current = ancestor.parent();
-    }
-    false
-}
-
 /// `node` and everything below it, as a `Syn`.
-fn snapshot(node: Node, field: Option<&str>, text: &str) -> Syn {
+pub fn snapshot(node: Node, field: Option<&str>, text: &str) -> Syn {
     let mut cursor = node.walk();
     let children: Vec<Syn> = node
         .children(&mut cursor)

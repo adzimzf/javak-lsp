@@ -4,7 +4,7 @@
 //! leaves, and the methods implementing an interface.
 
 use crate::parser::{Position, Syn};
-use crate::semantic::{
+use crate::feature::semantic::{
     is_identifier, members_of, parameters_of, path_to, type_of_node, FileView, Snapshot,
 };
 

@@ -1,8 +1,21 @@
-//! What the server asks of a parser, and nothing more: the interface is
-//! phrased in positions and names, never in tree-sitter's types, so the
-//! implementation (`treesitter`) is replaceable.
+//! What the server asks of a parser, and nothing more: the interface
+//! ([`Syntax`]) is phrased in positions and names, never in tree-sitter's
+//! types. Each language implements it in a module of its own (`java`,
+//! `kotlin`), on what every tree-sitter grammar shares (`treesitter`).
 
+pub mod java;
+pub mod kotlin;
 pub mod treesitter;
+
+use crate::language::Language;
+
+/// The parser of a language.
+pub fn syntax(language: Language) -> &'static dyn Syntax {
+    match language {
+        Language::Java => &java::Java,
+        Language::Kotlin => &kotlin::Kotlin,
+    }
+}
 
 /// A zero-based position: LSP's, with the column in UTF-16 units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,6 +50,12 @@ pub enum Kind {
     Constant,
     Method,
     Constructor,
+    /// A Kotlin property.
+    Property,
+    /// A function outside a class, or one Kotlin gives a type.
+    Function,
+    /// A Kotlin `object`, a companion one included.
+    Object,
 }
 
 /// A foldable region, by zero-based line.

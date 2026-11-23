@@ -3,9 +3,12 @@
 //! names its nodes the way the Java grammar does.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::Url;
 
+use crate::feature::{features, MethodShape, Parameter};
+use crate::language::Language;
 use crate::parser::{Position, Syn};
 
 /// The open files, each parsed.
@@ -13,10 +16,16 @@ pub struct Snapshot {
     pub files: Vec<FileView>,
 }
 
+/// One parsed file. Text and tree are shared, so a snapshot of many files
+/// is cheap to take.
 pub struct FileView {
     pub uri: Url,
-    pub text: String,
-    pub tree: Syn,
+    pub language: Language,
+    pub text: Arc<String>,
+    pub tree: Arc<Syn>,
+    /// A source of a library: read to resolve names, never searched for
+    /// uses or renamed.
+    pub library: bool,
 }
 
 /// A type as it is written: a name, its arguments and its dimensions.
@@ -308,7 +317,11 @@ impl Snapshot {
                     None => self.enclosing(from, at)?,
                 };
                 let method = self.member(&owner, &name.text, expression.child("arguments"))?;
-                self.type_of_declaration(&method)
+                let returned = self.type_of_declaration(&method)?;
+                Some(
+                    self.inferred_from_arguments(&method, &returned, expression, from)
+                        .unwrap_or(returned),
+                )
             }
             "object_creation_expression" => expression.child("type").map(type_of_node),
             "cast_expression" => expression.child("type").map(type_of_node),
@@ -346,6 +359,36 @@ impl Snapshot {
         }
     }
 
+    /// What a generic method returns when it returns its own type
+    /// parameter: the type of the argument passed for a parameter of that
+    /// type (`<T> T unwrap(T value)` called with a `Dog` returns a `Dog`).
+    fn inferred_from_arguments(
+        &self,
+        method: &Found<'_>,
+        returned: &Type,
+        call: &Syn,
+        from: &FileView,
+    ) -> Option<Type> {
+        let introduced = type_parameter_names(method.node);
+        if !introduced.contains(&returned.name) {
+            return None;
+        }
+        let at = parameters_of(method.node).iter().position(|parameter| {
+            parameter
+                .child("type")
+                .is_some_and(|written| type_of_node(written) == Type::named(&returned.name))
+        })?;
+        let argument = call
+            .child("arguments")?
+            .children
+            .iter()
+            .filter(|child| !matches!(child.kind.as_str(), "(" | ")" | ","))
+            .nth(at)?;
+        let mut given = self.type_of_expression(argument, from)?;
+        given.dimensions += returned.dimensions;
+        Some(given)
+    }
+
     /// The type of what a declaration declares: a field's or a local's
     /// written type, a method's return type, a record component's type,
     /// with the type parameters of its class filled in.
@@ -353,7 +396,11 @@ impl Snapshot {
         let node = declaration.node;
         let written = match node.kind.as_str() {
             "method_declaration" => node.child("type").map(type_of_node),
-            "formal_parameter" | "spread_parameter" | "catch_formal_parameter" | "field_declaration"
+            "catch_formal_parameter" => node
+                .child("type")
+                .or_else(|| node.first("catch_type").and_then(|caught| caught.children.first()))
+                .map(type_of_node),
+            "formal_parameter" | "spread_parameter" | "field_declaration"
             | "local_variable_declaration" | "resource" | "type_pattern" => {
                 node.child("type").map(type_of_node)
             }
@@ -1224,11 +1271,14 @@ impl Snapshot {
             "method_declaration" | "annotation_type_element_declaration" => {
                 Some(self.method_signature(found))
             }
-            "constructor_declaration" | "compact_constructor_declaration" => Some(format!(
-                "{}({})",
-                found.name.text,
-                written_parameters(node).join(", ")
-            )),
+            "constructor_declaration" | "compact_constructor_declaration" => {
+                let language = features(found.file.language);
+                let parameters: Vec<String> = parameters(node, &Bindings::new())
+                    .iter()
+                    .map(|parameter| language.parameter(parameter))
+                    .collect();
+                Some(format!("{}({})", found.name.text, parameters.join(", ")))
+            }
             "class_declaration" | "record_declaration" | "interface_declaration"
             | "enum_declaration" | "annotation_type_declaration" => {
                 let parameters = type_parameters_of(node);
@@ -1260,25 +1310,16 @@ impl Snapshot {
 
     fn method_signature(&self, found: &Found<'_>) -> String {
         let node = found.node;
-        let parameters = type_parameters_of(node);
-        let introduced = if parameters.is_empty() {
-            String::new()
-        } else {
-            format!("<{}> ", parameters.join(", "))
+        let shape = MethodShape {
+            name: found.name.text.clone(),
+            type_parameters: type_parameters_of(node),
+            returns: node.child("type").map(|written| type_of_node(written).written()),
+            parameters: parameters(node, &Bindings::new()),
+            thrown: node
+                .first("throws")
+                .map(|throws| throws.text.split_whitespace().collect::<Vec<_>>().join(" ")),
         };
-        let returns = node
-            .child("type")
-            .map(|written| format!("{} ", type_of_node(written).written()))
-            .unwrap_or_default();
-        let thrown = node
-            .first("throws")
-            .map(|throws| format!(" {}", throws.text.split_whitespace().collect::<Vec<_>>().join(" ")))
-            .unwrap_or_default();
-        format!(
-            "{introduced}{returns}{}({}){thrown}",
-            found.name.text,
-            written_parameters(node).join(", ")
-        )
+        features(found.file.language).method_signature(&shape)
     }
 
     /// `com.demo.Main.sum(int, int)`: the method a local belongs to.
@@ -1310,9 +1351,19 @@ impl Snapshot {
     }
 }
 
-/// `String s`, `String... parts`, `int[] indexes`, as written.
-pub fn written_parameters(declaration: &Syn) -> Vec<String> {
-    parameters_of(declaration)
+/// The parameters a declaration takes, each with its type as written
+/// (the type parameters in `bindings` filled in) and its name. A record
+/// takes its components.
+pub fn parameters(declaration: &Syn, bindings: &Bindings) -> Vec<Parameter> {
+    let source = if declaration.kind == "record_declaration" {
+        components_of(declaration)
+            .into_iter()
+            .map(|(component, _)| component)
+            .collect::<Vec<_>>()
+    } else {
+        parameters_of(declaration)
+    };
+    source
         .iter()
         .map(|parameter| {
             // A spread parameter writes its type by position, not under a
@@ -1322,25 +1373,31 @@ pub fn written_parameters(declaration: &Syn) -> Vec<String> {
                 .or_else(|| parameter.children.first())
                 .map(type_of_node)
                 .unwrap_or_default();
-            let spread = if parameter.kind == "spread_parameter" {
-                "..."
-            } else {
-                ""
-            };
-            let name = parameter
-                .child("name")
+            let name = declared_name(parameter)
+                .or_else(|| parameter.child("name"))
                 .map(|name| name.text.clone())
-                .or_else(|| {
-                    parameter
-                        .all("variable_declarator")
-                        .next()
-                        .and_then(|declarator| declarator.child("name"))
-                        .map(|name| name.text.clone())
-                })
                 .unwrap_or_default();
-            format!("{}{spread} {name}", written.written())
+            Parameter {
+                written: substituted(written, bindings).written(),
+                name,
+                spread: parameter.kind == "spread_parameter",
+            }
         })
         .collect()
+}
+
+/// The names of the type parameters a declaration introduces.
+fn type_parameter_names(declaration: &Syn) -> Vec<String> {
+    declaration
+        .child("type_parameters")
+        .map(|parameters| {
+            parameters
+                .all("type_parameter")
+                .filter_map(|parameter| parameter.first("type_identifier"))
+                .map(|name| name.text.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn type_parameters_of(declaration: &Syn) -> Vec<String> {
@@ -1372,7 +1429,8 @@ impl Snapshot {
     pub fn uses_of(&self, declaration: &Found<'_>) -> Vec<(&Url, Position)> {
         let wanted = (&declaration.file.uri, declaration.selection());
         let mut places = Vec::new();
-        for file in &self.files {
+        // A library is read, not searched: its uses are not the workspace's.
+        for file in self.files.iter().filter(|file| !file.library) {
             for node in file.tree.walk() {
                 if !is_identifier(node) || node.text != declaration.name.text {
                     continue;
@@ -1850,38 +1908,13 @@ impl Snapshot {
         self.supertypes(of).into_iter().next()
     }
 
-    /// The parameters of a declaration as written, with the bindings of
-    /// its receiver filled in.
+    /// The parameters of a declaration as its language writes them, with
+    /// the bindings of its receiver filled in.
     pub fn parameters_written(&self, found: &Found<'_>) -> Vec<String> {
-        let source = if found.node.kind == "record_declaration" {
-            components_of(found.node)
-                .into_iter()
-                .map(|(component, _)| component)
-                .collect::<Vec<_>>()
-        } else {
-            parameters_of(found.node)
-        };
-        source
+        let language = features(found.file.language);
+        parameters(found.node, &found.bindings)
             .iter()
-            .map(|parameter| {
-                let written = parameter
-                    .child("type")
-                    .or_else(|| parameter.children.first())
-                    .map(type_of_node)
-                    .unwrap_or_default();
-                let spread = if parameter.kind == "spread_parameter" {
-                    "..."
-                } else {
-                    ""
-                };
-                let name = declared_name(parameter)
-                    .map(|name| name.text.clone())
-                    .unwrap_or_default();
-                format!(
-                    "{}{spread} {name}",
-                    substituted(written, &found.bindings).written()
-                )
-            })
+            .map(|parameter| language.parameter(parameter))
             .collect()
     }
 }
