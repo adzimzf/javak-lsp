@@ -42,13 +42,13 @@ pub(crate) const JAVA_INSTALL: InstallLocations = InstallLocations {
 };
 
 fn decompiler_dir() -> PathBuf {
-    crate::indexer::xdg_cache_base()
+    crate::util::xdg_cache_base()
         .join("javak-lsp")
         .join("decompiler")
 }
 
 fn decompiled_dir() -> PathBuf {
-    crate::indexer::xdg_cache_base()
+    crate::util::xdg_cache_base()
         .join("javak-lsp")
         .join("decompiled")
 }
@@ -175,7 +175,7 @@ fn is_decompilable(jar: &Path) -> bool {
 /// Where the decompiled sources of `jar` are cached: one file per jar version.
 fn decompiled_jar_path(jar: &Path) -> Option<PathBuf> {
     let stem = jar.file_stem()?.to_string_lossy().into_owned();
-    let fingerprint = crate::jar_extract::jar_fingerprint(jar)?;
+    let fingerprint = crate::indexer::library::jar_fingerprint(jar)?;
     Some(decompiled_dir().join(format!("{stem}-{fingerprint:016x}-decompiled-sources.jar")))
 }
 

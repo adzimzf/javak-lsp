@@ -415,6 +415,9 @@ pub(crate) struct DependencyManifest {
     pub(crate) saved_at: u64,
 }
 
+// `jars` and `covers_whole_classpath` serve a scan of the shared Gradle
+// cache, which this server does not do yet; their rules are tested.
+#[allow(dead_code)]
 impl DependencyManifest {
     /// Compiled jars that still exist on disk.
     pub(crate) fn jars(&self) -> Vec<PathBuf> {
@@ -585,7 +588,7 @@ fn manifest_path(root: &Path) -> PathBuf {
 }
 
 fn dependencies_cache_dir() -> PathBuf {
-    crate::indexer::xdg_cache_base()
+    crate::util::xdg_cache_base()
         .join("javak-lsp")
         .join("dependencies")
 }

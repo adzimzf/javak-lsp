@@ -1,5 +1,11 @@
 //! The LSP server: every request is answered out of the parser's view of
-//! the open files.
+//! the open files and the libraries they name. How the protocol names a
+//! language is behind [`LanguageProtocol`], implemented in `java` and
+//! `kotlin`; dependency sync runs from [`dependencies`].
+
+mod dependencies;
+pub mod java;
+pub mod kotlin;
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -9,17 +15,39 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
+use crate::feature::features;
 use crate::indexer::Indexer;
-use crate::parser::treesitter::Language;
+use crate::language::Language;
 use crate::parser::{Fold, Kind, Outline, Position};
+use dependencies::DependencySync;
+
+/// How the protocol names a language.
+pub trait LanguageProtocol: Send + Sync {
+    /// The `languageId` a client opens its documents with, and the
+    /// language of the code blocks the server answers with.
+    fn language_id(&self) -> &'static str;
+}
+
+/// The protocol names of a language.
+pub fn protocol(language: Language) -> &'static dyn LanguageProtocol {
+    match language {
+        Language::Java => &java::Java,
+        Language::Kotlin => &kotlin::Kotlin,
+    }
+}
 
 pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
-    Backend { indexer, client }
+    Backend {
+        indexer,
+        client,
+        dependencies: Arc::new(DependencySync::default()),
+    }
 }
 
 pub struct Backend {
     indexer: Arc<Indexer>,
     client: Client,
+    dependencies: Arc<DependencySync>,
 }
 
 impl Backend {
@@ -94,18 +122,33 @@ fn at_name(at: Position) -> Range {
     Range { start, end: start }
 }
 
+/// The language of an opened document: the client's language id, else
+/// the file's extension, else Java.
 fn language_of(id: &str, uri: &Url) -> Language {
-    match id {
-        "kotlin" => Language::Kotlin,
-        "java" => Language::Java,
-        _ if uri.as_str().ends_with(".kt") || uri.as_str().ends_with(".kts") => Language::Kotlin,
-        _ => Language::Java,
-    }
+    Language::ALL
+        .into_iter()
+        .find(|language| protocol(*language).language_id() == id)
+        .or_else(|| Language::of_path(uri.path()))
+        .unwrap_or(Language::Java)
 }
+
+/// The build files whose change can change the dependencies.
+const BUILD_FILE_GLOBS: &[&str] = &[
+    "**/build.gradle",
+    "**/build.gradle.kts",
+    "**/settings.gradle",
+    "**/settings.gradle.kts",
+    "**/gradle.properties",
+    "**/gradle-wrapper.properties",
+    "**/*.versions.toml",
+    "**/pom.xml",
+];
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        self.dependencies
+            .configure(params.initialization_options.as_ref());
         if !self.indexer.workspace_pinned.load(Ordering::Relaxed) {
             if let Some(root) = params
                 .root_uri
@@ -117,8 +160,13 @@ impl LanguageServer for Backend {
         }
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                text_document_sync: Some(TextDocumentSyncCapability::Options(
+                    TextDocumentSyncOptions {
+                        open_close: Some(true),
+                        change: Some(TextDocumentSyncKind::FULL),
+                        save: Some(TextDocumentSyncSaveOptions::Supported(true)),
+                        ..TextDocumentSyncOptions::default()
+                    },
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
@@ -152,6 +200,57 @@ impl LanguageServer for Backend {
             },
             ..InitializeResult::default()
         })
+    }
+
+    async fn initialized(&self, _: InitializedParams) {
+        let watchers = BUILD_FILE_GLOBS
+            .iter()
+            .map(|glob| FileSystemWatcher {
+                glob_pattern: GlobPattern::String((*glob).to_owned()),
+                kind: None,
+            })
+            .collect();
+        let registration = Registration {
+            id: "javak-lsp-build-files".to_owned(),
+            method: "workspace/didChangeWatchedFiles".to_owned(),
+            register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                watchers,
+            })
+            .ok(),
+        };
+        let indexer = Arc::clone(&self.indexer);
+        let client = self.client.clone();
+        let dependencies = Arc::clone(&self.dependencies);
+        // Registering waits on the client; the sync does not.
+        tokio::spawn(async move {
+            let _ = client.register_capability(vec![registration]).await;
+        });
+        dependencies.start(indexer, self.client.clone());
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let build_file_changed = params.changes.iter().any(|change| {
+            change
+                .uri
+                .to_file_path()
+                .is_ok_and(|path| DependencySync::is_build_file(&path))
+        });
+        if build_file_changed {
+            self.dependencies
+                .start(Arc::clone(&self.indexer), self.client.clone());
+        }
+    }
+
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        let is_build_file = params
+            .text_document
+            .uri
+            .to_file_path()
+            .is_ok_and(|path| DependencySync::is_build_file(&path));
+        if is_build_file {
+            self.dependencies
+                .start(Arc::clone(&self.indexer), self.client.clone());
+        }
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -234,6 +333,13 @@ impl LanguageServer for Backend {
         params: request::GotoTypeDefinitionParams,
     ) -> Result<Option<request::GotoTypeDefinitionResponse>> {
         let at = params.text_document_position_params;
+        let language = self
+            .indexer
+            .language(&at.text_document.uri)
+            .unwrap_or(Language::Java);
+        if !features(language).answers_type_definition() {
+            return Ok(None);
+        }
         let snapshot = self.indexer.snapshot();
         let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position))
         else {
@@ -255,12 +361,15 @@ impl LanguageServer for Backend {
         let at = params.text_document_position_params;
         let snapshot = self.indexer.snapshot();
         let found = snapshot.declaration_at(&at.text_document.uri, cursor(at.position));
-        let Some(signature) = found.as_ref().and_then(|found| snapshot.signature_of(found)) else {
+        let Some(found) = found else {
+            return Ok(None);
+        };
+        let Some(signature) = snapshot.signature_of(&found) else {
             return Ok(None);
         };
         Ok(Some(Hover {
             contents: HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
-                language: "java".to_owned(),
+                language: protocol(found.file.language).language_id().to_owned(),
                 value: signature,
             })),
             range: None,
@@ -291,8 +400,13 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
-        let places = snapshot
-            .uses_of(&found)
+        let mut uses = snapshot.uses_of(&found);
+        for also in features(found.file.language).also_referenced(&snapshot, &found) {
+            uses.extend(snapshot.uses_of(&also));
+        }
+        uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
+        uses.dedup();
+        let places = uses
             .into_iter()
             .map(|(uri, at)| Location {
                 uri: uri.clone(),
@@ -312,7 +426,7 @@ impl LanguageServer for Backend {
         let Some(file) = snapshot.file(&uri) else {
             return Ok(None);
         };
-        if let Some(places) = crate::highlight::special(&snapshot, file, cursor(at.position)) {
+        if let Some(places) = crate::feature::highlight::special(&snapshot, file, cursor(at.position)) {
             return Ok(Some(places.into_iter().map(highlighted).collect()));
         }
         let Some(found) = snapshot.declaration_at(&uri, cursor(at.position)) else {
@@ -367,7 +481,7 @@ impl LanguageServer for Backend {
         let Some(file) = snapshot.file(&at.text_document.uri) else {
             return Ok(None);
         };
-        let Some(help) = crate::signature::help_at(&snapshot, file, cursor(at.position)) else {
+        let Some(help) = crate::feature::signature::help_at(&snapshot, file, cursor(at.position)) else {
             return Ok(None);
         };
         let label = format!("{}({})", help.name, help.parameters.join(", "));
@@ -397,12 +511,13 @@ impl LanguageServer for Backend {
         let Some(file) = snapshot.file(&at.text_document.uri) else {
             return Ok(None);
         };
-        let language = self
-            .indexer
-            .language(&at.text_document.uri)
-            .unwrap_or(Language::Java);
-        let syntax = self.indexer.syntax(language);
-        let offers = crate::completion::offers(&snapshot, syntax, file, cursor(at.position));
+        let implied = self.indexer.implied_package(&at.text_document.uri);
+        let offers = crate::feature::completion::offers(
+            &snapshot,
+            file,
+            cursor(at.position),
+            implied.as_deref(),
+        );
         Ok(Some(CompletionResponse::Array(
             offers
                 .into_iter()
@@ -498,5 +613,8 @@ fn symbol_kind(kind: Kind) -> SymbolKind {
         Kind::Constant => SymbolKind::CONSTANT,
         Kind::Method => SymbolKind::METHOD,
         Kind::Constructor => SymbolKind::CONSTRUCTOR,
+        Kind::Property => SymbolKind::PROPERTY,
+        Kind::Function => SymbolKind::FUNCTION,
+        Kind::Object => SymbolKind::OBJECT,
     }
 }
