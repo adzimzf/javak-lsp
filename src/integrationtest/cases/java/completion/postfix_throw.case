@@ -6,3 +6,4 @@ public class Test {
 		e.throw$0	}
 }
 //= expected
+(nothing)

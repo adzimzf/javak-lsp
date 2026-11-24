@@ -114,6 +114,7 @@ impl Type {
 pub type Bindings = HashMap<String, Type>;
 
 /// A declaration the server found, and where.
+#[derive(Clone)]
 pub struct Found<'a> {
     pub file: &'a FileView,
     /// The declaration itself.
@@ -1370,18 +1371,18 @@ pub struct Import {
 }
 
 impl Import {
-    fn last_segment(&self) -> &str {
+    pub(crate) fn last_segment(&self) -> &str {
         last_segment(&self.name)
     }
 
     /// Everything before the last segment: the package of a type import,
     /// the type of a static member import.
-    fn qualifier(&self) -> &str {
+    pub(crate) fn qualifier(&self) -> &str {
         self.name.rsplit_once('.').map_or("", |(before, _)| before)
     }
 }
 
-fn imports(file: &FileView) -> Vec<Import> {
+pub(crate) fn imports(file: &FileView) -> Vec<Import> {
     file.tree
         .all("import_declaration")
         .map(|declaration| {

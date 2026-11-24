@@ -120,6 +120,38 @@ impl Libraries {
             .unwrap_or_default()
     }
 
+    /// The simple names of the types whose name starts with `prefix`,
+    /// whatever their case, sorted.
+    pub fn types_starting(&self, prefix: &str) -> Vec<String> {
+        let Ok(indexed) = self.by_name.read() else {
+            return Vec::new();
+        };
+        let prefix = prefix.to_lowercase();
+        let mut found: Vec<String> = indexed
+            .types
+            .keys()
+            .filter(|name| name.to_lowercase().starts_with(&prefix))
+            .cloned()
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// The simple names of the types the files of `package` declare.
+    pub fn types_in_package(&self, package: &str) -> Vec<String> {
+        let Ok(indexed) = self.by_name.read() else {
+            return Vec::new();
+        };
+        let mut found: Vec<String> = indexed
+            .types
+            .iter()
+            .filter(|(_, files)| files.iter().any(|file| file.package == package))
+            .map(|(name, _)| name.clone())
+            .collect();
+        found.sort();
+        found
+    }
+
     /// The top-level functions whose key ([`super::SourceLayout::library_functions`])
     /// starts with `prefix`, each with the files declaring it.
     pub fn functions_starting(&self, prefix: &str) -> Vec<(String, Vec<LibraryFile>)> {

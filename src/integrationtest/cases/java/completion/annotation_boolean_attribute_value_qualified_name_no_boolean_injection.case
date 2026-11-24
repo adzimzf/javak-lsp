@@ -6,3 +6,5 @@ public class Test {
     public static final boolean blah = false;
 }
 //= expected
+blah
+class

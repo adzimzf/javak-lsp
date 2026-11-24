@@ -5,3 +5,4 @@ public class Test {
 		identifier.assert$0	}
 }
 //= expected
+(nothing)

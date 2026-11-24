@@ -6,3 +6,4 @@ public class Test {
 		foo.sysout$0	}
 }
 //= expected
+(nothing)

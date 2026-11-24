@@ -4,3 +4,4 @@ public interface Test {}
 public interface InnerTest{}
 $0
 //= expected
+interface

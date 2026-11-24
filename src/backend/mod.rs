@@ -604,6 +604,10 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
+        // A library's declaration is not the workspace's to rename.
+        if found.file.library {
+            return Ok(None);
+        }
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut places: Vec<(&Url, Position)> = Vec::new();
         for tied in snapshot.tied_to(&found) {

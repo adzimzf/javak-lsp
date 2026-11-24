@@ -4,3 +4,4 @@ package foo.bar;
 public class BaseTest extends AbstractTe$0 {
 }
 //= expected
+(nothing)

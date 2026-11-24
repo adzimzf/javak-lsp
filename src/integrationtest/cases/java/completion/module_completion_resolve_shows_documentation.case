@@ -5,3 +5,4 @@ import module java.$0
 
 public class ImportModule {}
 //= expected
+(nothing)

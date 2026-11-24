@@ -11,3 +11,4 @@ public class TestSuper {
 	public void test(String x, int y){}
 }
 //= expected
+test

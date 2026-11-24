@@ -3,3 +3,4 @@ package org.sample;
 import java.util.List$0
 public class Test {}
 //= expected
+List

@@ -4,3 +4,4 @@ public interface Test {
 ctor$0
 }
 //= expected
+(nothing)

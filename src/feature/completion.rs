@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+mod java;
+
 use crate::language::Language;
 use crate::parser::{syntax, Position, Syn};
 use crate::feature::features;
@@ -67,9 +69,36 @@ pub fn offers(
             );
         }
         offers
+    } else if file.language == Language::Java {
+        java::contextual(&java::Context {
+            snapshot: &world,
+            file: probe_file,
+            written: file,
+            path: path.clone(),
+            name,
+            prefix: &prefix,
+            dotted: dotted.as_deref(),
+        })
     } else {
         contextual(&world, probe_file, &path, name, &prefix, dotted.as_deref())
     };
+    if file.language == Language::Java {
+        offers.retain(|offer| {
+            prefix.is_empty()
+                || java::matches(offer, &prefix)
+                || dotted.as_deref().is_some_and(|dotted| java::starts_with(&offer.name, dotted))
+        });
+        // One offer per name, at the best place any of them has.
+        let mut kept: Vec<Offer> = Vec::new();
+        for offer in offers {
+            match kept.iter_mut().find(|known| known.name == offer.name) {
+                Some(known) if offer.rank < known.rank => known.rank = offer.rank,
+                Some(_) => {}
+                None => kept.push(offer),
+            }
+        }
+        return kept;
+    }
     offers.retain(|offer| {
         prefix.is_empty()
             || offer.name.starts_with(&prefix)
@@ -381,6 +410,10 @@ fn visible(
         let members = members_of(type_of.node);
         for (index, (member, named)) in members.iter().enumerate() {
             let is_static = member.text.contains("static") || member.kind == "enum_constant";
+            // A constructor is named as its type is, not as a member.
+            if matches!(member.kind.as_str(), "constructor_declaration" | "compact_constructor_declaration") {
+                continue;
+            }
             let offered = match wanted {
                 Wanted::Static => is_static,
                 Wanted::Instance => member.kind != "enum_constant",
@@ -596,10 +629,39 @@ fn probe(text: &str, at: Position, prefix: &str) -> String {
     let column = (at.column as usize).min(characters.len());
     let start = column - prefix.chars().count();
     let before: String = characters[..start].iter().collect();
-    let after: String = characters[column..].iter().collect();
-    *line = format!("{before}{PROBE}{after}");
+    // The cursor may sit inside a word: the rest of a name is the name
+    // being replaced (`A|rrays.equals(…)`), a keyword stays where it is
+    // (`|package com.demo;`).
+    let rest = characters[column..]
+        .iter()
+        .take_while(|character| is_name_character(**character))
+        .count();
+    let word: String = characters[column..column + rest].iter().collect();
+    let (skipped, separator) = if rest == 0 {
+        (0, "")
+    } else if JAVA_KEYWORDS.contains(&word.as_str()) {
+        (0, " ")
+    } else {
+        (rest, "")
+    };
+    let after: String = characters[column + skipped..].iter().collect();
+    *line = format!("{before}{PROBE}{separator}{after}");
     lines.join("\n") + "\n"
 }
+
+/// The words a name cannot be, so a cursor right before one is not in a
+/// name.
+const JAVA_KEYWORDS: &[&str] = &[
+    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class",
+    "const", "continue", "default", "do", "double", "else", "enum", "extends", "final",
+    "finally", "float", "for", "goto", "if", "implements", "import", "instanceof", "int",
+    "interface", "long", "native", "new", "package", "private", "protected", "public",
+    "return", "short", "static", "strictfp", "super", "switch", "synchronized", "this",
+    "throw", "throws", "transient", "try", "void", "volatile", "while", "true", "false",
+    "null", "var", "record", "sealed", "non", "permits", "yield", "fun", "val", "object",
+    "companion", "data", "when", "is", "in", "as", "typealias", "override", "open",
+    "internal", "lateinit", "suspend", "inline",
+];
 
 /// Where the placeholder ended up.
 fn probe_node(tree: &Syn) -> Option<&Syn> {

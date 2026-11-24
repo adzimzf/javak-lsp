@@ -14,3 +14,9 @@ public class Foo {
     }
 }
 //= expected
+List
+args
+stream
+streams
+Foo
+Stream

@@ -3,3 +3,4 @@ public class Foo {
   boolean getThing(@Deprec$0
 }
 //= expected
+(nothing)
