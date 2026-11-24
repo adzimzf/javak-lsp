@@ -1,0 +1,17 @@
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+  static String parse(String html, Object parser) { return html; }
+  static String parse(String html) { return html; }
+  static String join(String... parts) { return ""; }
+
+  void run(String test) {
+    parse(test);
+    parse(test, null);
+    join();
+    join(test, test);
+  }
+}
+//= expected
+(nothing)

@@ -20,7 +20,7 @@
 use tree_sitter::Node;
 
 use super::super::treesitter::at;
-use super::super::Finding;
+use super::super::{Finding, Syn};
 use super::GRAMMAR;
 
 pub(super) fn syntax_errors(text: &str) -> Vec<Finding> {
@@ -294,6 +294,45 @@ fn token_before(node: Node) -> Option<Node> {
         }
         current = current.parent()?;
     }
+}
+
+/// A language feature and the first Java source level that has it, as
+/// the Eclipse compiler names it.
+struct Feature {
+    name: &'static str,
+    since: u32,
+    /// Whether `node` is written with the feature.
+    written_by: fn(&Syn) -> bool,
+}
+
+const FEATURES: &[Feature] = &[Feature {
+    name: "Text Blocks",
+    since: 15,
+    written_by: |node| {
+        node.kind == "string_literal"
+            && node.children.first().is_some_and(|quote| quote.kind == "\"\"\"")
+    },
+}];
+
+/// Every use of a feature the source level `level` does not have, at
+/// where it is written: `The Java feature 'Text Blocks' is only available
+/// with source level 15 and above`.
+pub(super) fn above_java_level(tree: &Syn, level: u32) -> Vec<Finding> {
+    tree.walk()
+        .into_iter()
+        .filter_map(|node| {
+            let feature = FEATURES
+                .iter()
+                .find(|feature| level < feature.since && (feature.written_by)(node))?;
+            Some(Finding {
+                at: node.start,
+                message: format!(
+                    "The Java feature '{}' is only available with source level {} and above",
+                    feature.name, feature.since
+                ),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

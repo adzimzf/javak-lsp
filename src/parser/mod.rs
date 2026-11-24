@@ -124,6 +124,11 @@ impl Syn {
 pub trait Syntax: Send + Sync {
     /// Where the parser cannot make sense of the text.
     fn syntax_errors(&self, text: &str) -> Vec<Finding>;
+    /// What `tree` writes that the project's Java source level `level`
+    /// does not have yet: a text block below Java 15.
+    fn above_java_level(&self, _tree: &Syn, _level: u32) -> Vec<Finding> {
+        Vec::new()
+    }
     /// The package the file declares, if it declares one.
     fn package(&self, text: &str) -> Option<String>;
     fn outline(&self, text: &str) -> Vec<Outline>;

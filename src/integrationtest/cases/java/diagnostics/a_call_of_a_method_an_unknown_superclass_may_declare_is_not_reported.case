@@ -1,0 +1,14 @@
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+import org.library.Base;
+
+class Ma$0in extends Base {
+  String parse(String html, String parser) { return html; }
+
+  void run(String test) {
+    parse(test);
+  }
+}
+//= expected
+(nothing)

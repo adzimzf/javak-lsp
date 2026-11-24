@@ -17,5 +17,5 @@ public class Za$0mzam {
     return "";
   }
 }
-//= expected (pending)
+//= expected
 /src/main/java/org/jsoup/azim/Zamzam.java:10:5  The method parse(String, Parser) in the type Zamzam is not applicable for the arguments (String)

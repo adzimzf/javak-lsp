@@ -1,5 +1,6 @@
-//! What the server knows: the open files, each parsed once, where the
-//! workspace is, and the sources of its libraries ([`library`]).
+//! What the server knows: the open files, each parsed once, the
+//! workspace's other source files as they are on disk, where the workspace
+//! is, and the sources of its libraries ([`library`]).
 //!
 //! Where a language keeps its sources and what a library file of it
 //! declares is behind [`SourceLayout`], implemented in `java` and `kotlin`.
@@ -9,9 +10,10 @@ pub mod kotlin;
 pub mod library;
 
 use std::collections::HashSet;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use dashmap::DashMap;
 use tower_lsp::lsp_types::{Location, Position, Range, SymbolInformation, SymbolKind, Url};
@@ -54,11 +56,44 @@ pub fn layout(language: Language) -> &'static dyn SourceLayout {
 const FILES_PER_NAME: usize = 4;
 const SUPERTYPE_ROUNDS: usize = 4;
 
+/// Directories never searched for sources: version control, IDE state and
+/// build output.
+pub const NOT_SOURCES: &[&str] = &[
+    ".git", ".gradle", ".idea", ".kotlin", "build", "target", "out", "node_modules",
+];
+
+/// Calls `visit` with every file below `root`, skipping [`NOT_SOURCES`] and
+/// hidden directories, until it breaks.
+pub fn walk_sources(root: &Path, mut visit: impl FnMut(&Path) -> ControlFlow<()>) {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if file_type.is_dir() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !NOT_SOURCES.contains(&name.as_str()) && !name.starts_with('.') {
+                    pending.push(path);
+                }
+            } else if file_type.is_file() && visit(&path).is_break() {
+                return;
+            }
+        }
+    }
+}
+
 /// An open file, parsed when it is opened or changed.
 pub struct Document {
     pub language: Language,
     pub text: Arc<String>,
     pub tree: Arc<Syn>,
+    /// The names the file declares, listed the first time they are asked.
+    declared: OnceLock<Vec<String>>,
 }
 
 pub struct Indexer {
@@ -67,6 +102,13 @@ pub struct Indexer {
     pub workspace_pinned: AtomicBool,
     pub workspace_root: OnceLock<PathBuf>,
     documents: DashMap<Url, Document>,
+    /// The workspace's source files as they are on disk: what the server
+    /// knows of a file no editor has open. Read once the workspace root is
+    /// known ([`Self::read_workspace`]), again for each file the client says
+    /// changed ([`Self::reread`]).
+    on_disk: DashMap<Url, Document>,
+    /// The Java source level the project's build file names, once read.
+    java_level: RwLock<Option<u32>>,
     pub libraries: Arc<Libraries>,
 }
 
@@ -82,6 +124,8 @@ impl Indexer {
             workspace_pinned: AtomicBool::new(false),
             workspace_root: OnceLock::new(),
             documents: DashMap::new(),
+            on_disk: DashMap::new(),
+            java_level: RwLock::new(None),
             libraries: Arc::new(Libraries::default()),
         }
     }
@@ -91,26 +135,99 @@ impl Indexer {
     }
 
     pub fn open(&self, uri: Url, text: String, language: Language) {
-        let tree = syntax(language).tree(&text);
-        self.documents.insert(
-            uri,
-            Document {
-                language,
-                text: Arc::new(text),
-                tree: Arc::new(tree),
-            },
-        );
+        self.documents.insert(uri, Document::parsed(text, language));
+    }
+
+    /// Reads every source file below the workspace root, as the build
+    /// would compile it: a name the editor has not opened still resolves.
+    /// Returns how many files were read; a root that is not a directory on
+    /// disk has none.
+    pub fn read_workspace(&self) -> usize {
+        let Some(root) = self.workspace_root.get().filter(|root| root.is_dir()) else {
+            return 0;
+        };
+        let mut files = Vec::new();
+        walk_sources(root, |path| {
+            if path.to_str().and_then(Language::of_path).is_some() {
+                files.extend(Url::from_file_path(path).ok());
+            }
+            ControlFlow::Continue(())
+        });
+        // Parsing is most of the time: one share of the files per core.
+        let threads = std::thread::available_parallelism().map_or(4, std::num::NonZero::get);
+        let share = files.len().div_ceil(threads).max(1);
+        std::thread::scope(|scope| {
+            let readers: Vec<_> = files
+                .chunks(share)
+                .map(|chunk| scope.spawn(|| chunk.iter().filter(|uri| self.reread(uri)).count()))
+                .collect();
+            readers
+                .into_iter()
+                .map(|reader| reader.join().unwrap_or(0))
+                .sum()
+        })
+    }
+
+    /// Lists what every workspace file declares, ahead of the first rename
+    /// that asks ([`Self::is_declared`]): that list is a parse of its own.
+    pub fn list_declared_names(&self) {
+        for document in self.on_disk.iter() {
+            document.declared.get_or_init(|| syntax(document.language).declared_names(&document.text));
+        }
+    }
+
+    /// Reads one source file of the workspace again, or forgets it where
+    /// it is gone. Returns whether the file is a source file and is there.
+    pub fn reread(&self, uri: &Url) -> bool {
+        let Ok(path) = uri.to_file_path() else {
+            return false;
+        };
+        let language = path.to_str().and_then(Language::of_path);
+        let text = language.and_then(|_| std::fs::read_to_string(&path).ok());
+        match language.zip(text) {
+            Some((language, text)) => {
+                self.on_disk
+                    .insert(uri.clone(), Document::parsed(text, language));
+                true
+            }
+            None => {
+                self.on_disk.remove(uri);
+                false
+            }
+        }
+    }
+
+    /// Reads the Java source level the build file at the workspace root
+    /// names (`<release>11</release>`, `sourceCompatibility = 1.8`).
+    pub fn read_java_level(&self) {
+        let level = self
+            .workspace_root
+            .get()
+            .and_then(|root| crate::dependency_sync::declared_java_version(root))
+            .and_then(|level| level.parse().ok());
+        if let Ok(mut known) = self.java_level.write() {
+            *known = level;
+        }
+    }
+
+    /// The Java source level of the project, where its build file names one.
+    pub fn java_level(&self) -> Option<u32> {
+        self.java_level.read().ok().and_then(|level| *level)
     }
 
     pub fn change(&self, uri: &Url, text: String) {
         if let Some(mut document) = self.documents.get_mut(uri) {
-            document.tree = Arc::new(syntax(document.language).tree(&text));
-            document.text = Arc::new(text);
+            *document = Document::parsed(text, document.language);
         }
     }
 
     pub fn close(&self, uri: &Url) {
         self.documents.remove(uri);
+    }
+
+    /// The files an editor has open.
+    pub fn open_uris(&self) -> Vec<Url> {
+        self.documents.iter().map(|document| document.key().clone()).collect()
     }
 
     pub fn text(&self, uri: &Url) -> Option<String> {
@@ -157,6 +274,39 @@ impl Indexer {
     }
 }
 
+impl Document {
+    fn parsed(text: String, language: Language) -> Self {
+        let tree = syntax(language).tree(&text);
+        Self {
+            language,
+            text: Arc::new(text),
+            tree: Arc::new(tree),
+            declared: OnceLock::new(),
+        }
+    }
+
+    /// Whether the file declares `name`. A file that does not spell the
+    /// name is not read for it.
+    fn declares(&self, name: &str) -> bool {
+        self.text.contains(name)
+            && self
+                .declared
+                .get_or_init(|| syntax(self.language).declared_names(&self.text))
+                .iter()
+                .any(|declared| declared == name)
+    }
+
+    fn view(&self, uri: &Url) -> FileView {
+        FileView {
+            uri: uri.clone(),
+            language: self.language,
+            text: self.text.clone(),
+            tree: self.tree.clone(),
+            library: false,
+        }
+    }
+}
+
 /// `com/demo/Main.java` as `com.demo`; `None` where a directory is not an
 /// identifier or there is none.
 fn dotted_directories(path: &str) -> Option<String> {
@@ -187,15 +337,12 @@ impl Indexer {
         let mut files: Vec<FileView> = self
             .documents
             .iter()
-            .map(|document| FileView {
-                uri: document.key().clone(),
-                language: document.language,
-                text: document.text.clone(),
-                tree: document.tree.clone(),
-                library: false,
-            })
+            .map(|document| document.view(document.key()))
             .collect();
+        // The library files the open ones name are read up front; what a
+        // file on disk names is read when an answer needs it.
         let libraries = self.library_files_named_by(&files);
+        files.extend(self.closed_documents().map(|document| document.view(document.key())));
         files.extend(libraries);
         Snapshot::new(files).reading(Some(Arc::clone(&self.libraries)))
     }
@@ -302,29 +449,48 @@ pub(crate) fn type_names(tree: &Syn, supertypes_only: bool) -> Vec<String> {
 }
 
 impl Indexer {
-    /// Whether any open file declares `name`: a name no source of the
-    /// workspace declares belongs to a library, and is not the
-    /// workspace's to rename.
-    pub fn is_declared(&self, name: &str) -> bool {
-        self.documents.iter().any(|document| {
-            syntax(document.language)
-                .declared_names(&document.text)
-                .iter()
-                .any(|declared| declared == name)
-        })
+    /// The files on disk no editor has open: an open file's text is the
+    /// editor's.
+    fn closed_documents(
+        &self,
+    ) -> impl Iterator<Item = dashmap::mapref::multiple::RefMulti<'_, Url, Document>> {
+        self.on_disk
+            .iter()
+            .filter(|document| !self.documents.contains_key(document.key()))
     }
 
-    /// Every type of every open file whose name the query matches.
+    /// Every source file of the workspace: the open ones, then the others
+    /// as they are on disk.
+    fn workspace_documents(&self) -> Vec<(Url, Language, Arc<String>)> {
+        self.documents
+            .iter()
+            .chain(self.closed_documents())
+            .map(|document| (document.key().clone(), document.language, document.text.clone()))
+            .collect()
+    }
+
+    /// Whether any source file of the workspace declares `name`: a name no
+    /// source of the workspace declares belongs to a library, and is not
+    /// the workspace's to rename.
+    pub fn is_declared(&self, name: &str) -> bool {
+        self.documents
+            .iter()
+            .chain(self.closed_documents())
+            .any(|document| document.declares(name))
+    }
+
+    /// Every type of every source file of the workspace whose name the
+    /// query matches.
     pub fn types_matching(&self, query: &str) -> Vec<SymbolInformation> {
         let mut found = Vec::new();
-        for document in self.documents.iter() {
-            let outline = syntax(document.language).outline(&document.text);
+        for (uri, language, text) in self.workspace_documents() {
+            let outline = syntax(language).outline(&text);
             for entry in outline {
                 let is_type = matches!(entry.kind, Kind::Class | Kind::Interface | Kind::Enum);
                 if !is_type || !query::matches(query, &entry.name) {
                     continue;
                 }
-                found.push(located(document.key().clone(), &entry));
+                found.push(located(uri.clone(), &entry));
             }
         }
         found
@@ -357,6 +523,32 @@ fn located(uri: Url, entry: &crate::parser::Outline) -> SymbolInformation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_workspace_is_read_from_disk_and_an_open_file_is_the_editors() {
+        let directory = tempfile::tempdir().unwrap();
+        let sources = directory.path().join("src/main/java/com/demo");
+        std::fs::create_dir_all(&sources).unwrap();
+        std::fs::create_dir_all(directory.path().join("target/classes")).unwrap();
+        std::fs::write(sources.join("Greeter.java"), "class Greeter {}").unwrap();
+        std::fs::write(sources.join("notes.txt"), "not a source").unwrap();
+        std::fs::write(directory.path().join("target/classes/Built.java"), "").unwrap();
+        let indexer = Indexer::new();
+        indexer.workspace_root.set(directory.path().to_owned()).unwrap();
+        assert_eq!(indexer.read_workspace(), 1, "build output and other files are not read");
+
+        let uri = Url::from_file_path(sources.join("Greeter.java")).unwrap();
+        indexer.open(uri.clone(), "class Greeter { int edited; }".to_owned(), Language::Java);
+        let snapshot = indexer.snapshot();
+        let greeters: Vec<_> = snapshot.files.iter().filter(|file| file.uri == uri).collect();
+        assert_eq!(greeters.len(), 1, "an open file is in the snapshot once");
+        assert!(greeters[0].text.contains("edited"), "with the editor's text");
+
+        std::fs::remove_file(sources.join("Greeter.java")).unwrap();
+        indexer.close(&uri);
+        assert!(!indexer.reread(&uri));
+        assert!(indexer.snapshot().files.iter().all(|file| file.uri != uri));
+    }
 
     #[test]
     fn a_package_is_the_directories_below_a_source_root() {

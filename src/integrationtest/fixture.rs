@@ -12,8 +12,17 @@
 //!
 //! A `//- /path` line starts a file; `$0` marks where the request is asked
 //! and is removed from the text. A fixture has exactly one `$0`.
+//!
+//! A source file is opened in the editor unless its header ends in
+//! `(not open)`: then, like a build file, it is only on disk, where the
+//! server has to find it the way it finds the rest of a project.
+//!
+//! ```text
+//! //- /com/demo/Greeter.java (not open)
+//! ```
 
 const FILE_HEADER: &str = "//- /";
+const NOT_OPEN: &str = "(not open)";
 const CURSOR: &str = "$0";
 
 pub(super) struct Fixture {
@@ -25,6 +34,16 @@ pub(super) struct FixtureFile {
     /// Path below the workspace root, `/`-separated.
     pub(super) path: String,
     pub(super) text: String,
+    /// Marked `(not open)`: on disk, and never opened in the editor.
+    not_open: bool,
+}
+
+impl FixtureFile {
+    /// Whether the editor opens the file: a source file not marked
+    /// `(not open)`. A build file (`pom.xml`) is never opened.
+    pub(super) fn is_opened(&self) -> bool {
+        !self.not_open && crate::language::Language::of_path(&self.path).is_some()
+    }
 }
 
 /// A zero-based LSP position in one of the fixture's files.
@@ -38,10 +57,13 @@ impl Fixture {
     pub(super) fn parse(source: &str) -> Self {
         let mut files: Vec<FixtureFile> = Vec::new();
         for line in source.trim_start().lines() {
-            if let Some(path) = line.strip_prefix(FILE_HEADER) {
+            if let Some(header) = line.strip_prefix(FILE_HEADER) {
+                let header = header.trim();
+                let path = header.strip_suffix(NOT_OPEN);
                 files.push(FixtureFile {
-                    path: path.trim().to_owned(),
+                    path: path.unwrap_or(header).trim().to_owned(),
                     text: String::new(),
+                    not_open: path.is_some(),
                 });
                 continue;
             }

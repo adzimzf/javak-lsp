@@ -1,0 +1,17 @@
+//- /src/main/java/org/jsoup/parser/Parser.java (not open)
+package org.jsoup.parser;
+
+public class Parser {
+    public String defaultNamespace() { return ""; }
+}
+//- /src/main/java/org/jsoup/azim/Zamzam.java
+package org.jsoup.azim;
+import org.jsoup.parser.Parser;
+
+public class Zamzam {
+    public static String parse(String html, Par$0ser parser) {
+        return parser.defaultNamespace();
+    }
+}
+//= expected
+/src/main/java/org/jsoup/parser/Parser.java:3:14  public class Parser {

@@ -37,6 +37,10 @@ impl Syntax for Java {
         errors::syntax_errors(text)
     }
 
+    fn above_java_level(&self, tree: &Syn, level: u32) -> Vec<Finding> {
+        errors::above_java_level(tree, level)
+    }
+
     fn package(&self, text: &str) -> Option<String> {
         let tree = GRAMMAR.parse(text)?;
         let mut cursor = tree.root_node().walk();

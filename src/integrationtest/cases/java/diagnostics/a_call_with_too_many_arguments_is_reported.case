@@ -1,0 +1,12 @@
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+  int count() { return 0; }
+
+  void run(String test) {
+    this.count(test, 1);
+  }
+}
+//= expected
+/src/main/java/com/demo/Main.java:7:10  The method count() in the type Main is not applicable for the arguments (String, int)
