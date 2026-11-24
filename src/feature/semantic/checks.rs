@@ -78,7 +78,7 @@ impl Snapshot {
             return None;
         }
         let mut found = Vec::new();
-        self.members_where(&caller, &|_| true, &mut found, &mut 0);
+        self.members_where(&caller, super::Wanted::Every, &mut found, &mut 0);
         let mut methods = Methods::new();
         for member in found {
             // A member list holds the methods of the classes nested in it

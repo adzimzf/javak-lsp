@@ -92,6 +92,8 @@ pub struct Document {
     pub language: Language,
     pub text: Arc<String>,
     pub tree: Arc<Syn>,
+    /// The names the file declares, listed the first time they are asked.
+    declared: OnceLock<Vec<String>>,
 }
 
 pub struct Indexer {
@@ -166,6 +168,14 @@ impl Indexer {
         })
     }
 
+    /// Lists what every workspace file declares, ahead of the first rename
+    /// that asks ([`Self::is_declared`]): that list is a parse of its own.
+    pub fn list_declared_names(&self) {
+        for document in self.on_disk.iter() {
+            document.declared.get_or_init(|| syntax(document.language).declared_names(&document.text));
+        }
+    }
+
     /// Reads one source file of the workspace again, or forgets it where
     /// it is gone. Returns whether the file is a source file and is there.
     pub fn reread(&self, uri: &Url) -> bool {
@@ -207,8 +217,7 @@ impl Indexer {
 
     pub fn change(&self, uri: &Url, text: String) {
         if let Some(mut document) = self.documents.get_mut(uri) {
-            document.tree = Arc::new(syntax(document.language).tree(&text));
-            document.text = Arc::new(text);
+            *document = Document::parsed(text, document.language);
         }
     }
 
@@ -272,7 +281,19 @@ impl Document {
             language,
             text: Arc::new(text),
             tree: Arc::new(tree),
+            declared: OnceLock::new(),
         }
+    }
+
+    /// Whether the file declares `name`. A file that does not spell the
+    /// name is not read for it.
+    fn declares(&self, name: &str) -> bool {
+        self.text.contains(name)
+            && self
+                .declared
+                .get_or_init(|| syntax(self.language).declared_names(&self.text))
+                .iter()
+                .any(|declared| declared == name)
     }
 
     fn view(&self, uri: &Url) -> FileView {
@@ -452,12 +473,10 @@ impl Indexer {
     /// source of the workspace declares belongs to a library, and is not
     /// the workspace's to rename.
     pub fn is_declared(&self, name: &str) -> bool {
-        self.workspace_documents().iter().any(|(_, language, text)| {
-            syntax(*language)
-                .declared_names(text)
-                .iter()
-                .any(|declared| declared == name)
-        })
+        self.documents
+            .iter()
+            .chain(self.closed_documents())
+            .any(|document| document.declares(name))
     }
 
     /// Every type of every source file of the workspace whose name the

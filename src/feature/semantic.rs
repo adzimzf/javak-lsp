@@ -33,6 +33,37 @@ pub struct Snapshot {
     /// The types each file declares, by the address of its tree, listed
     /// once per snapshot: a library file is large, and asked often.
     declared_types: elsa::sync::FrozenMap<usize, Vec<TypePath>>,
+    /// The members of each type declaration asked about, by the address of
+    /// its node: [`members_of`] walks the whole body, and resolving one
+    /// name asks for the members of every class around it.
+    members: elsa::sync::FrozenMap<usize, Box<Members>>,
+    /// What [`Self::type_named`] answered, by the address of the file asked
+    /// from and the name: a name is resolved again for every class above
+    /// every use of it. The answer is the address of the declaring file
+    /// and the child indices leading to the declaration.
+    types_named: elsa::sync::FrozenMap<(usize, String), Box<Option<TypeAt>>>,
+}
+
+/// Where a type is declared: the address of its file, and the child
+/// indices from the file's root to the declaration.
+type TypeAt = (usize, Vec<u32>);
+
+/// Which members of a declaration are asked for.
+#[derive(Clone, Copy)]
+enum Wanted<'n> {
+    Named(&'n str),
+    Every,
+}
+
+/// A member of a declaration: its name, and the child indices that lead
+/// from the declaration to the member and to its name.
+type MemberPath = (String, Vec<u32>, Vec<u32>);
+
+/// The members of a declaration, in order, and where each name is among
+/// them.
+struct Members {
+    all: Vec<MemberPath>,
+    by_name: HashMap<String, Vec<usize>>,
 }
 
 /// A type a file declares: its name, and the child indices that lead to
@@ -106,6 +137,8 @@ impl Snapshot {
             libraries: None,
             read: elsa::sync::FrozenVec::new(),
             declared_types: elsa::sync::FrozenMap::new(),
+            members: elsa::sync::FrozenMap::new(),
+            types_named: elsa::sync::FrozenMap::new(),
         }
     }
 
@@ -130,6 +163,36 @@ impl Snapshot {
     }
 
     /// The same, reading what else it needs from `libraries`.
+    /// The members of `declaration` ([`members_of`]) that `wanted` asks
+    /// for, listed once per snapshot.
+    fn members_named_by<'a>(&self, declaration: &'a Syn, wanted: Wanted<'_>) -> Vec<(&'a Syn, &'a Syn)> {
+        let key = std::ptr::from_ref(declaration) as usize;
+        let listed = match self.members.get(&key) {
+            Some(listed) => listed,
+            None => {
+                let all = member_paths(declaration);
+                let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+                for (index, (name, _, _)) in all.iter().enumerate() {
+                    by_name.entry(name.clone()).or_default().push(index);
+                }
+                self.members.insert(key, Box::new(Members { all, by_name }))
+            }
+        };
+        let located = |(_, member, name): &MemberPath| {
+            Some((at_path(declaration, member)?, at_path(declaration, name)?))
+        };
+        match wanted {
+            Wanted::Named(name) => listed
+                .by_name
+                .get(name)
+                .into_iter()
+                .flatten()
+                .filter_map(|index| located(&listed.all[*index]))
+                .collect(),
+            Wanted::Every => listed.all.iter().filter_map(located).collect(),
+        }
+    }
+
     pub fn reading(mut self, libraries: Option<Arc<Libraries>>) -> Self {
         self.libraries = libraries;
         self
@@ -200,11 +263,30 @@ impl Snapshot {
     /// on its own (`java.lang`, `kotlin.collections`), then anything else
     /// the workspace or its libraries declare.
     pub fn type_named<'a>(&'a self, name: &str, from: &'a FileView) -> Option<Found<'a>> {
+        let key = (std::ptr::from_ref(from) as usize, name.to_owned());
+        let answer = match self.types_named.get(&key) {
+            Some(answer) => answer,
+            None => {
+                let found = self.type_named_uncached(name, from).and_then(|found| {
+                    let path = indices_to(&found.file.tree, found.node)?;
+                    Some((std::ptr::from_ref(found.file) as usize, path))
+                });
+                self.types_named.insert(key, Box::new(found))
+            }
+        };
+        let (file, path) = answer.as_ref()?;
+        let file = self
+            .every_file()
+            .find(|known| std::ptr::from_ref(*known) as usize == *file)?;
+        self.declared(file, at_path(&file.tree, path)?)
+    }
+
+    fn type_named_uncached<'a>(&'a self, name: &str, from: &'a FileView) -> Option<Found<'a>> {
         if let Some((qualifier, last)) = name.rsplit_once('.') {
             return self.type_qualified(qualifier, last, from);
         }
-        if let Some(found) = types_of(from).into_iter().find(|found| found.0 == name) {
-            return self.declared(from, found.1);
+        if let Some(declaration) = self.declared_type(from, name) {
+            return self.declared(from, declaration);
         }
         let imported = imports(from)
             .into_iter()
@@ -372,15 +454,15 @@ impl Snapshot {
         found: &mut Vec<Found<'a>>,
         depth: &mut usize,
     ) {
-        self.members_where(of, &|member| member == name, found, depth);
+        self.members_where(of, Wanted::Named(name), found, depth);
     }
 
-    /// Every member of this type and its supertypes whose name `wanted`
-    /// accepts, nearest first.
+    /// Every member of this type and its supertypes that `wanted` asks
+    /// for, nearest first.
     fn members_where<'a>(
         &'a self,
         of: &Found<'a>,
-        wanted: &dyn Fn(&str) -> bool,
+        wanted: Wanted<'_>,
         found: &mut Vec<Found<'a>>,
         depth: &mut usize,
     ) {
@@ -388,15 +470,13 @@ impl Snapshot {
             return;
         }
         *depth += 1;
-        for (member, identifier) in members_of(of.node) {
-            if wanted(&identifier.text) {
-                found.push(Found {
-                    file: of.file,
-                    node: member,
-                    name: identifier,
-                    bindings: of.bindings.clone(),
-                });
-            }
+        for (member, identifier) in self.members_named_by(of.node, wanted) {
+            found.push(Found {
+                file: of.file,
+                node: member,
+                name: identifier,
+                bindings: of.bindings.clone(),
+            });
         }
         for supertype in self.supertypes(of) {
             self.members_where(&supertype, wanted, found, depth);
@@ -1331,6 +1411,47 @@ pub fn members_of(declaration: &Syn) -> Vec<(&Syn, &Syn)> {
     members
 }
 
+/// [`members_of`] as paths from `declaration`, so a snapshot can keep them.
+fn member_paths(declaration: &Syn) -> Vec<MemberPath> {
+    let mut paths: HashMap<usize, Vec<u32>> = HashMap::new();
+    let mut pending = vec![(declaration, Vec::new())];
+    while let Some((node, path)) = pending.pop() {
+        for (index, child) in node.children.iter().enumerate() {
+            let mut below = path.clone();
+            below.push(index as u32);
+            pending.push((child, below));
+        }
+        paths.insert(std::ptr::from_ref(node) as usize, path);
+    }
+    let path_of = |node: &Syn| paths.get(&(std::ptr::from_ref(node) as usize)).cloned();
+    members_of(declaration)
+        .into_iter()
+        .filter_map(|(member, name)| Some((name.text.clone(), path_of(member)?, path_of(name)?)))
+        .collect()
+}
+
+/// The child indices that lead from `root` to `target`, a node of its tree:
+/// only the children spanning `target` are entered.
+fn indices_to(root: &Syn, target: &Syn) -> Option<Vec<u32>> {
+    if std::ptr::eq(root, target) {
+        return Some(Vec::new());
+    }
+    root.children.iter().enumerate().find_map(|(index, child)| {
+        if child.start > target.start || target.end > child.end {
+            return None;
+        }
+        let mut path = indices_to(child, target)?;
+        path.insert(0, index as u32);
+        Some(path)
+    })
+}
+
+/// The node the child indices `path` lead to from `root`.
+fn at_path<'a>(root: &'a Syn, path: &[u32]) -> Option<&'a Syn> {
+    path.iter()
+        .try_fold(root, |node, index| node.children.get(*index as usize))
+}
+
 /// A member the parser could not finish: where a call is still being
 /// typed, the declaration below it ends up inside an error — a parameter
 /// list with the method's name somewhere in front of it.
@@ -1741,17 +1862,20 @@ fn is_loop_or_switch(node: &Syn) -> bool {
 
 /// The identifier `at` is in, or the one that ends there.
 fn identifier_at(tree: &Syn, at: Position) -> Option<&Syn> {
-    let inside = tree
-        .walk()
-        .into_iter()
-        .filter(|node| is_identifier(node))
-        .find(|node| node.start <= at && at < node.end);
-    inside.or_else(|| {
-        tree.walk()
-            .into_iter()
-            .filter(|node| is_identifier(node))
-            .find(|node| node.end == at)
-    })
+    first_identifier(tree, at, &|node| node.start <= at && at < node.end)
+        .or_else(|| first_identifier(tree, at, &|node| node.end == at))
+}
+
+/// The first identifier, in tree order, that `accepts`: only the nodes
+/// covering `at` are entered, where every identifier asked for lies.
+fn first_identifier<'a>(node: &'a Syn, at: Position, accepts: &dyn Fn(&Syn) -> bool) -> Option<&'a Syn> {
+    if is_identifier(node) && accepts(node) {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .filter(|child| child.covers(at))
+        .find_map(|child| first_identifier(child, at, accepts))
 }
 
 /// The identifier a declaration names, where it names one. A field or a
@@ -1969,24 +2093,84 @@ fn assigned_value<'a>(declaration: &'a Syn, name: &str) -> Option<&'a str> {
 /// construction.
 impl Snapshot {
     pub fn uses_of(&self, declaration: &Found<'_>) -> Vec<(&Url, Position)> {
+        self.uses_in(declaration, None)
+    }
+
+    /// [`Self::uses_of`] in one file, or in every file when none is given.
+    /// Each file that spells the name is searched on a core of its own
+    /// share: a name is resolved where it is written, and a workspace
+    /// writes a popular type's name hundreds of times.
+    pub fn uses_in<'a>(
+        &'a self,
+        declaration: &Found<'_>,
+        only: Option<&Url>,
+    ) -> Vec<(&'a Url, Position)> {
         let wanted = (&declaration.file.uri, declaration.selection());
-        let mut places = Vec::new();
+        let name = declaration.name.text.as_str();
         // A library is read, not searched: its uses are not the workspace's.
-        for file in self.files.iter().filter(|file| !file.library) {
-            for node in file.tree.walk() {
-                if !is_identifier(node) || node.text != declaration.name.text {
-                    continue;
-                }
-                let Some(found) = self.declaration_at(&file.uri, node.start) else {
-                    continue;
-                };
-                if (&found.file.uri, found.selection()) == wanted {
-                    places.push((&file.uri, node.start));
-                }
-            }
-        }
+        let files: Vec<&'a FileView> = self
+            .files
+            .iter()
+            .filter(|file| !file.library && only.is_none_or(|only| file.uri == *only))
+            .filter(|file| file.text.contains(name))
+            .collect();
+        let uses_in_file = |file: &&'a FileView| self.uses_in_file(file, name, wanted);
+        // The largest files first, each taken by whichever core is free:
+        // a few files hold most of the uses.
+        let mut files = files;
+        files.sort_by_key(|file| std::cmp::Reverse(file.text.len()));
+        let threads = std::thread::available_parallelism()
+            .map_or(4, std::num::NonZero::get)
+            .min(files.len());
+        let mut places: Vec<(&'a Url, Position)> = if threads <= 1 {
+            files.iter().flat_map(uses_in_file).collect()
+        } else {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            std::thread::scope(|scope| {
+                let searches: Vec<_> = (0..threads)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            let mut places = Vec::new();
+                            loop {
+                                let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let Some(file) = files.get(index) else {
+                                    break places;
+                                };
+                                places.extend(uses_in_file(file));
+                            }
+                        })
+                    })
+                    .collect();
+                searches
+                    .into_iter()
+                    .flat_map(|search| search.join().unwrap_or_default())
+                    .collect()
+            })
+        };
         places.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         places.dedup();
+        places
+    }
+
+    /// Where `file` writes `name` meaning the declaration at `wanted`.
+    fn uses_in_file<'a>(
+        &'a self,
+        file: &'a FileView,
+        name: &str,
+        wanted: (&Url, Position),
+    ) -> Vec<(&'a Url, Position)> {
+        let mut places = Vec::new();
+        for node in file.tree.walk() {
+            if !is_identifier(node) || node.text != name {
+                continue;
+            }
+            let Some(found) = self.declaration_at(&file.uri, node.start) else {
+                continue;
+            };
+            if (&found.file.uri, found.selection()) == wanted {
+                places.push((&file.uri, node.start));
+            }
+        }
         places
     }
 }

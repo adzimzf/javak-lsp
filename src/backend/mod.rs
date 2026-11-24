@@ -281,6 +281,8 @@ impl LanguageServer for Backend {
             indexer.read_workspace()
         })
         .await;
+        let indexer = Arc::clone(&self.indexer);
+        tokio::task::spawn_blocking(move || indexer.list_declared_names());
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -560,9 +562,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let highlights = snapshot
-            .uses_of(&found)
+            .uses_in(&found, Some(&uri))
             .into_iter()
-            .filter(|(used_in, _)| **used_in == uri)
             .map(|(_, at)| highlighted(at))
             .collect();
         Ok(Some(highlights))
