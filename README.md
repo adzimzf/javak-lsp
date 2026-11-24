@@ -71,6 +71,56 @@ Client settings (`initializationOptions`):
 `"dependencySync": "off"` never runs the build tool; the libraries of the last
 sync, and the platform's sources, are still read.
 
+## Debugging
+
+javak-lsp answers the `workspace/executeCommand` commands of jdtls' debug
+plugin (`com.microsoft.java.debug.plugin`), so an editor set up for jdtls'
+debugger (nvim-dap with nvim-jdtls, Zed, vscode-java-debug) debugs through
+javak-lsp unchanged:
+
+| Command | Answer |
+| --- | --- |
+| `vscode.java.startDebugSession` | the port of a Debug Adapter Protocol server: Microsoft's java-debug, the adapter jdtls runs |
+| `vscode.java.resolveMainClass` | every `static void main(String[])`, Kotlin `fun main` and `@JvmStatic main`: `[{mainClass, projectName, filePath}]` |
+| `vscode.java.resolveMainMethod` | a file's `main` methods, for the Run / Debug code lens |
+| `vscode.java.resolveClasspath` | `[modulePaths, classPaths]`: the build modules' compiled classes and the jars of the last dependency sync |
+| `vscode.java.resolveJavaExecutable` | the `java` of `javaHome`, `$JAVA_HOME` or the `PATH` |
+| `vscode.java.buildWorkspace` | the project compiled by its own build tool (`gradle classes testClasses`, `mvn test-compile`) |
+| `vscode.java.updateDebugSettings`, `validateLaunchConfig`, `checkProjectSettings`, `isOnClasspath`, `fetchPlatformSettings`, `inferLaunchCommandLength`, `resolveSourceUri`, `fetchUsageData` | as jdtls answers them |
+
+Inside a session java-debug asks javak-lsp what jdtls answers from its
+Java model: the class that holds a breakpoint's line (the outermost class,
+or a Kotlin file's facade, `MainKt`) and the file a stack frame's class came
+from, workspace or library sources (`src/debugger`). Expressions — watches,
+the debug console, breakpoint conditions, logpoints — are interpreted over
+JDI: names, `this`, fields, array elements, method calls, literals and Java's
+operators. jdtls compiles them with JDT, so it takes any Java; javak-lsp
+does not do hot code replace or step-into-target, and needs the code built
+(`buildWorkspace`, or the build tool) before a launch.
+
+java-debug runs in `javak-debug-server.jar`, built from
+`java-sidecar/debug-server`:
+
+```sh
+cd java-sidecar/debug-server && mvn -q package   # target/javak-debug-server.jar
+```
+
+The server looks for it at `$JAVAK_LSP_DEBUG_SERVER_JAR`, next to the
+`javak-lsp` binary, in `../share/javak-lsp`, in `~/.cargo/bin`, and in this
+checkout's `java-sidecar/debug-server/target`. With nvim-dap alone:
+
+```lua
+dap.adapters.java = function(callback)
+  local client = vim.lsp.get_clients({ name = "javak-lsp" })[1]
+  client:request("workspace/executeCommand", { command = "vscode.java.startDebugSession" },
+    function(_, port) callback({ type = "server", host = "127.0.0.1", port = port }) end)
+end
+```
+
+`python3 java-sidecar/debug-server/e2e_test.py` drives a whole session
+(launch, breakpoints, a condition and a logpoint, the stack, variables,
+expressions) against a debug build.
+
 ## Tests
 
 ```sh

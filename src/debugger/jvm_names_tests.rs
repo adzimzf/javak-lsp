@@ -1,209 +1,132 @@
 use super::*;
-use crate::parser::{parse_java, parse_kotlin};
 
-const KOTLIN_APP: &str = r#"package com.example.app
-
-import kotlin.math.max
-
-fun main(args: Array<String>) {
-    println(helper(1))
+fn parsed(language: Language, text: &str) -> Syn {
+    syntax(language).tree(text)
 }
 
-fun helper(value: Int): Int = max(value, 2)
-
-class Greeter(private val name: String) {
-    fun greet(): String {
-        return "Hello $name"
-    }
-
-    companion object {
-        @JvmStatic
-        fun main(args: Array<String>) {
-            println(Greeter("x").greet())
-        }
-    }
-
-    inner class Nested {
-        fun nested() = 1
-    }
+fn breakpoint(language: Language, file_name: &str, text: &str, line: u32) -> Option<String> {
+    breakpoint_class(language, file_name, text, &parsed(language, text), line)
 }
 
-object Tool {
-    @JvmStatic fun main(args: Array<String>) {}
+fn mains(language: Language, file_name: &str, text: &str) -> Vec<String> {
+    main_classes(language, file_name, text, &parsed(language, text))
 }
 
-object NotRunnable {
-    fun main(args: Array<String>) {}
-}
-
-fun String.main() {}
-"#;
-
-const JAVA_APP: &str = r#"package com.example.app;
+const JAVA: &str = "\
+package com.demo;
 
 import java.util.List;
 
-public class Launcher {
-    public static void main(String[] args) {
-        System.out.println("hi");
+public class Main {
+    static class Inner {
+        void run() {
+            Runnable task = () -> System.out.println();
+        }
     }
 
-    void main() {}
-
-    static class Inner {
-        public static void main(String[] args) {
-            System.out.println("inner");
-        }
+    public static void main(String[] args) {
+        new Inner().run();
     }
 }
 
 class Helper {
-    void run() {}
+    void help() {}
 }
-"#;
+";
 
 #[test]
-fn kotlin_top_level_line_maps_to_file_facade() {
-    let file_data = parse_kotlin(KOTLIN_APP);
-    let class = breakpoint_class_at("/src/app/Main.kt", &file_data, 5);
+fn a_java_breakpoint_goes_in_the_outermost_class_at_its_line() {
+    let at = |line| breakpoint(Language::Java, "/w/Main.java", JAVA, line);
+    assert_eq!(at(7).as_deref(), Some("com.demo.Main"), "a lambda in a nested class");
+    assert_eq!(at(12).as_deref(), Some("com.demo.Main"));
+    assert_eq!(at(17).as_deref(), Some("com.demo.Helper"));
+    assert_eq!(at(2), None, "an import holds no code");
+    assert_eq!(at(15), None, "between two classes");
+}
+
+#[test]
+fn a_kotlin_line_outside_every_class_is_in_the_file_facade() {
+    let text = "package com.demo\n\nfun main() {\n    println(Greeter().greet())\n}\n\nclass Greeter {\n    fun greet() = \"hi\"\n}\n";
+    let at = |line| breakpoint(Language::Kotlin, "/w/app/main.kt", text, line);
+    assert_eq!(at(3).as_deref(), Some("com.demo.MainKt"));
+    assert_eq!(at(7).as_deref(), Some("com.demo.Greeter"));
+}
+
+#[test]
+fn a_kotlin_facade_takes_the_file_jvm_name() {
+    let text = "@file:JvmName(\"Starter\")\npackage com.demo\n\nfun main() {}\n";
+    assert_eq!(breakpoint(Language::Kotlin, "Main.kt", text, 3).as_deref(), Some("com.demo.Starter"));
+    assert_eq!(mains(Language::Kotlin, "Main.kt", text), ["com.demo.Starter"]);
+}
+
+#[test]
+fn facade_names_capitalize_the_file_stem() {
+    let tree = parsed(Language::Kotlin, "");
+    assert_eq!(kotlin_facade_name("/w/src/main.kt", &tree), "MainKt");
+    assert_eq!(kotlin_facade_name("app-utils.kt", &tree), "App_utilsKt");
+}
+
+#[test]
+fn java_main_classes_are_the_ones_with_a_static_main_taking_strings() {
+    let text = "\
+package com.demo;
+public class Main {
+    static class Inner { public static void main(String... args) {} }
+    public static void main(String[] args) {}
+}
+class NotStatic { public void main(String[] args) {} }
+class WrongParameters { public static void main(int[] args) {} }
+class TwoDimensions { public static void main(String[][] args) {} }
+";
+    assert_eq!(mains(Language::Java, "Main.java", text), ["com.demo.Main", "com.demo.Main$Inner"]);
+}
+
+#[test]
+fn kotlin_main_classes_are_the_facade_and_jvm_static_mains() {
+    let text = "\
+package com.demo
+
+class Greeter {
+    companion object {
+        @JvmStatic fun main(args: Array<String>) {}
+    }
+}
+
+object Tool {
+    @JvmStatic
+    fun main(args: Array<String>) {}
+}
+
+object NotStatic {
+    fun main(args: Array<String>) {}
+}
+
+fun main() {}
+";
     assert_eq!(
-        class,
-        BreakpointClass::Class("com.example.app.MainKt".into())
+        mains(Language::Kotlin, "App.kt", text),
+        ["com.demo.AppKt", "com.demo.Greeter", "com.demo.Tool"]
     );
 }
 
 #[test]
-fn kotlin_member_line_maps_to_outermost_class_not_companion() {
-    let file_data = parse_kotlin(KOTLIN_APP);
-    // `println(Greeter("x").greet())` inside the companion object.
-    let line = KOTLIN_APP
-        .lines()
-        .position(|line| line.contains("Greeter(\"x\")"))
-        .unwrap() as u32;
-    let class = breakpoint_class_at("/src/app/Main.kt", &file_data, line);
+fn a_main_method_is_reported_at_its_name() {
+    let text = "class A {\n    public static void main(String[] args) {}\n}\n";
+    let found = main_methods(Language::Java, "A.java", text, &parsed(Language::Java, text));
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].class_name, "A");
+    assert_eq!(found[0].name_start, Position { line: 1, column: 23 });
+    assert_eq!(found[0].name_end, Position { line: 1, column: 27 });
+}
+
+#[test]
+fn source_paths_match_by_file_name_and_package() {
+    let source = SourcePath::parse("com/demo/Main.kt").unwrap();
+    assert!(source.matches("/w/src/whatever/Main.kt", Some("com.demo")));
+    assert!(!source.matches("/w/src/com/demo/Main.kt", Some("com.other")));
+    assert!(SourcePath::parse("Main.java").unwrap().matches("/w/Main.java", None));
     assert_eq!(
-        class,
-        BreakpointClass::Class("com.example.app.Greeter".into())
-    );
-}
-
-#[test]
-fn kotlin_object_line_maps_to_object_class() {
-    let file_data = parse_kotlin(KOTLIN_APP);
-    let line = KOTLIN_APP
-        .lines()
-        .position(|line| line.contains("@JvmStatic fun main"))
-        .unwrap() as u32;
-    let class = breakpoint_class_at("/src/app/Main.kt", &file_data, line);
-    assert_eq!(class, BreakpointClass::Class("com.example.app.Tool".into()));
-}
-
-#[test]
-fn java_line_maps_to_enclosing_top_level_class() {
-    let file_data = parse_java(JAVA_APP);
-    let inner_line = JAVA_APP
-        .lines()
-        .position(|line| line.contains("\"inner\""))
-        .unwrap() as u32;
-    let helper_line = JAVA_APP
-        .lines()
-        .position(|line| line.contains("void run()"))
-        .unwrap() as u32;
-    assert_eq!(
-        breakpoint_class_at("/src/Launcher.java", &file_data, inner_line),
-        BreakpointClass::Class("com.example.app.Launcher".into())
-    );
-    assert_eq!(
-        breakpoint_class_at("/src/Launcher.java", &file_data, helper_line),
-        BreakpointClass::Class("com.example.app.Helper".into())
-    );
-}
-
-#[test]
-fn java_import_line_has_no_class() {
-    let file_data = parse_java(JAVA_APP);
-    assert_eq!(
-        breakpoint_class_at("/src/Launcher.java", &file_data, 2),
-        BreakpointClass::NoClass
-    );
-}
-
-#[test]
-fn kotlin_main_classes_cover_facade_companion_and_object() {
-    let file_data = parse_kotlin(KOTLIN_APP);
-    let names = main_class_names("/src/app/Main.kt", &file_data);
-    assert_eq!(
-        names,
-        vec![
-            "com.example.app.Greeter".to_owned(),
-            "com.example.app.MainKt".to_owned(),
-            "com.example.app.Tool".to_owned(),
-        ]
-    );
-}
-
-#[test]
-fn java_main_classes_need_static_and_use_binary_names() {
-    let file_data = parse_java(JAVA_APP);
-    let names = main_class_names("/src/Launcher.java", &file_data);
-    assert_eq!(
-        names,
-        vec![
-            "com.example.app.Launcher".to_owned(),
-            "com.example.app.Launcher$Inner".to_owned(),
-        ]
-    );
-}
-
-#[test]
-fn facade_name_honours_file_jvm_name() {
-    let lines = vec![
-        "@file:JvmName(\"Entry\")".to_owned(),
-        "package com.example".to_owned(),
-    ];
-    assert_eq!(kotlin_facade_class_name("/a/Main.kt", &lines), "Entry");
-}
-
-#[test]
-fn facade_name_capitalizes_and_sanitizes() {
-    assert_eq!(kotlin_facade_class_name("/a/my-tool.kt", &[]), "My_toolKt");
-    assert_eq!(kotlin_facade_class_name("C:\\a\\app.kt", &[]), "AppKt");
-}
-
-#[test]
-fn source_path_parses_package_and_file() {
-    let source_path = SourcePath::parse("com/example/app/Main.kt").unwrap();
-    assert_eq!(source_path.package, "com.example.app");
-    assert_eq!(source_path.file_name, "Main.kt");
-    assert!(source_path.matches("/w/src/Main.kt", Some("com.example.app")));
-    // Same file name in a different package is a different file.
-    assert!(!source_path.matches("/w/other/Main.kt", Some("com.example.other")));
-}
-
-#[test]
-fn source_path_from_nested_class_name_uses_top_level_class() {
-    let source_path = SourcePath::from_class_name("com.example.Outer$Inner$1", "java");
-    assert_eq!(source_path.package, "com.example");
-    assert_eq!(source_path.file_name, "Outer.java");
-}
-
-#[test]
-fn named_companion_main_belongs_to_the_owning_class() {
-    let source = "package p\n\nclass Server {\n    companion object Factory {\n        @JvmStatic\n        fun main(args: Array<String>) {}\n    }\n}\n";
-    let file_data = parse_kotlin(source);
-    assert_eq!(
-        main_class_names("/s/Server.kt", &file_data),
-        vec!["p.Server".to_owned()]
-    );
-}
-
-#[test]
-fn main_in_nested_object_uses_binary_name() {
-    // A `main` nested in a plain object inside a class lives in `Outer$Tool`.
-    let source = "package p\n\nclass Outer {\n    object Tool {\n        @JvmStatic fun main(args: Array<String>) {}\n    }\n}\n";
-    let file_data = parse_kotlin(source);
-    assert_eq!(
-        main_class_names("/s/Outer.kt", &file_data),
-        vec!["p.Outer$Tool".to_owned()]
+        SourcePath::of_class("com.demo.Outer$Inner$1", "java"),
+        SourcePath { package: "com.demo".into(), file_name: "Outer.java".into() }
     );
 }

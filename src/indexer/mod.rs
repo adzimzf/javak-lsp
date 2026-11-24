@@ -469,6 +469,24 @@ impl Indexer {
             .collect()
     }
 
+    /// Every source file of the workspace, parsed: the open ones as the
+    /// editor has them, the others as they are on disk.
+    pub fn workspace_files(&self) -> Vec<FileView> {
+        self.documents
+            .iter()
+            .chain(self.closed_documents())
+            .map(|document| document.view(document.key()))
+            .collect()
+    }
+
+    /// One source file of the workspace, the editor's text if it is open.
+    pub fn workspace_file(&self, uri: &Url) -> Option<FileView> {
+        self.documents
+            .get(uri)
+            .map(|document| document.view(uri))
+            .or_else(|| self.on_disk.get(uri).map(|document| document.view(uri)))
+    }
+
     /// Whether any source file of the workspace declares `name`: a name no
     /// source of the workspace declares belongs to a library, and is not
     /// the workspace's to rename.

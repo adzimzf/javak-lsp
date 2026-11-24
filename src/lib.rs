@@ -12,8 +12,11 @@
 //!
 //! `dependency_sync` asks the project's build tool for its libraries; the
 //! backend runs it and the indexer reads the sources jars it resolves.
+//! `debugger` answers the `vscode.java.*` commands jdtls' debug plugin
+//! does, and runs Microsoft's java-debug behind them.
 
 pub mod backend;
+pub(crate) mod debugger;
 pub(crate) mod dependency_sync;
 pub mod feature;
 pub mod indexer;
