@@ -1,0 +1,9 @@
+//- /Foo.java
+$0public class Foo {
+	public Foo(Integer a) {
+		this(1, 2);
+	}
+	public Foo(Integer a, Integer b) {
+	}
+}
+//= expected

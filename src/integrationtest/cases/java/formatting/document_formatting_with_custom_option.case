@@ -1,0 +1,9 @@
+//- /Baz.java
+$0@Deprecated package org.sample;
+
+public class Baz {
+    /**Java doc @param a some parameter*/
+	void foo(int a){;;
+}
+}
+//= expected

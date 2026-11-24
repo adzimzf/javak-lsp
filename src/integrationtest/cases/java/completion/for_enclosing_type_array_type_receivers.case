@@ -1,0 +1,7 @@
+//- /Arr.java
+public class Arr {
+	void foo() {
+		Arr[] ages = new $0A
+	}
+}
+//= expected

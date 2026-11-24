@@ -1,0 +1,6 @@
+//- /E.java
+public class E {
+    public  E(int $0count$1) {
+    }
+}
+//= expected

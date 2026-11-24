@@ -1,0 +1,10 @@
+//- /org/sample/Test.java
+package org.sample;
+public enum Test {
+	/**
+	* {@link ArrayList}
+	* Match case for the first letter.$0
+	*/
+	FIRSTLETTER;
+}
+//= expected

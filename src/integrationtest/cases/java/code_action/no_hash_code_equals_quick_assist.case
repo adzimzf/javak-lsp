@@ -1,0 +1,12 @@
+//- /p/A.java
+package p;
+
+public class $0A$1 {
+	String name;
+   public int hashCode() {
+	}
+	public boolean equals(Object a) {
+		return true;
+	}
+}
+//= expected

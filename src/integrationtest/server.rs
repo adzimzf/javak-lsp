@@ -78,6 +78,8 @@ pub(super) struct Session {
     disk: Option<PathBuf>,
     /// How long one request may take. A JVM needs longer than a thread.
     patience: Duration,
+    /// What the server said it can do in its `initialize` answer.
+    capabilities: Value,
     _host: Option<Host>,
     _child: Option<tokio::process::Child>,
     /// The directory an in-memory server reads unopened files from, removed
@@ -110,6 +112,7 @@ impl Session {
             root,
             disk: None,
             patience: PATIENCE,
+            capabilities: Value::Null,
             _host: Some(host),
             _child: None,
             _scratch: scratch,
@@ -151,6 +154,7 @@ impl Session {
             project: directory_url(project_root),
             disk: Some(source_root.to_owned()),
             patience: CHILD_PATIENCE,
+            capabilities: Value::Null,
             _host: None,
             _child: Some(child),
             _scratch: None,
@@ -194,6 +198,11 @@ impl Session {
         }
         self.diagnosed.clear();
         self.published.clear();
+    }
+
+    /// The token types and modifiers the server's semantic tokens index.
+    pub(super) fn semantic_legend(&self) -> &Value {
+        &self.capabilities["semanticTokensProvider"]["legend"]
     }
 
     /// Whether the server runs in another process: one that is not this
@@ -423,6 +432,25 @@ impl Session {
                     "documentSymbol": {"hierarchicalDocumentSymbolSupport": true},
                     "rename": {"prepareSupport": true},
                     "signatureHelp": {},
+                    "codeAction": {
+                        "codeActionLiteralSupport": {"codeActionKind": {"valueSet": [
+                            "", "quickfix", "refactor", "refactor.extract", "refactor.inline",
+                            "refactor.rewrite", "source", "source.organizeImports",
+                        ]}},
+                    },
+                    "inlayHint": {},
+                    "codeLens": {},
+                    "callHierarchy": {},
+                    "typeHierarchy": {},
+                    "selectionRange": {},
+                    "formatting": {},
+                    "rangeFormatting": {},
+                    "semanticTokens": {
+                        "requests": {"full": true},
+                        "tokenTypes": [],
+                        "tokenModifiers": [],
+                        "formats": ["relative"],
+                    },
                 },
                 "workspace": {
                     "workspaceEdit": {"documentChanges": true},
@@ -433,8 +461,10 @@ impl Session {
                 },
             },
         });
-        self.request("initialize", params, OnError::Panic, deadline)
+        let answer = self
+            .request("initialize", params, OnError::Panic, deadline)
             .await;
+        self.capabilities = answer["capabilities"].clone();
         self.notify("initialized", json!({})).await;
     }
 

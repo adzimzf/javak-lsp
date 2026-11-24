@@ -1,0 +1,9 @@
+//- /Foo.java
+import java.sq 
+public class Foo {
+private String myTestString;
+	void foo() {
+   this.myTestS$0
+	}
+}
+//= expected

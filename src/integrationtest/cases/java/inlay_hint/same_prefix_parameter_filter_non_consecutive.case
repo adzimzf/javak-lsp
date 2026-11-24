@@ -1,0 +1,8 @@
+//- /Foo.java
+$0public class Foo {
+	void nonConsecutive(String s1, String s3, String s5) {}
+	void bar() {
+		nonConsecutive("first", "second", "third");
+	}
+}
+//= expected

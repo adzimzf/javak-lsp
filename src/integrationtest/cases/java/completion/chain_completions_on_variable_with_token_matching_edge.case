@@ -1,0 +1,8 @@
+//- /Foo.java
+import java.util.List;
+public class Foo {
+    public static void main(String[] args) {
+		List<String> names = emptyL$0
+    }
+}
+//= expected

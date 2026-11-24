@@ -1,0 +1,10 @@
+//- /src/Car.java
+public class Car extends Vehicle{
+
+    public int fast_speed(){
+        this.mo$0del = "Ford Fusion";
+        return this.speed()*2;
+    }
+
+}
+//= expected

@@ -1,0 +1,12 @@
+//- /src/main/java/java/Foo.java
+$0package java;
+public class Foo {
+	public static void notThis(){
+		System.out.println(this);
+	}
+	public void method1(){
+	}
+	public void method1(){
+	}
+}
+//= expected

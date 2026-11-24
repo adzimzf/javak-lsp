@@ -1,0 +1,20 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	public static void main(String[] args) {
+		fo$0
+		System.out.println("Hello World!");
+	}
+
+	/**
+	* This method has Javadoc
+	*/
+	public static void foo(String bar) {
+	}
+	/**
+	* Another Javadoc
+	*/
+	public static void foo() {
+	}
+}
+//= expected

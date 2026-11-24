@@ -1,0 +1,22 @@
+//- /test/Test.java
+package test;
+public class Test {
+    interface Calculator {
+        /**
+         * Adds two numbers.
+         *
+         * @param a the first number
+         * @param b the second number
+         * @return the sum
+         */
+        int add(int a, int b);
+    }
+    static class SimpleCalculator implements Calculator {
+        /// {@inheritDoc}
+        @Override
+        public int a$0dd(int a, int b) {
+            return a + b;
+        }
+    }
+}
+//= expected

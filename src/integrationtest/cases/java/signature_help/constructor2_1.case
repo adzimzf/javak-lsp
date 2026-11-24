@@ -1,0 +1,8 @@
+//- /test1/E.java
+package test1;
+public class E {
+   public void bar() {
+     new String($0,);
+   }
+}
+//= expected

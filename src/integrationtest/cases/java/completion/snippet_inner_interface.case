@@ -1,0 +1,5 @@
+//- /org/sample/Test.java
+package org.sample;
+public interface Test {}
+$0
+//= expected

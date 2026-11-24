@@ -1,0 +1,10 @@
+//- /src/main/java/test1/F123.java
+package test1;
+public class F123 {
+}
+//- /src/main/java/test1/F456.java
+$0package test1;
+public class F456 {
+  { F123.foo(); }
+}
+//= expected

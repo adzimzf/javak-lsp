@@ -1,0 +1,8 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	public void testMethod() {
+		Exception e;
+		e.throw$0	}
+}
+//= expected

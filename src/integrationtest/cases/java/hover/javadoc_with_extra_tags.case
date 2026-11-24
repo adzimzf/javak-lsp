@@ -1,0 +1,12 @@
+//- /test1/Meh.java
+package test1;
+/**
+ * Some text.
+ *
+ * @uses java.sql.Driver
+ *
+ * @moduleGraph
+ * @since 9
+ */
+public class Me$0h {}
+//= expected

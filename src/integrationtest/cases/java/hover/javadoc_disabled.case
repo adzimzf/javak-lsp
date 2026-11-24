@@ -1,0 +1,19 @@
+//- /src/java/Foo.java
+package java;
+
+/**
+ * This is foo
+ */
+public class Fo$0o {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+	
+	/**
+	 * This method comes from Foo
+	 * @param input an input String
+	 */
+	public void foo(String input) {}
+}
+//= expected

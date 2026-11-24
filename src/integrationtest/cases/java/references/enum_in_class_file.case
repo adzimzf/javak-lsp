@@ -1,0 +1,25 @@
+//- /src/org/reference/Main.java
+package org.reference;
+
+import org.sample.Foo;
+
+public class Main {
+	priva$0te static Foo foo = Foo.FOO2;
+
+	public static void main(String[] args) {
+		System.out.println(foo);
+	}
+
+	public void test() {
+		String message1 = getMessage();
+	}
+	public String getMessage () {
+		return "some message";
+	}
+
+}
+//- /src/org/reference/User.java (not open)
+package org.reference;
+public class User {
+}
+//= expected

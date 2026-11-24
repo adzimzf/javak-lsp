@@ -1,0 +1,7 @@
+//- /Foo.java
+public class Foo {
+	void f() {
+		syser$0
+	}
+};
+//= expected

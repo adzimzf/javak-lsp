@@ -1,0 +1,11 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	private void test(String s, int i) {
+  if (i > 2) {
+  } else {
+    s.$0
+    System.out.println("b");
+}
+}
+//= expected

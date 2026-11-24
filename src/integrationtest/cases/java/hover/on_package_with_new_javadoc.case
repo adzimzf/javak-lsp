@@ -1,0 +1,9 @@
+//- /src/main/java/foo/bar/Bar.java
+package foo.bar;
+
+import bar.foo$0.Foo;
+
+public class Bar extends Foo {
+
+}
+//= expected

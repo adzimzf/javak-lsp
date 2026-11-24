@@ -1,0 +1,8 @@
+//- /java/Foo.java
+package java;
+public class Foo {
+  @SuppressWarnings("$0deprecation$1")
+  public void test () {
+  }
+}
+//= expected

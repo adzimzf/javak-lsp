@@ -1,0 +1,1572 @@
+//- /hello/src/org/sample/TestJavadoc.java
+$0package org.sample;
+
+/**
+ * Test javadoc class
+ * 
+ * @param <K> the type of keys 
+ * @param <V> the type of values
+ * @author Some dude
+ * @author Another one
+ * @see some.pkg.SomeClass
+ * @see some.pkg.SomeClass#someMethod()
+ */
+public class TestJavadoc<K, V> {
+	
+	/**
+	 * Foo field
+	 */
+	public int fooField;
+
+	/**
+	 * Foo method
+	 * 
+	 * @param input some input
+	 * @param count some count
+	 * @return some string
+	 */
+	private String foo(String input, int count) {
+		Inner inner = new Inner();
+		return inner.test;
+	}
+
+	public class Inner {
+		/** Test */
+		public String test;
+	}
+
+	/**
+	 * <pre><code>
+	 *  interface Service {
+	 *     {@literal @LookupIfProperty(name = "service.foo.enabled", stringValue = "true")}
+	 *     String name();
+	 *  }
+	 *  </code></pre>
+	 */
+	public void anotherMethod() {
+		// TODO Auto-generated method stub
+		
+	}
+}
+//- /java24/src/main/java/org/sample/Test.java
+package org.sample;
+
+public class Test {
+}
+//- /java5/src/java/Foo.java (not open)
+package java;
+
+public class Foo {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+}
+//- /java24/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java24/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+	public Foo() {
+		System.out.println();
+		super();
+	}
+}
+//- /java16/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java16/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /java16/src/main/java/foo/bar/Bar.java (not open)
+package foo.bar;
+
+public class Bar {
+	record Edge(int fromNodeId,
+		int toNodeId,
+		Object fromPoint,
+		Object toPoint,
+		double length,
+		Object profile
+	) {}
+	void foo(String id) {
+		new Edge(1, 2, 3, 4, 5, 6);
+	}
+}
+//- /unresolvedtype/src/pckg/Foo.java (not open)
+package pckg;
+
+public class Foo implements IFoo {
+
+}
+//- /unresolvedtype/src/internal/IFoo.java (not open)
+package internal;
+
+/**
+ * 
+ * test
+ *
+ */
+public interface IFoo {
+
+}
+//- /gh2871/project1/src/org/sample/First.java (not open)
+package org.sample;
+public abstract class First 
+{}
+//- /gh2871/project2/src/org/sample/Second.java (not open)
+package org.sample;
+
+public class Second extends First{
+}
+//- /java7/src/java/Foo.java (not open)
+package java;
+
+import java.util.Optional;
+
+public class Foo {
+
+	public static void main(String[] args) {
+		Optional.of(1).stream();
+	}
+}
+//- /java20/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java20/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /hello/Foo.java (not open)
+
+//- /hello/src/Foo.java (not open)
+
+//- /hello/src/NoPackage.java (not open)
+public class NoPackage {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+}
+//- /hello/src/test1/SignatureHelp2097.java (not open)
+package test1;
+@SuppressWarnings("all")
+public class SignatureHelp2097 {
+    private String name;
+    SignatureHelp2097 signatureHelp;
+
+    public SignatureHelp2097(String name) {
+        this.name = name;
+    }
+    boolean test() {
+        this.signatureHelp = new SignatureHelp2097(null);
+        SignatureHelp2097 sh = new SignatureHelp2097(null);
+        Result resultData = new Result();
+        boolean flag = true;
+        try {
+            if (flag) {
+                return resultData.success("abc, cde!", signatureHelp);
+            } else {
+                return resultData.fail(flag);
+            }
+        } catch (Exception e) {
+            System.out.println(e.getMessage());
+        }
+        return resultData.fail("abc, cde!", signatureHelp);
+    }
+}
+
+class Result {
+    private boolean flag;
+    public Boolean success(int code, String msg, Object data) {
+        return flag;
+    }
+    public Boolean success(String msg, Object data) {
+        return flag;
+    }
+    public Boolean success(Object data) {
+        return flag;
+    }
+    public Boolean fail(int code, String msg, Object data) {
+        return flag;
+    }
+    public Boolean fail(String msg, Object data) {
+        return flag;
+    }
+    public Boolean fail(Object data) {
+        return flag;
+    }
+}
+//- /hello/src/test1/TaskMarkerTest.java (not open)
+package test1;
+
+/**
+ * TaskMarkerTest
+ */
+public class TaskMarkerTest {
+
+    private int i;
+    public static void main(String[] args) {
+        // TODO task 1
+        System.out.println("1");
+        // TODO task 2 
+        System.out.println("2");
+
+    }
+}
+//- /hello/src/test1/B.java (not open)
+package test1;
+
+public class B {
+	public void bar() {
+		f//here
+	}
+
+}
+//- /hello/src/test1/Varargs.java (not open)
+package test1;
+
+public class Varargs {
+    public static void main(String[] args) {
+        run(Object.class, args);
+    }
+
+    public static void run(Class<?> clazz, String... args) {
+        run(new Class<?>[] { clazz }, args);
+    }
+
+    public static void run(Class<?>[] classes, String[] args) {
+
+    }
+
+    public void run(String... args) {
+    }
+}
+//- /hello/src/test1/SignatureHelp.java (not open)
+package test1;
+
+import java.util.function.Function;
+
+public class SignatureHelp
+{
+  public SignatureHelp( String signature ) {
+    this.test( (s) -> s );
+    this.test(
+  }
+  public void test( Function<String,String> f ) {
+  }
+}
+//- /hello/src/test1/A.java (not open)
+package test1;
+
+public class A {
+	public static void foo() {
+		
+	}
+
+}
+//- /hello/src/java/FooWithField.java (not open)
+package java;
+
+public class FooWithField {
+	
+	private String name;
+}
+//- /hello/src/java/Foo4.java (not open)
+package java;
+
+import java.util.ArrayList;
+
+public class Foo4 {
+}
+//- /hello/src/java/Foo.java (not open)
+package java;
+
+/**
+ * This is foo
+ */
+public class Foo {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+	
+	/**
+	 * This method comes from Foo
+	 * @param input an input String
+	 */
+	public void foo(String input) {}
+}
+//- /hello/src/java/Test.java (not open)
+package java;
+
+public abstract class Test implements ITest {
+
+	@Override
+	public void testMethod() {}
+
+	public abstract void testAbstractMethod();
+
+	public void noReferences() {}
+}
+//- /hello/src/java/Bar.java (not open)
+package java;
+
+/**
+ * Bar
+ */
+public class Bar extends Foo {
+
+    public Bar () {
+    	somethingFromLombok();
+    	somethingFromJPAModelGen();
+    }
+    
+    @javax.annotation.Generated(value="lombok")
+    public void somethingFromLombok(){}
+    
+    @javax.annotation.Generated(value = "org.hibernate.jpamodelgen.JPAMetaModelEntityProcessor")
+    public void somethingFromJPAModelGen(){}
+    
+    @javax.annotation.Generated("lombok")
+    public void somethingElseFromLombok(){}
+   
+    @Override
+    public void foo(String input) {
+      super.foo("lombok");
+    }
+}
+//- /hello/src/java/ITest.java (not open)
+package java;
+
+public interface ITest {
+
+	public void testMethod();
+
+}
+//- /hello/src/java/IFoo.java (not open)
+package java;
+
+/**
+ * This is IFoo
+ */
+public interface IFoo {
+
+}
+//- /hello/src/java/Foo3.java (not open)
+package java;
+
+/**
+ * This is foo3
+ */
+public class Foo3 extends Foo2 {
+
+}
+//- /hello/src/java/Baz.java (not open)
+package java;
+
+import java.internal.InternalBar;
+
+public class Baz extends InternalBar {
+}
+//- /hello/src/java/Ext.java (not open)
+package java;
+
+public class Ext extends Test{
+
+	@Override
+	public void testMethod() {}
+
+	@Override
+	public void testAbstractMethod() {}
+}
+//- /hello/src/java/Foo2.java (not open)
+package java;
+
+/**
+ * This is foo2
+ */
+public class Foo2 implements IFoo {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+
+	/**
+	 * This method comes from Foo
+	 */
+	public void foo() {}
+}
+//- /hello/src/java/internal/InternalBar.java (not open)
+package java.internal;
+
+import org.springframework.core.SpringVersion;
+
+public class InternalBar {
+
+	public static void main(String[] args) {
+		System.err.println(SpringVersion.getVersion());
+	}
+}
+//- /hello/src/java/internal/package-info.java (not open)
+/**
+ * this is a <b>bold</b> package!
+ */
+package java.internal;
+//- /hello/src/org/sample/FooChild.java (not open)
+package org.sample;
+
+public class FooChild extends Foo {
+
+	public void someMethod() {
+		super.someMethod();
+	}
+}
+//- /hello/src/org/sample/IConstantDefault.java (not open)
+package org.sample;
+@interface IConstantDefault {
+
+	static final int ONE = 1;
+	static final double TEST = 107.1921;
+	String someMethod() default "test";
+
+}
+//- /hello/src/org/sample/Foo4.java (not open)
+package org.sample;
+public class Foo4 {
+
+	public static <T extends Number> T get() {
+		return null;
+	}
+
+}
+//- /hello/src/org/sample/Foo.java (not open)
+package org.sample;
+
+public class Foo {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+	
+	public void someMethod() {}
+}
+//- /hello/src/org/sample/CallHierarchyGH2771.java (not open)
+package org.sample;
+
+public interface CallHierarchyGH2771 {
+    Opt<String> name();
+
+    public static class Opt<T> {
+        public static <T> Opt<T> of(T t) {
+            return new Opt();
+        }
+    }
+}
+//- /hello/src/org/sample/Foo$Bar.java (not open)
+package org.sample;
+
+public class Foo$Bar {
+
+}
+//- /hello/src/org/sample/FooService.java (not open)
+package org.sample;
+
+public class FooService {
+	private IFoo foo;
+
+	void bar() {
+		foo.someMethod();
+	}
+
+	void bar1() {
+		Foo newFoo = new Foo();
+		newFoo.someMethod();
+	}
+
+	void bar2(AbstractFoo newFoo) {
+		newFoo.someMethod();
+	}
+}
+//- /hello/src/org/sample/TestEnum.java (not open)
+package org.sample;
+
+import org.sample.Enums.MyEnum;
+
+public class TestEnum {
+	private MyEnum myEnum = MyEnum.ENUM1;
+}
+//- /hello/src/org/sample/CallHierarchy.java (not open)
+package org.sample;
+
+public class CallHierarchy {
+
+  @Deprecated
+  public static void main(String[] args) {
+    new Base();
+    new Child().bar();
+    System.out.println(Base.STATIC_FIELD);
+  }
+
+  public static class Base {
+
+    static int STATIC_FIELD = 100;
+    protected int protectedField = 200;
+
+/*nothing*/
+
+    public Base() {
+/*should resolve to enclosing "method/constructor/initializer"*/
+    }
+
+    public void foo() {
+
+    }
+
+    public void bar() {
+      new Child();
+      new Child();
+      Thread.currentThread();
+      Thread.currentThread();
+    }
+
+    protected void method_1() {
+      foo();
+      bar();
+    }
+
+  }
+
+  public static class Child extends Base {
+
+    Child() {
+      super();
+      foo();
+      bar();
+      method_1();
+      protectedField = 300;
+      protectedField = 400;
+    }
+
+    protected void method_2() {
+      method_1();
+      method_1();
+      method_1();
+    }
+
+  }
+
+  public void recursive1() {
+    recursive2();
+  }
+
+  public void recursive2() {
+    recursive1();
+  }
+}
+//- /hello/src/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /hello/src/org/sample/Child.java (not open)
+package org.sample;
+
+public class Child extends Parent {
+	protected String name;
+}
+//- /hello/src/org/sample/AbstractFoo.java (not open)
+package org.sample;
+
+public abstract class AbstractFoo {
+	
+	abstract void someMethod();
+
+}
+//- /hello/src/org/sample/Foo5.java (not open)
+package org.sample;
+
+public class Foo5 {
+	public void name() {}
+	public void bar() {
+		nam
+	}
+}
+//- /hello/src/org/sample/RunnableTest.java (not open)
+package org.sample;
+
+public class RunnableTest implements Runnable {
+
+	@Override
+	public void run() {
+	}
+
+}
+//- /hello/src/org/sample/Call.java (not open)
+package org.sample;
+
+public class Call {
+    public static void main(String[] args) {
+        System.out.println("skip");
+        System.out.println("skip");
+        System.out.println("skip");
+        new Foo().someMethod();
+        System.out.println("skip");
+        System.out.println("skip");
+        new Foo().someMethod();
+    }
+}
+//- /hello/src/org/sample/IFoo.java (not open)
+package org.sample;
+
+public interface IFoo {
+	
+	void someMethod();
+
+}
+//- /hello/src/org/sample/Parent.java (not open)
+package org.sample;
+
+public class Parent {
+	protected String parentName;
+}
+//- /hello/src/org/sample/Highlight.java (not open)
+package org.sample;
+
+import java.io.IOException;
+
+public class Highlight implements FooInterface {
+
+	private String str = "string";
+
+	public String getFoo() throws IOException {
+		if (str.contains("!")) {
+			throw new IOException();
+		}
+		str = "bar";
+		if (str.length() == 0) {
+			throw new RuntimeException();
+		}
+		loop: while (!str.isEmpty()) {
+			for (;;) {
+				if (str.contains("foo")) {
+					break loop;
+				}
+				continue;
+			}
+		}
+		str = String.format(str);
+		return str + "foo";
+	}
+
+	public int getBar() {
+		String str = "bar";
+		return str.length();
+	}
+
+	@Override
+	public void foo() {
+		// TODO Auto-generated method stub
+	}
+
+	@Override
+	public void bar() {
+		// TODO Auto-generated method stub
+	}
+
+}
+
+interface FooInterface {
+	public void foo();
+	public void bar();
+}
+//- /hello/src/org/sample/MyList.java (not open)
+package org.sample;
+
+import java.util.List;
+
+public interface MyList<E> extends List<E> {
+
+	/**
+	 * Test
+	 */
+	boolean add(E e);
+
+}
+//- /hello/src/org/sample/Enums.java (not open)
+package org.sample;
+
+public class Enums {
+
+    public enum MyEnum {
+        ENUM1 {
+
+            @Override
+            public String get() {
+                return "ENUM1";
+            }
+        },
+        ENUM2 {
+
+            @Override
+            public String get() {
+                return "ENUM2";
+            }
+        };
+
+        public abstract String get();
+
+    }
+    
+}
+//- /hello/src/org/sample/Foo3.java (not open)
+package org.sample;
+
+/**
+ * This is foo3
+ */
+public class Foo3 extends Foo2 {
+
+}
+//- /hello/src/org/sample/Baz.java (not open)
+package org.sample;
+
+import java.io.File;
+import java.io.IOException;
+
+public class Baz {
+
+	protected File getParent(File file, int depth) {
+		return null;
+	}
+
+	protected void deleteSomething() throws IOException {
+
+	}
+}
+//- /hello/src/org/sample/Foo6.java (not open)
+package org.sample;
+
+public class Foo6 {
+    List list = List.of(1).stream().collect(toList());
+    double i = abs(-1);
+    double pi = PI;
+}
+//- /hello/src/org/sample/HelloWorld.java (not open)
+package org.sample;
+
+import java.util.function.Consumer;
+
+public class HelloWorld {
+    public static <T> void build(T element) {
+        new Thread(() -> {
+            new Consumer<T>() {
+
+                @Override
+                public void accept(T t) {
+
+                }
+            };
+        });
+    }
+}
+//- /hello/src/org/sample/App.java (not open)
+package org.sample;
+import java.util.function.Function;
+public class App {
+    public String getGreeting() {
+      return "foo";
+    }
+    public static void main(String[] args) {
+        Function<Integer, Integer> foo = new Function<>() {
+
+          @Override
+          public Integer apply(Integer t) {
+              // Go to definition on `getGreeting` doesn't work
+              new App().getGreeting();
+              return 10;
+          }
+        };
+    }
+}
+//- /hello/src/org/sample/TestSerial.java (not open)
+package org.sample;
+
+import java.io.Serializable;
+
+public class TestSerial implements Serializable {
+
+}
+//- /hello/src/org/sample/Foo2.java (not open)
+package org.sample;
+
+public class Foo2 implements IFoo {
+
+    public void someMethod() {}
+}
+//- /hello/src/org/ref/Apple.java (not open)
+package org.ref;
+
+public class Apple {
+	private String name;
+
+	public Apple(String name) {
+		this.name = name;
+	}
+
+	public String getName() {
+		return name;
+	}
+
+	public void setName(String name) {
+		this.name = name;
+	}
+
+	public static <T> AppleBuilder<T> builder() {
+		return new AppleBuilder<T>();
+	}
+
+	public static class AppleBuilder<T> {
+		private String name;
+
+		private AppleBuilder() {
+		}
+
+		public AppleBuilder<T> name(String name) {
+			this.name = name;
+			return this;
+		}
+
+		@java.lang.Override
+		public String toString() {
+			return "AppleBuilder(name = " + name + ")";
+		}
+
+		public Apple build() {
+			return new Apple(name);
+		}
+	}
+
+}
+//- /hello/src/org/ref/Test.java (not open)
+package org.ref;
+
+public class Test {
+	public static void main(String[] args) {
+		Apple apple = Apple.builder().name("Hello World!").build();
+		System.out.println(apple.getName());
+	}
+
+}
+//- /hello/test/foo/bar/BaseTest.java (not open)
+package foo.bar;
+
+public class BaseTest {
+}
+//- /hello/test/foo/bar/AbstractTest.java (not open)
+package foo.bar;
+
+public abstract class AbstractTest{
+}
+//- /hello/nopackage/Test2.java (not open)
+public clas Test{
+	private x x;
+}
+//- /hello/nopackage/Test.java (not open)
+public class Test{
+    public static void main(String[] args) {
+        System.out.println("test");
+    }
+}
+//- /java8fx/src/foo/Foo.java (not open)
+package foo;
+
+import javafx.application.Application;
+import javafx.stage.Stage;
+
+public class Foo extends Application {
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+    
+    @Override
+    public void start(Stage stage) {
+        
+    }
+}
+//- /java14/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java14/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+
+    public static void main(String[] args) {
+        Object foo = "x";
+        if (foo instanceof String str) {
+            System.out.println(str);
+        }
+    }
+
+}
+//- /records/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /ignored-filter/src/foo/Main.java (not open)
+package foo;
+public class Main {
+}
+//- /projectwithrootsource/MyTest.java (not open)
+public class MyTest {
+	
+}
+//- /testnullable3/src/org/sample/Main.java (not open)
+package org.sample;
+import javax.annotation.Nonnull;
+public class Main {
+  public static void main(String[] args) {
+    Test.foo(null); 
+  }
+}
+class Test {
+  static void foo(@Nonnull Test a) { }
+}
+//- /java4/src/java/Foo.java (not open)
+package java;
+
+public class Foo {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+}
+//- /java22/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java22/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java22/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+	public Foo() {
+		System.out.println();
+		super();
+	}
+}
+//- /java15/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java15/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /java12/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+
+    public static void main(String[] args) {
+        var qty = switch (args ==null?0:args.length) {
+        	case 0 -> "Zero";
+        	case 1 -> "One";
+        	default -> "Many";
+        };
+        System.out.print(qty + " args");
+    }
+    
+}
+//- /source-attachment/src/Test.java (not open)
+import foo.bar;
+
+public class Test {
+
+	public static void main(String[] args) {
+		int sum = bar.add(1, 2, 3);
+		System.out.println(sum);
+	}
+
+}
+//- /java23/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java23/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java23/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+	public Foo() {
+		System.out.println();
+		super();
+	}
+}
+//- /declaration-test/src/Vehicle.java (not open)
+public class Vehicle implements MovingObject{
+    public int speed(){
+        return 60;
+    }
+
+    public int distance(){
+        return speed()*60;
+    }
+
+    public String model;
+}
+//- /declaration-test/src/Car.java (not open)
+public class Car extends Vehicle{
+
+    public int fast_speed(){
+        this.model = "Ford Fusion";
+        return this.speed()*2;
+    }
+
+}
+//- /declaration-test/src/TestSame.java (not open)
+public class TestSame implements Test{
+    public void someMethod(){
+    
+    }
+
+    public String model;
+}
+
+public interface Test {
+    public void someMethod();
+}
+//- /declaration-test/src/MovingObject.java (not open)
+public interface MovingObject {
+    public int speed();
+}
+//- /declaration-test/src/PackageTwo/Foo2.java (not open)
+package PackageTwo;
+
+import PackageOne.*;
+
+public class Foo2 {
+	
+    Foo bar;
+
+    public void test() {
+        bar.hello();
+    }
+}
+//- /declaration-test/src/PackageOne/Foo.java (not open)
+package PackageOne;
+
+public class Foo implements IFoo{
+    public void hello() {
+        System.out.println("Hello World!");
+    }
+}
+
+interface IFoo {
+    void hello();
+}
+//- /multi/bar/src/bar/Bar.java (not open)
+package bar;
+
+public class Bar {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+}
+//- /multi/foo/src/foo/Foo.java (not open)
+package foo;
+
+public class Foo {
+
+	public static void main(String[] args) {
+		System.out.print("Hello world!");
+	}
+}
+//- /testnullable/src/org/sample/Main.java (not open)
+package org.sample;
+
+import java.util.ArrayList;
+
+public class Main {
+
+	public void test() {
+		String[] arr = (new ArrayList<>()).stream().toArray(String[]::new);
+		new Runnable() {
+			ru
+		}
+	}
+
+}
+//- /testnullable2/src/org/sample/Main.java (not open)
+package org.sample;
+import javax.annotation.Nonnull;
+public class Main {
+  public static void main(String[] args) {
+    Test.foo(null); 
+  }
+}
+class Test {
+  static void foo(@Nonnull Test a) { }
+}
+//- /forbiddenreference/src/testjdk8/Test.java (not open)
+package testjdk8;
+
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
+import com.sun.management.UnixOperatingSystemMXBean;
+
+public class Test {
+	public static void main(String[] args) {
+		OperatingSystemMXBean bean = ManagementFactory.getOperatingSystemMXBean();
+		if (bean instanceof UnixOperatingSystemMXBean) {
+			System.out.println("Unix");
+		}
+	}
+}
+//- /java27/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java27/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java27/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+	// JEP 532: Primitive Types in Patterns, instanceof, and switch (Fifth Preview)
+	static String classify(int value) {
+		return switch (value) {
+			case 0 -> "zero";
+			case int i when i > 0 -> "positive";
+			case int i -> "negative";
+		};
+	}
+}
+//- /reference/src/org/reference/User.java (not open)
+package org.reference;
+public class User {
+}
+//- /reference/src/org/reference/Main.java (not open)
+package org.reference;
+
+import org.sample.Foo;
+
+public class Main {
+	private static Foo foo = Foo.FOO2;
+
+	public static void main(String[] args) {
+		System.out.println(foo);
+	}
+
+	public void test() {
+		String message1 = getMessage();
+	}
+	public String getMessage () {
+		return "some message";
+	}
+
+}
+//- /java10/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+import java.util.Arrays;
+
+public class Foo {
+
+	public static void main(String[] args) {
+		for(var name : Arrays.asList("a")) {
+			System.err.println(name.toUpperCase());
+		}
+	}
+}
+//- /wtpproject/src/Test.java (not open)
+/**
+ * Test
+ */
+public class Test {
+	private int i;
+    
+}
+//- /java13/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+
+    public static void main(String[] args) {
+    	String foo = 
+    			"""
+    			Raw
+    			String
+    			Literal
+    			FTW
+    			""";
+    	System.out.println(foo);
+    	
+        var qty = switch (args ==null?0:args.length) {
+        	case 0 -> "Zero";
+        	case 1 -> "One";
+        	default -> "Many";
+        };
+        System.out.print(qty + " args");
+    }
+    
+}
+//- /gitfilter/src/demo/Foo.java (not open)
+package demo;
+
+import demo.egit.internal.Base;
+
+public class Foo extends Base {
+
+}
+//- /gitfilter/src/demo/egit/internal/Base.java (not open)
+package demo.egit.internal;
+
+public abstract class Base {
+
+}
+//- /java9/src/main/java/foo/bar/MyDriverAction.java (not open)
+package foo.bar;
+
+import java.sql.DriverAction;
+
+public class MyDriverAction implements DriverAction {
+
+	@Override
+	public void deregister() {
+		
+	}
+	
+}
+//- /java19/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java19/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /remote-javadoc/src/main/java/foo/bar/Bar.java (not open)
+package foo.bar;
+
+import bar.foo.Foo;
+
+public class Bar extends Foo {
+
+}
+//- /java21/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java21/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java21/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /java17/src/main/java/test1/Test.java (not open)
+package test1;
+public record Test (int value) {
+}
+//- /java17/src/main/java/test1/Main.java (not open)
+package test1;
+public class Main {
+    public static void main(String[] args) {
+        Test instance = new Test(2);
+        System.out.println(instance.value());
+    }
+}
+//- /java17/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java17/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /testbundle/src/testbundle/ExtFactory.java (not open)
+package testbundle;
+
+import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.IExecutableExtensionFactory;
+
+public class ExtFactory implements IExecutableExtensionFactory {
+
+	@Override
+	public Object create() throws CoreException {
+		return Ext.getInstance();
+	}
+}
+//- /testbundle/src/testbundle/Ext.java (not open)
+package testbundle;
+
+public class Ext {
+
+	public static Ext getInstance() {
+		return new Ext();
+	}
+
+	private Ext() {
+
+	}
+
+	@Override
+	public String toString() {
+		return "EXT_TOSTRING_0.6.0";
+	}
+}
+//- /testbundle/src/testbundle/Activator.java (not open)
+package testbundle;
+
+import org.osgi.framework.BundleActivator;
+import org.osgi.framework.BundleContext;
+
+public class Activator implements BundleActivator {
+
+	/*
+	 * (non-Javadoc)
+	 * @see org.osgi.framework.BundleActivator#start(org.osgi.framework.BundleContext)
+	 */
+	public void start(BundleContext context) throws Exception {
+		System.out.println("Hello World!!");
+	}
+	
+	/*
+	 * (non-Javadoc)
+	 * @see org.osgi.framework.BundleActivator#stop(org.osgi.framework.BundleContext)
+	 */
+	public void stop(BundleContext context) throws Exception {
+		System.out.println("Goodbye World!!");
+	}
+
+}
+//- /java18/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java18/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /java25/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java25/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java25/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+	public Foo() {
+		System.out.println();
+		super();
+	}
+}
+//- /java11/src/main/java/org/sample/App2.java (not open)
+package org.sample;
+
+import java.util.List;
+import java.util.ArrayList;
+public class App2 {
+	public void test() {
+		List<String> arr = new ArrayList<>() {
+			String s2 = "abc";
+			private void test() {
+				int len = s2.length();
+				System.out.println(s2);
+				System.out.println(len);
+			}
+		};
+	}
+}
+//- /java11/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+
+	/**
+	 * It's a Bar interface
+	 */
+    interface Bar {
+        void something(Foo i, Bar j);
+    }
+
+    public static void main(String[] args) {
+        Bar bar = (var i, var j) -> System.out.println(i.bar() + j.toString());
+        System.out.print(bar);
+    }
+    
+    public String bar() {
+    	return toString();
+    }
+}
+//- /updatejar/src/Test.java (not open)
+import foo.bar;
+
+public class Test {
+
+	public static void main(String[] args) {
+		int sum = bar.add(1, 2, 3);
+		System.out.println(sum);
+	}
+
+}
+//- /java26/src/main/java/UnnamedWithString.java (not open)
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+//- /java26/src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /java26/src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public class Foo {
+	// JEP 530: Primitive Types in Patterns, instanceof, and switch (Fourth Preview)
+	static String classify(int value) {
+		return switch (value) {
+			case 0 -> "zero";
+			case int i when i > 0 -> "positive";
+			case int i -> "negative";
+		};
+	}
+}
+//= expected

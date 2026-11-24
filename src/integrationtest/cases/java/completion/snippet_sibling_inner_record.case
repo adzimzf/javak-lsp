@@ -1,0 +1,5 @@
+//- /org/sample/Test.java
+$0package org.sample;
+public record Test() {}
+public record InnerTest(){}
+//= expected

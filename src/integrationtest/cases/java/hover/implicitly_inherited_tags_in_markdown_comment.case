@@ -1,0 +1,22 @@
+//- /test/Test.java
+package test;
+public class Test {
+    interface Calculator {
+        /**
+         * Calculates a difference.
+         *
+         * @param a the inherited first number
+         * @param b the inherited second number
+         * @return the inherited difference
+         */
+        int subtract(int a, int b);
+    }
+    static class SimpleCalculator implements Calculator {
+        /// Subtracts two numbers locally.
+        @Override
+        public int s$0ubtract(int a, int b) {
+            return a - b;
+        }
+    }
+}
+//= expected

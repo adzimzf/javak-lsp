@@ -1,0 +1,15 @@
+//- /test1/Test.java
+package test1;
+/**
+ * A simple program.
+ * {@snippet :
+ * class HelloWorld {
+ *     public static void main(String... args) {
+ *         System.out.println("Hello World!");    // @highlight substring="println"
+ *     }
+ * }
+ * }
+ */
+public class Te$0st {
+}
+//= expected

@@ -1,0 +1,12 @@
+//- /Test.java
+package org.sample
+public class Test {
+	public void test(String x){}
+	public void test(String x, int y){}
+	public void test(String x, int y, boolean z){}
+	public static void main(String[] args) {
+		  Test obj = new Test();
+		  obj.test$0
+	}
+}
+//= expected

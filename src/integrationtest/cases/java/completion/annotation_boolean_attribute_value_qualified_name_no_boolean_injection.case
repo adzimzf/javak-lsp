@@ -1,0 +1,8 @@
+//- /foo/bar/Test.java
+package foo.bar;
+
+@Deprecated(forRemoval = Test.$0)
+public class Test {
+    public static final boolean blah = false;
+}
+//= expected

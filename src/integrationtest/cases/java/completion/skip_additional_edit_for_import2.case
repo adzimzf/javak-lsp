@@ -1,0 +1,5 @@
+//- /org/sample/Test.java
+$0package org.sample;
+import public class Test {
+}
+//= expected

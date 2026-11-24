@@ -1,0 +1,10 @@
+//- /org/sample/Test.java
+package org.sample;
+import static java.util.List.DUMMY;public class Test {
+
+	void test() {
+
+		List$0
+	}
+}
+//= expected

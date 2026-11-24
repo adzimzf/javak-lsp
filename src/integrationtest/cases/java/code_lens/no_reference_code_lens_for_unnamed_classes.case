@@ -1,0 +1,25 @@
+//- /src/main/java/UnnamedWithString.java
+String foo() {
+	return "foo";
+}
+
+void main() {
+	System.out.println(foo());
+}
+$0
+//- /src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /src/main/java/foo/bar/Foo.java (not open)
+package foo.bar;
+
+/**
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//= expected

@@ -1,0 +1,6 @@
+//- /src/main/java/java/Foo.java
+$0package java;
+public class Foo extends UnknownType {	public void method1(){
+		super.whatever();	}
+}
+//= expected

@@ -1,0 +1,10 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+
+	void test() {
+
+		if (c$0
+	}
+}
+//= expected

@@ -1,0 +1,15 @@
+//- /test1/E.java
+package test1;
+public class E {
+	/**
+	 * Copies elements from source to destination.
+	 * @param src the source array
+	 * @param dest the destination array
+	 * @param count number of elements to copy
+	 */
+	public void copy(Object[] src, Object[] dest, int count) {}
+	public void test() {
+		copy($0null, null, 0)
+	}
+}
+//= expected

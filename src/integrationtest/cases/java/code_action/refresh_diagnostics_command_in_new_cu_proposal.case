@@ -1,0 +1,8 @@
+//- /org/sample/Foo.java
+package org.sample;
+public class Foo {
+	public static void main(String[] args) {
+		$0CU$1 obj;
+	}
+}
+//= expected

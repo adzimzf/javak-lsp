@@ -1,0 +1,9 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	void sysop(){}
+	public void testMethod(Object args) {
+		new Test().syso$0
+	}
+}
+//= expected

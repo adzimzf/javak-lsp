@@ -1,0 +1,11 @@
+//- /Foo.java
+$0public class Foo {
+	void bar() {
+		String name = "World";
+		int count = 42;
+		String result = """
+					    Hello %s, count is %d
+					""".formatted(name, count);
+	}
+}
+//= expected

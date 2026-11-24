@@ -1,0 +1,6 @@
+//- /p/A.java
+package p;
+
+public record $0A$1(String name, int age) {
+}
+//= expected

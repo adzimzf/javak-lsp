@@ -1,0 +1,5 @@
+//- /App.java
+$0public class App {
+	String foo = App.test(); // compilation error, test() doesn't exist
+}
+//= expected

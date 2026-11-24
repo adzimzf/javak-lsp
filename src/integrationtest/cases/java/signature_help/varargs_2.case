@@ -1,0 +1,12 @@
+//- /test1/E.java
+package test1;
+import java.util.Arrays;
+public class E {
+	public static void main(String[] args) {
+		Arrays.asList(1,2,3);
+		demo("1", "2","3"$0 )
+	}
+	public static void demo (String s, String... s2) {
+	}
+}
+//= expected

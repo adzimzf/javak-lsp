@@ -1,0 +1,18 @@
+//- /src/pckg/Foo.java
+$0package pckg;
+
+public class Foo implements IFoo {
+
+}
+//- /src/internal/IFoo.java (not open)
+package internal;
+
+/**
+ * 
+ * test
+ *
+ */
+public interface IFoo {
+
+}
+//= expected

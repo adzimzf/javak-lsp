@@ -1,0 +1,14 @@
+//- /Foo.java
+public class Foo {
+    public static boo(StringChain chain) {
+		String variable = $0//
+		"variable".concat("");
+    }
+
+	static class StringChain {
+		public String newString() {
+			return "";
+		}
+	}
+}
+//= expected

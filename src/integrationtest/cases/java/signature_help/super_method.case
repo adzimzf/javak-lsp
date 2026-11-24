@@ -1,0 +1,9 @@
+//- /test1/E.java
+package test1;
+public class E extends F {
+	public void foo() {
+		E.super.equals($01);
+	}
+}
+class F {}
+//= expected

@@ -1,0 +1,8 @@
+//- /Foo.java
+$0public class Foo {
+	void process(String param1, String param2, String param3) {}
+	void bar() {
+		process("first", "second", "third");
+	}
+}
+//= expected

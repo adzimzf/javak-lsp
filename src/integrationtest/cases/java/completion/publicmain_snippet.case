@@ -1,0 +1,5 @@
+//- /Foo.java
+class Foo {
+	public$0
+};
+//= expected

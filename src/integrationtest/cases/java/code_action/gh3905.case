@@ -1,0 +1,9 @@
+//- /E.java
+public class E {
+    public class SuperType {
+        public SuperType(String name) {}
+    }
+    public class $0SubType$1 extends SuperType {
+    }
+}
+//= expected

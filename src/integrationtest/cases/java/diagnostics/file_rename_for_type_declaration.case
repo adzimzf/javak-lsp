@@ -1,0 +1,10 @@
+//- /src/main/java/Other.java
+$0public class Foo {
+}
+
+public class Bar {
+}
+
+public class Biz {
+}
+//= expected

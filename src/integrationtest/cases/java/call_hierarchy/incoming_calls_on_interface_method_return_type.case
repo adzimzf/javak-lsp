@@ -1,0 +1,13 @@
+//- /src/org/sample/CallHierarchyGH2771.java
+package org.sample;
+
+public interface CallHierarchyGH2771 {
+    Op$0t<String> name();
+
+    public static class Opt<T> {
+        public static <T> Opt<T> of(T t) {
+            return new Opt();
+        }
+    }
+}
+//= expected

@@ -1,0 +1,31 @@
+//- /src/main/java/foo/bar/Foo.java
+package foo.bar;
+
+/**$0
+ * It's a Foo class
+ */
+public sealed interface Foo
+permits Bar { 
+}
+record Bar(String name) implements Foo { }
+//- /src/main/java/org/sample/Test.java (not open)
+package org.sample;
+
+public class Test {
+}
+//- /src/main/java/foo/bar/Bar.java (not open)
+package foo.bar;
+
+public class Bar {
+	record Edge(int fromNodeId,
+		int toNodeId,
+		Object fromPoint,
+		Object toPoint,
+		double length,
+		Object profile
+	) {}
+	void foo(String id) {
+		new Edge(1, 2, 3, 4, 5, 6);
+	}
+}
+//= expected

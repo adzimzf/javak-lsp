@@ -1,0 +1,8 @@
+//- /Foo.java
+$0import java.util.stream.Stream;
+public class Foo {
+	void bar() {
+		Stream.of(2, 3, 5, 7).map(n -> n * 2);
+	}
+}
+//= expected

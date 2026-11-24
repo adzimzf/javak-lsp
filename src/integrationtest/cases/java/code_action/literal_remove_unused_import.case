@@ -1,0 +1,7 @@
+//- /Foo.java
+import $0java.sql$1.*; 
+public class Foo {
+	void foo() {
+	}
+}
+//= expected
