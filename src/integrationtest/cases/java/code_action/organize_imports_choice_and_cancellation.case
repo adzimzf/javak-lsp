@@ -1,0 +1,9 @@
+//- /module-info.java
+module demo {
+}
+//- /alternative/One.java
+package alternative; public class One {}
+//- /demo/App.java
+$0package demo;
+class App { One one; }
+//= expected

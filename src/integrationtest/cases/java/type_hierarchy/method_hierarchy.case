@@ -1,0 +1,49 @@
+//- /src/main/java/org/example/Zero.java
+package org.example;
+
+public class Zero {
+    public void f$0oo() {
+    }
+}
+//- /src/main/java/org/example/One.java
+package org.example;
+
+public class One extends Zero {
+    @Override
+    public void foo() {
+    }
+}
+//- /src/main/java/org/example/Two.java
+package org.example;
+
+public class Two extends Zero {
+}
+//- /src/main/java/org/example/Three.java
+package org.example;
+
+public class Three extends One {
+}
+//- /src/main/java/org/example/Four.java
+package org.example;
+
+public class Four extends One {
+    @Override
+    public void foo() {
+        super.foo();
+    }
+}
+//- /src/main/java/org/example/Five.java
+package org.example;
+
+public class Five extends Two {
+}
+//- /src/main/java/org/example/Six.java
+package org.example;
+
+public class Six extends Two {
+    @Override
+    public void foo() {
+        super.foo();
+    }
+}
+//= expected

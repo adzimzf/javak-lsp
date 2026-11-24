@@ -1,0 +1,9 @@
+//- /Foo.java
+$0import java.util.Locale;
+public class Foo {
+	void bar() {
+		String name = "Alice";
+		String result = String.format(Locale.US, "Hello %s", name);
+	}
+}
+//= expected

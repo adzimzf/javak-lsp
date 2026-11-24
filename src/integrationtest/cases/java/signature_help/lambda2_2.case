@@ -1,0 +1,9 @@
+//- /test1/E.java
+package test1;
+import java.util.Arrays;
+public class E {
+	public static void main(String[] args) {
+		 Arrays.stream(args).filter($0a -> a.length() > 0).toArray(String[]::new);
+	}
+}
+//= expected

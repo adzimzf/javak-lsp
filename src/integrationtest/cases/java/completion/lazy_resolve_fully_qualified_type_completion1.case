@@ -1,0 +1,6 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	java.util.List$0
+}
+//= expected

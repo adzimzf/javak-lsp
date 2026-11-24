@@ -1,0 +1,16 @@
+//- /test1/Car.java
+package test1;
+public class Car extends Vehicle {
+   public void speed(int x, int y) {}
+   public static void main(int [] args) {
+      Car test = new Car();
+      test.speed($0);
+   }
+}
+class Vehicle extends MovingObject {
+   public void speed(int x) {}
+}
+class MovingObject {
+   public void speed(int x, int y, int z) {}
+}
+//= expected

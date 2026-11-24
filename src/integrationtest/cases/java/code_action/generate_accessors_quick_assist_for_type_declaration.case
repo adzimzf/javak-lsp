@@ -1,0 +1,8 @@
+//- /p/A.java
+package p;
+
+public class $0A$1 {
+	public String name = "name";
+	public String pet = "pet";
+}
+//= expected

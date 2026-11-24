@@ -1,0 +1,7 @@
+//- /foo/bar/Foo.java
+package foo.bar;
+
+@SuppressWarnings(value = $0)
+public class Foo {
+}
+//= expected

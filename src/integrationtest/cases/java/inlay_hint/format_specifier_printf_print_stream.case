@@ -1,0 +1,8 @@
+//- /Foo.java
+$0public class Foo {
+	void bar() {
+		String name = "World";
+		System.out.printf("Hello %s\n", name);
+	}
+}
+//= expected

@@ -1,0 +1,15 @@
+//- /org/sample/Test.java
+package org.sample;
+import java.util.Arrays;
+public class Test {
+
+	public static void main(String[] args) {
+		new Runnable() {
+			@Override
+			public void run() {
+				boolean equals = A$0rrays.equals(new Object[0], new Object[0]);
+			}
+		};
+	}
+}
+//= expected

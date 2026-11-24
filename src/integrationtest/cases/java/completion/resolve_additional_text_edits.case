@@ -1,0 +1,7 @@
+//- /Foo.java
+public class Foo {
+	void foo() {
+		HashMa$0
+	}
+}
+//= expected

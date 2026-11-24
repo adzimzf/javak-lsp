@@ -1,0 +1,5 @@
+//- /src/main/java/test1/E.java
+$0package test1;
+import java.security.Certificate;
+public interface E extends Certificate {}
+//= expected

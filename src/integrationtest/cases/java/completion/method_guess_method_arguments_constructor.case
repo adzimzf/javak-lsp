@@ -1,0 +1,9 @@
+//- /Foo.java
+public class Foo {
+	public static void main(String[] args) {
+		String str = "x";
+		new A$0
+	}
+	private static class A { public A(String name){} }
+}
+//= expected

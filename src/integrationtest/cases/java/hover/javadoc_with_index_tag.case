@@ -1,0 +1,7 @@
+//- /test1/Meh.java
+package test1;
+/**
+ * Some <dfn>{@index "locale-sensitive"}</dfn> text.
+ */
+public class M$0eh {}
+//= expected

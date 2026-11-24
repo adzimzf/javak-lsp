@@ -1,0 +1,10 @@
+//- /Foo.java
+$0import java.util.Map;
+import java.util.HashMap;
+public class Foo {
+	void bar() {
+		Map<String, Integer> map = new HashMap<>();
+		map.forEach((key, value) -> System.out.println(key + value));
+	}
+}
+//= expected

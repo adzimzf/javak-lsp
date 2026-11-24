@@ -1,0 +1,9 @@
+//- /test1/E.java
+package test1;
+public class E {
+	public void bar() {
+		System.out.println("""
+			(,{,[],$0})""");
+	}
+}
+//= expected

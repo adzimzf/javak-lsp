@@ -1,0 +1,11 @@
+//- /Foo.java
+$0import java.util.stream.Stream;
+public class Foo {
+	void bar() {
+		// Explicit type - should not show inlay hint
+		Stream.of(2, 3, 5, 7).map((Integer n) -> n * 2);
+		// Implicit type - should show inlay hint
+		Stream.of(2, 3, 5, 7).map(x -> x * 2);
+	}
+}
+//= expected

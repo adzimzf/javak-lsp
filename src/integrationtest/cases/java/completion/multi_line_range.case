@@ -1,0 +1,12 @@
+//- /Foo.java
+public class Foo {
+    public static void main(String[] args) {
+        if (true) {
+            java.util.List<String> list = new java.util.ArrayList<>();
+            list.$0add
+            ("test"
+            );
+        }
+    }
+}
+//= expected

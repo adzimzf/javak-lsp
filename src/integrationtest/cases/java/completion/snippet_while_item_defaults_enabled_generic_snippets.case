@@ -1,0 +1,12 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	/**
+	 * This is a test.
+	 */
+	private int a;
+	public void test(int a) {
+		a$0
+	}
+}
+//= expected

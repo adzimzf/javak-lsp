@@ -1,0 +1,7 @@
+//- /src/pckg/Foo.java
+package pckg;
+
+public class Foo implements IFo$0o {
+
+}
+//= expected

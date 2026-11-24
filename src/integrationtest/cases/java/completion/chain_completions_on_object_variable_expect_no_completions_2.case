@@ -1,0 +1,14 @@
+//- /Foo.java
+public class Foo {
+    public static boo(ObjectChain chain) {
+		Object variable = //
+		chain.equals($0variable);
+    }
+
+	static class ObjectChain {
+		public Object newObject() {
+			return new Object();
+		}
+	}
+}
+//= expected

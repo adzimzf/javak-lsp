@@ -1,0 +1,16 @@
+//- /Foo.java
+import java.util.List;
+public class Foo {
+	public class Stream {
+		public List<String> toList(int size) {
+			return null;
+		}
+	}
+
+    public static void main(String[] args) {
+		Stream stream = new Stream();
+		Stream[] streams = new Stream[0];
+		List<String> names =$0
+    }
+}
+//= expected

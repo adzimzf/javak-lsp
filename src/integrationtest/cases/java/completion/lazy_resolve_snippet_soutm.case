@@ -1,0 +1,7 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	public void testMethod() {
+		soutm$0	}
+}
+//= expected

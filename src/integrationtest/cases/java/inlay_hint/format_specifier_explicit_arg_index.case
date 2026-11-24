@@ -1,0 +1,9 @@
+//- /Foo.java
+$0public class Foo {
+	void bar() {
+		String a = "first";
+		String b = "second";
+		String result = String.format("%2$s before %1$s", a, b);
+	}
+}
+//= expected

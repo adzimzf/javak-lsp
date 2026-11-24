@@ -1,0 +1,19 @@
+//- /test/Test.java
+package test;
+/// ## TestClass
+///
+/// Paragraph
+///
+/// - item 1
+/// - _item 2_
+    public class T$0est {
+    /// ### m()
+    ///
+    /// Paragraph with _emphasis_
+    /// - item 1
+    /// - item 2
+    /// @param i an _integer_ !
+    void m(int i) {
+    }
+}
+//= expected

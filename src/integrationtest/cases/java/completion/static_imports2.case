@@ -1,0 +1,11 @@
+//- /test1/B.java
+package test1;
+
+public class B {
+    public void bar() {
+        /* */fo$0
+    }
+    public void foo(int x) {
+    }
+}
+//= expected

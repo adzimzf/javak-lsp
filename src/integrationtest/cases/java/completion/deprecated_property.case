@@ -1,0 +1,7 @@
+//- /Test.java
+public class Main {
+	@Deprecated
+	public static final class DeprecatedClass {}
+	DeprecatedCl$0
+}
+//= expected

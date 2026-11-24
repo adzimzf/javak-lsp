@@ -1,0 +1,11 @@
+//- /org/sample/Baz.java
+package org.sample;
+
+public class Baz {
+    public String print() {
+        int a = 1;
+        return String.format("Value: {}",$0
+        a);
+    }
+}
+//= expected

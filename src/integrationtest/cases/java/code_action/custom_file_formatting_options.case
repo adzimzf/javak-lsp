@@ -1,0 +1,14 @@
+//- /test1/E.java
+package test1;
+interface I {
+	void method();
+}
+public class E {
+	void bar(I i) {
+	}
+	void foo() {
+		bar(() $0/*[*//*]*/$1-> {
+		});
+	}
+}
+//= expected

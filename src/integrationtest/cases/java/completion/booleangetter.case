@@ -1,0 +1,6 @@
+//- /Foo.java
+public class Foo {
+    private boolean boolField;
+    is$0
+}
+//= expected

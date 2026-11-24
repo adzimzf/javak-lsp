@@ -1,0 +1,12 @@
+//- /test1/B.java
+package test1;
+import static java.lang.Math.sqrt;
+import java.util.List;
+public class B {
+    List<String> list = new ArrayL
+    public static void main(String[] args) {
+        double d1 = sqrt(4);
+        double d2 = abs$0
+    }
+}
+//= expected

@@ -1,0 +1,10 @@
+//- /test1/Test.java
+package test1;
+/**
+ * <h4><a id="special_cases_constructor">Special cases</a></h4>
+ * A simple mention of {@linkplain ##special_cases_constructor Special Cases}.
+ * <p> A link to {@linkplain String}
+ */
+public class Te$0st {
+}
+//= expected

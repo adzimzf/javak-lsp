@@ -1,0 +1,9 @@
+//- /src/main/java/org/sample/Bar.java
+package org.sample;
+
+import org.apache.commons.collections.primitives.ShortCo$0llections;
+
+public class Bar {
+
+}
+//= expected

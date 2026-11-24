@@ -1,0 +1,16 @@
+//- /E.java
+interface I {
+    void method();
+}
+public class E {
+    public void bar(I i) {}
+    public void foo() {
+        bar(new I() {
+            @Override
+            /*[*/$0public void method() {
+                System.out.println();
+            }$1/*]*/
+        });
+    }
+}
+//= expected

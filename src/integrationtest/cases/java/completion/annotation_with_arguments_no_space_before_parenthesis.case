@@ -1,0 +1,4 @@
+//- /Foo.java
+@Supp$0("unused")
+public class Foo {}
+//= expected

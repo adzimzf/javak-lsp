@@ -1,0 +1,8 @@
+//- /Foo.java
+import java.util.stream.Stream;
+public class Foo {
+    public static void main(String[] args) {
+		Stream.of("1").collect($0)
+    }
+}
+//= expected

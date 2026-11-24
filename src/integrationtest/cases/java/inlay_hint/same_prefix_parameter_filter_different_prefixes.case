@@ -1,0 +1,8 @@
+//- /Foo.java
+$0public class Foo {
+	void differentPrefixes(String s1, String t1, String u1) {}
+	void bar() {
+		differentPrefixes("first", "second", "third");
+	}
+}
+//= expected

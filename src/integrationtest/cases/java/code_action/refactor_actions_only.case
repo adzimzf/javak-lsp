@@ -1,0 +1,6 @@
+//- /Foo.java
+public class Foo {
+	void foo() {
+		String $0bar$1 = "astring";	}
+}
+//= expected

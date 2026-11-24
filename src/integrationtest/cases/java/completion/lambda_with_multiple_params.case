@@ -1,0 +1,7 @@
+//- /Foo.java
+public class Foo {
+	void foo() {
+ 		java.util.function.BiConsumer<Integer, Long> bc = $0
+	}
+}
+//= expected

@@ -1,0 +1,7 @@
+//- /Foo.java
+public class Foo {
+	void foo() {
+		Object o = new O$0
+	}
+}
+//= expected

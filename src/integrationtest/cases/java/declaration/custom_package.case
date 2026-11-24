@@ -1,0 +1,14 @@
+//- /src/PackageTwo/Foo2.java
+package PackageTwo;
+
+import PackageOne.*;
+
+public class Foo2 {
+	
+    Foo bar;
+
+    public void test() {
+        bar.he$0llo();
+    }
+}
+//= expected

@@ -1,0 +1,17 @@
+//- /p1/C.java
+package p1;
+
+public class C {
+}
+//- /p2/C.java
+package p2;
+
+public class C {
+}
+//- /p/B.java
+$0package p;
+
+public class B {
+	C c;
+}
+//= expected

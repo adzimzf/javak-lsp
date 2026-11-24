@@ -1,0 +1,12 @@
+//- /test1/E.java
+package test1;
+import java.util.LinkedList;
+import org.sample.MyList;
+public class E {
+
+	void test() {
+		MyList<String> l = new LinkedList<>();
+		l.add($0
+	}
+}
+//= expected

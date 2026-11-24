@@ -1,0 +1,12 @@
+//- /test/Test.java
+package test;
+public class Test {
+    /// ## calculate()
+    ///
+    /// Paragraph
+    ///
+    /// - item 1
+    /// - _item 2_
+    void c$0alculate() {}
+}
+//= expected

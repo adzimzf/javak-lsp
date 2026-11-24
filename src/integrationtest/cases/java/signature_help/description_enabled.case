@@ -1,0 +1,11 @@
+//- /test1/E.java
+package test1;
+public class E {
+	/**
+	 * This is an API.
+	 */
+	public void foo(String s) {
+		 foo($0null)
+	}
+}
+//= expected

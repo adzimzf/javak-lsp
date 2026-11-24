@@ -1,0 +1,8 @@
+//- /test/MarkdownCode.java
+package test;
+/// Here's some code {@code
+///     List<String> list = List.of("Hello World!");
+/// }
+/// that does something.
+public class M$0arkdownCode {}
+//= expected

@@ -1,0 +1,6 @@
+//- /Foo.java
+public class Foo {
+	void foo() {
+		Integer $0bar$1 = 2000;	}
+}
+//= expected

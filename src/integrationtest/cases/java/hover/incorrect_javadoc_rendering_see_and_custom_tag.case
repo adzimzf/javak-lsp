@@ -1,0 +1,9 @@
+//- /test2/Hover.java
+package test2;
+/**
+  * Some javadoc and then ...
+  * @see String
+  * @jls 9.6.4.1 @Target
+  */
+public class H$0over {}
+//= expected

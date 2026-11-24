@@ -1,0 +1,11 @@
+//- /src/main/java/test1/E.java
+$0package test1;
+public class E {
+    public boolean foo(boolean b1) {
+        if (false) {
+            return true;
+        }
+        return false;
+    }
+}
+//= expected

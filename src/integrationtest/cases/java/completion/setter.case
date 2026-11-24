@@ -1,0 +1,5 @@
+//- /Foo.java
+public class Foo {
+    private String strField;
+    set$0}
+//= expected

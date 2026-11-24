@@ -35,6 +35,23 @@ pub(super) enum Kind {
     /// Every diagnostic of the cursor's file, pulled; the cursor itself is
     /// not used.
     Diagnostics,
+    Declaration,
+    /// Asked for the selection `$0`…`$1`, or the empty range at `$0`, with
+    /// no diagnostics in its context.
+    CodeAction,
+    /// The whole file, or the selection `$0`…`$1` when the case has one.
+    Formatting,
+    /// The whole file.
+    InlayHint,
+    CodeLens,
+    /// Prepared at the cursor, then the calls into and out of the first
+    /// item.
+    CallHierarchy,
+    /// Prepared at the cursor, then the supertypes and subtypes of the
+    /// first item.
+    TypeHierarchy,
+    SemanticTokens,
+    SelectionRange,
 }
 
 impl Kind {
@@ -54,6 +71,15 @@ impl Kind {
             Self::FoldingRange => "textDocument/foldingRange",
             Self::WorkspaceSymbol => "workspace/symbol",
             Self::Diagnostics => "textDocument/diagnostic",
+            Self::Declaration => "textDocument/declaration",
+            Self::CodeAction => "textDocument/codeAction",
+            Self::Formatting => "textDocument/formatting",
+            Self::InlayHint => "textDocument/inlayHint",
+            Self::CodeLens => "textDocument/codeLens",
+            Self::CallHierarchy => "textDocument/prepareCallHierarchy",
+            Self::TypeHierarchy => "textDocument/prepareTypeHierarchy",
+            Self::SemanticTokens => "textDocument/semanticTokens/full",
+            Self::SelectionRange => "textDocument/selectionRange",
         }
     }
 
@@ -61,10 +87,39 @@ impl Kind {
         let cursor = &fixture.cursor;
         let document = json!({"uri": session.uri(&cursor.path)});
         let position = json!({"line": cursor.line, "character": cursor.character});
+        let end = fixture.selection_end.as_ref().unwrap_or(cursor);
+        let selection = json!({
+            "start": position,
+            "end": {"line": end.line, "character": end.character},
+        });
+        let options = json!({"tabSize": 4, "insertSpaces": false});
         match self {
-            Self::DocumentSymbol | Self::FoldingRange | Self::Diagnostics => {
+            Self::DocumentSymbol
+            | Self::FoldingRange
+            | Self::Diagnostics
+            | Self::CodeLens
+            | Self::SemanticTokens => {
                 json!({"textDocument": document})
             }
+            Self::CodeAction => json!({
+                "textDocument": document,
+                "range": selection,
+                "context": {"diagnostics": []},
+            }),
+            Self::Formatting if fixture.selection_end.is_some() => json!({
+                "textDocument": document,
+                "range": selection,
+                "options": options,
+            }),
+            Self::Formatting => json!({"textDocument": document, "options": options}),
+            Self::InlayHint => json!({
+                "textDocument": document,
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": fixture.line_count(&cursor.path), "character": 0},
+                },
+            }),
+            Self::SelectionRange => json!({"textDocument": document, "positions": [position]}),
             Self::WorkspaceSymbol => json!({"query": fixture.word_at_cursor()}),
             Self::References => json!({
                 "textDocument": document,
@@ -84,8 +139,29 @@ impl Kind {
     /// with `null`; for the two rename requests both read as nothing.
     fn on_error(self) -> OnError {
         match self {
-            Self::PrepareRename | Self::Rename => OnError::AnswerNothing,
-            _ => OnError::Panic,
+            Self::Definition
+            | Self::TypeDefinition
+            | Self::Implementation
+            | Self::References
+            | Self::DocumentHighlight
+            | Self::Completion
+            | Self::Hover
+            | Self::SignatureHelp
+            | Self::DocumentSymbol
+            | Self::FoldingRange
+            | Self::WorkspaceSymbol
+            | Self::Diagnostics => OnError::Panic,
+            // Renaming says "cannot" with an error; the rest are requests a
+            // server may not serve at all, which reads as nothing.
+            _ => OnError::AnswerNothing,
+        }
+    }
+
+    /// The method that range formatting is asked with instead.
+    fn method_for(self, fixture: &Fixture) -> &'static str {
+        match self {
+            Self::Formatting if fixture.selection_end.is_some() => "textDocument/rangeFormatting",
+            _ => self.method(),
         }
     }
 
@@ -113,8 +189,29 @@ impl Kind {
                 .await
         } else {
             session
-                .request_until(self.method(), params, self.on_error(), settled)
+                .request_until(self.method_for(fixture), params, self.on_error(), settled)
                 .await
+        };
+        let answer = match self {
+            Self::CallHierarchy => {
+                hierarchy(
+                    session,
+                    &answer,
+                    "callHierarchy",
+                    ["incomingCalls", "outgoingCalls"],
+                )
+                .await
+            }
+            Self::TypeHierarchy => {
+                hierarchy(
+                    session,
+                    &answer,
+                    "typeHierarchy",
+                    ["supertypes", "subtypes"],
+                )
+                .await
+            }
+            _ => answer,
         };
         let view = View {
             session,
@@ -135,6 +232,14 @@ impl Kind {
             Self::FoldingRange => folded_lines(&answer),
             Self::WorkspaceSymbol => view.workspace_types(&answer),
             Self::Diagnostics => view.reported(&fixture.cursor.path, &answer),
+            Self::Declaration => view.locations(&answer),
+            Self::CodeAction => action_titles(&answer),
+            Self::Formatting => view.formatted(&answer),
+            Self::InlayHint => inlay_hints(&answer),
+            Self::CodeLens => view.lenses(&answer),
+            Self::CallHierarchy | Self::TypeHierarchy => view.hierarchy(&answer),
+            Self::SemanticTokens => view.semantic_tokens(&answer),
+            Self::SelectionRange => selection_ranges(&answer),
         };
         if lines.is_empty() {
             lines.push(NOTHING.to_owned());
@@ -614,4 +719,246 @@ fn folded_lines(answer: &Value) -> Vec<String> {
         .into_iter()
         .map(|(start, end)| format!("{}..{}", start + 1, end + 1))
         .collect()
+}
+
+/// The prepared items of a call or type hierarchy, and for the first one
+/// the answer of each of `directions`, as
+/// `{"items": [...], "<direction>": [...]}`.
+async fn hierarchy(
+    session: &mut Session,
+    prepared: &Value,
+    prefix: &str,
+    directions: [&str; 2],
+) -> Value {
+    let mut answer = json!({"items": prepared.clone()});
+    if let Some(item) = as_list(prepared).first().copied().cloned() {
+        for direction in directions {
+            let found = session
+                .request_until(
+                    &format!("{prefix}/{direction}"),
+                    json!({"item": item}),
+                    OnError::AnswerNothing,
+                    |_| true,
+                )
+                .await;
+            answer[direction] = found;
+        }
+    }
+    answer
+}
+
+/// The title of each action, sorted: which comes first is up to the
+/// client.
+fn action_titles(answer: &Value) -> Vec<String> {
+    let mut titles: Vec<String> = as_list(answer)
+        .into_iter()
+        .filter_map(|action| Some(action["title"].as_str()?.to_owned()))
+        .collect();
+    titles.sort();
+    titles.dedup();
+    titles
+}
+
+/// `line:column  label` of each hint, one-based, in source order.
+fn inlay_hints(answer: &Value) -> Vec<String> {
+    let mut hints: Vec<(u64, u64, String)> = as_list(answer)
+        .into_iter()
+        .filter_map(|hint| {
+            let label = match &hint["label"] {
+                Value::String(text) => text.clone(),
+                parts => as_list(parts)
+                    .into_iter()
+                    .filter_map(|part| part["value"].as_str())
+                    .collect(),
+            };
+            let position = &hint["position"];
+            Some((
+                position["line"].as_u64()?,
+                position["character"].as_u64()?,
+                label,
+            ))
+        })
+        .collect();
+    hints.sort();
+    hints
+        .into_iter()
+        .map(|(line, column, label)| format!("{}:{}  {}", line + 1, column + 1, label.trim()))
+        .collect()
+}
+
+/// The ranges around the cursor, innermost first, as `first:column..last:column`.
+fn selection_ranges(answer: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut range = as_list(answer).first().copied();
+    while let Some(selection) = range {
+        let (start, end) = (&selection["range"]["start"], &selection["range"]["end"]);
+        lines.push(format!(
+            "{}:{}..{}:{}",
+            start["line"].as_u64().unwrap_or(0) + 1,
+            start["character"].as_u64().unwrap_or(0) + 1,
+            end["line"].as_u64().unwrap_or(0) + 1,
+            end["character"].as_u64().unwrap_or(0) + 1,
+        ));
+        range = selection.get("parent").filter(|parent| !parent.is_null());
+    }
+    lines
+}
+
+impl View<'_> {
+    /// The cursor's file once the edits are applied, line by line.
+    fn formatted(&self, answer: &Value) -> Vec<String> {
+        let edits = as_list(answer);
+        if edits.is_empty() {
+            return Vec::new();
+        }
+        let path = &self.fixture.cursor.path;
+        let text = self.fixture.text(path).unwrap_or_default();
+        apply_edits(text, &edits)
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// `/path:line:column  source line` of each lens, with the title of its
+    /// command when the server already resolved it.
+    fn lenses(&self, answer: &Value) -> Vec<String> {
+        let path = format!("/{}", self.fixture.cursor.path);
+        let mut lenses: Vec<(Place, String)> = as_list(answer)
+            .into_iter()
+            .filter_map(|lens| {
+                let place = Place::new(path.clone(), lens.get("range")?);
+                let title = lens["command"]["title"].as_str().unwrap_or_default();
+                Some((place, title.to_owned()))
+            })
+            .collect();
+        lenses.sort();
+        lenses
+            .iter()
+            .map(|(place, title)| {
+                let shown = self.show(place);
+                if title.is_empty() {
+                    shown
+                } else {
+                    format!("{shown}  [{title}]")
+                }
+            })
+            .collect()
+    }
+
+    /// `item`, then `incomingCalls` / `outgoingCalls` (or `supertypes` /
+    /// `subtypes`): `name  /path:line:column  source line`, each group in
+    /// source order.
+    fn hierarchy(&self, answer: &Value) -> Vec<String> {
+        let mut lines = Vec::new();
+        let show = |item: &Value| -> Option<String> {
+            let uri = item["uri"].as_str()?;
+            let range = item.get("selectionRange").or_else(|| item.get("range"))?;
+            let place = Place::new(self.session.display(uri), range);
+            Some(format!("{}  {}", item["name"].as_str()?, self.show(&place)))
+        };
+        for (group, key, inner) in [
+            ("item", "items", None),
+            ("incoming", "incomingCalls", Some("from")),
+            ("outgoing", "outgoingCalls", Some("to")),
+            ("supertype", "supertypes", None),
+            ("subtype", "subtypes", None),
+        ] {
+            let mut shown: Vec<String> = as_list(&answer[key])
+                .into_iter()
+                .filter_map(|entry| show(inner.map_or(entry, |field| &entry[field])))
+                .map(|line| format!("{group} {line}"))
+                .collect();
+            shown.sort();
+            lines.extend(shown);
+        }
+        lines
+    }
+
+    /// `line:column  text  type [modifiers]` of each token, decoded with the
+    /// legend the server gave in `initialize`.
+    fn semantic_tokens(&self, answer: &Value) -> Vec<String> {
+        let legend = self.session.semantic_legend();
+        let types = as_list(&legend["tokenTypes"]);
+        let modifiers = as_list(&legend["tokenModifiers"]);
+        let data: Vec<u64> = as_list(&answer["data"])
+            .into_iter()
+            .filter_map(Value::as_u64)
+            .collect();
+        let path = format!("/{}", self.fixture.cursor.path);
+        let (mut line, mut column) = (0, 0);
+        let mut lines = Vec::new();
+        for token in data.chunks_exact(5) {
+            if token[0] > 0 {
+                line += token[0];
+                column = token[1];
+            } else {
+                column += token[1];
+            }
+            let source: Vec<u16> = self
+                .fixture
+                .line(&path, line as usize)
+                .unwrap_or_default()
+                .encode_utf16()
+                .collect();
+            let start = (column as usize).min(source.len());
+            let end = (start + token[2] as usize).min(source.len());
+            let text = String::from_utf16_lossy(&source[start..end]);
+            let kind = types
+                .get(token[3] as usize)
+                .and_then(|kind| kind.as_str())
+                .unwrap_or("?");
+            let set: Vec<&str> = modifiers
+                .iter()
+                .enumerate()
+                .filter(|(bit, _)| token[4] & (1 << bit) != 0)
+                .filter_map(|(_, modifier)| modifier.as_str())
+                .collect();
+            let mut shown = format!("{}:{}  {text}  {kind}", line + 1, column + 1);
+            if !set.is_empty() {
+                shown.push_str(&format!(" [{}]", set.join(", ")));
+            }
+            lines.push(shown);
+        }
+        lines
+    }
+}
+
+/// `text` with the LSP `edits` applied; positions count UTF-16 units.
+fn apply_edits(text: &str, edits: &[&Value]) -> String {
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(at, _)| at + 1))
+        .collect();
+    let offset = |position: &Value| -> usize {
+        let line = position["line"].as_u64().unwrap_or(0) as usize;
+        let Some(&start) = line_starts.get(line) else {
+            return text.len();
+        };
+        let rest = &text[start..];
+        let mut units = position["character"].as_u64().unwrap_or(0) as usize;
+        let mut end = 0;
+        for character in rest.chars() {
+            if units == 0 || character == '\n' {
+                break;
+            }
+            units = units.saturating_sub(character.len_utf16());
+            end += character.len_utf8();
+        }
+        start + end
+    };
+    let mut spans: Vec<(usize, usize, &str)> = edits
+        .iter()
+        .map(|edit| {
+            (
+                offset(&edit["range"]["start"]),
+                offset(&edit["range"]["end"]),
+                edit["newText"].as_str().unwrap_or_default(),
+            )
+        })
+        .collect();
+    spans.sort_by_key(|(start, end, _)| std::cmp::Reverse((*start, *end)));
+    let mut result = text.to_owned();
+    for (start, end, new_text) in spans {
+        result.replace_range(start..end.max(start), new_text);
+    }
+    result
 }

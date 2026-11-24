@@ -1,0 +1,10 @@
+//- /Foo.java
+$0import java.util.Formatter;
+public class Foo {
+	void bar() {
+		String name = "World";
+		Formatter fmt = new Formatter();
+		fmt.format("Hello %s", name);
+	}
+}
+//= expected

@@ -1,0 +1,10 @@
+//- /Foo.java
+public class Foo {
+    public static void main(String[] args) {
+        run("name", new Runnable($0
+        , 1);
+    }
+    void run(String name, Runnable runnable, int i) {
+    }
+}
+//= expected

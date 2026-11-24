@@ -20,14 +20,20 @@
 //! ```text
 //! //- /com/demo/Greeter.java (not open)
 //! ```
+//!
+//! A `$1` after the `$0` makes the two a selection: the range a code action
+//! or a range formatting is asked for. Without one the range is empty.
 
 const FILE_HEADER: &str = "//- /";
 const NOT_OPEN: &str = "(not open)";
 const CURSOR: &str = "$0";
+const SELECTION_END: &str = "$1";
 
 pub(super) struct Fixture {
     pub(super) files: Vec<FixtureFile>,
     pub(super) cursor: Cursor,
+    /// Where a selection from [`Self::cursor`] ends: `$1`, in the same file.
+    pub(super) selection_end: Option<Cursor>,
 }
 
 pub(super) struct FixtureFile {
@@ -74,7 +80,12 @@ impl Fixture {
             file.text.push('\n');
         }
         let cursor = take_cursor(&mut files);
-        Self { files, cursor }
+        let selection_end = take_selection_end(&mut files, &cursor);
+        Self {
+            files,
+            cursor,
+            selection_end,
+        }
     }
 }
 
@@ -88,6 +99,14 @@ fn take_cursor(files: &mut [FixtureFile]) -> Cursor {
     }
     assert_eq!(cursors.len(), 1, "a fixture has exactly one `$0`");
     cursors.remove(0)
+}
+
+fn take_selection_end(files: &mut [FixtureFile], cursor: &Cursor) -> Option<Cursor> {
+    let file = files.iter_mut().find(|file| file.path == cursor.path)?;
+    let offset = file.text.find(SELECTION_END)?;
+    file.text
+        .replace_range(offset..offset + SELECTION_END.len(), "");
+    Some(cursor_at(&file.path, &file.text, offset))
 }
 
 fn cursor_at(path: &str, text: &str, offset: usize) -> Cursor {
@@ -108,6 +127,17 @@ impl Fixture {
             .iter()
             .find(|file| path.strip_prefix('/') == Some(file.path.as_str()))?;
         file.text.lines().nth(index)
+    }
+
+    /// The text of the file at `path` (no leading `/`).
+    pub(super) fn text(&self, path: &str) -> Option<&str> {
+        let file = self.files.iter().find(|file| file.path == path)?;
+        Some(&file.text)
+    }
+
+    /// How many lines the file at `path` (no leading `/`) has.
+    pub(super) fn line_count(&self, path: &str) -> usize {
+        self.text(path).map_or(0, |text| text.lines().count())
     }
 
     /// Whether `name` is written somewhere in the fixture as a whole word.

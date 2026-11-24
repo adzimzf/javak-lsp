@@ -1,0 +1,9 @@
+//- /Foo.java
+public class Foo {
+	/**$0 
+	 * @int 
+	*/ 
+	void foo(int i, String s) {
+	}
+}
+//= expected

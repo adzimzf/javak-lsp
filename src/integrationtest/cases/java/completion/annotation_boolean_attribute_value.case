@@ -1,0 +1,7 @@
+//- /foo/bar/Foo.java
+package foo.bar;
+
+@Deprecated(forRemoval = $0)
+public class Foo {
+}
+//= expected
