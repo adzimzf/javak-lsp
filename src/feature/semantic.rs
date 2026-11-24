@@ -1534,16 +1534,19 @@ fn locals_of(node: &Syn) -> Vec<(&Syn, &Syn)> {
                     declarations.push((parameter, name));
                 }
             }
-            if let Some(parameters) = node.child("parameters") {
-                for inferred in parameters.walk() {
-                    if inferred.kind == "inferred_parameters" || inferred.kind == "identifier" {
-                        for name in inferred.walk() {
-                            if name.kind == "identifier" {
-                                declarations.push((node, name));
-                            }
+            // A lambda's untyped parameters: `x -> …` or `(a, b) -> …`. Only
+            // the names themselves: an identifier deeper in a parameter list
+            // is an annotation's or a type's name, not a declaration.
+            match node.child("parameters") {
+                Some(name) if name.kind == "identifier" => declarations.push((node, name)),
+                Some(inferred) if inferred.kind == "inferred_parameters" => {
+                    for name in &inferred.children {
+                        if name.kind == "identifier" {
+                            declarations.push((node, name));
                         }
                     }
                 }
+                _ => {}
             }
             if node.child("parameters").is_none() {
                 if let Some(name) = node.children.iter().find(|child| child.kind == "identifier") {

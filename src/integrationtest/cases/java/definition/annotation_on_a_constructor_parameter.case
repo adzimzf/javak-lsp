@@ -1,0 +1,14 @@
+//- /com/demo/Nullable.java
+package com.demo;
+
+@interface Nullable {
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    private Main(@Nullable Main source, @Null$0able String name) {
+    }
+}
+//= expected
+/com/demo/Nullable.java:3:12  @interface Nullable {
