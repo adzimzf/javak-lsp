@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::jvm_names::{main_class_names, MainClass};
+use tower_lsp::lsp_types::Url;
+
+use super::jvm_names::{main_classes, MainClass};
 use crate::indexer::Indexer;
 
 const BUILD_FILES: &[&str] = &[
@@ -28,9 +30,9 @@ const MODULE_SEARCH_DEPTH: usize = 6;
 /// Which compiled classes a launch needs, as jdtls' `resolveClasspath` scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClasspathScope {
-    /// Main source set only — running an application.
+    /// Main source set only: running an application.
     Runtime,
-    /// Main and test source sets — running a test class.
+    /// Main and test source sets: running a test class.
     Test,
 }
 
@@ -43,25 +45,21 @@ impl ClasspathScope {
     }
 }
 
-/// Every runnable class in indexed workspace sources, optionally only those
+/// Every runnable class of the workspace's sources, optionally only those
 /// under `under` (a file or directory).
 pub(crate) fn resolve_main_classes(indexer: &Indexer, under: Option<&Path>) -> Vec<MainClass> {
     let root = indexer.workspace_root.get();
     let mut found: Vec<MainClass> = Vec::new();
-    for entry in indexer.files.iter() {
-        let Some(path) = file_path_of(entry.key()) else {
+    for file in indexer.workspace_files() {
+        let Ok(path) = file.uri.to_file_path() else {
             continue;
         };
-        let is_inside = under.is_none_or(|parent| path.starts_with(parent));
-        let is_jvm_source = path
-            .extension()
-            .is_some_and(|extension| extension == "kt" || extension == "java");
-        if !is_inside || !is_jvm_source {
+        if under.is_some_and(|parent| !path.starts_with(parent)) {
             continue;
         }
         let path_text = path.to_string_lossy().into_owned();
-        for main_class in main_class_names(&path_text, entry.value()) {
-            let project_name = match &root {
+        for main_class in main_classes(file.language, &path_text, &file.text, &file.tree) {
+            let project_name = match root {
                 Some(root) => project_name(&module_dir_of(&path, root), root),
                 None => String::new(),
             };
@@ -77,8 +75,8 @@ pub(crate) fn resolve_main_classes(indexer: &Indexer, under: Option<&Path>) -> V
     found
 }
 
-/// Classpath entries (directories and jars) to run `main_class`:
-/// the module's own compiled classes first, then every other module's, then
+/// Classpath entries (directories and jars) to run `main_class`: the
+/// module's own compiled classes first, then every other module's, then
 /// the project's library jars.
 pub(crate) fn resolve_classpath(
     indexer: &Indexer,
@@ -91,24 +89,28 @@ pub(crate) fn resolve_classpath(
     };
     let own_module = project_name
         .filter(|name| !name.is_empty())
-        .and_then(|name| module_dir_for_project(name, &root))
+        .and_then(|name| module_dir_for_project(name, root))
         .or_else(|| {
             resolve_main_classes(indexer, None)
                 .into_iter()
                 .find(|candidate| candidate.main_class == main_class)
-                .map(|candidate| module_dir_of(Path::new(&candidate.file_path), &root))
+                .map(|candidate| module_dir_of(Path::new(&candidate.file_path), root))
         });
 
     let mut classpath: Vec<PathBuf> = Vec::new();
     if let Some(module) = &own_module {
         classpath.extend(output_dirs(module, scope));
     }
-    for module in module_dirs(&root) {
+    for module in module_dirs(root) {
         if Some(&module) != own_module.as_ref() {
             classpath.extend(output_dirs(&module, ClasspathScope::Runtime));
         }
     }
-    classpath.extend(library_jars(&root));
+    classpath.extend(
+        crate::dependency_sync::load_manifest(root)
+            .map(|manifest| manifest.jars())
+            .unwrap_or_default(),
+    );
 
     let mut unique: Vec<String> = Vec::with_capacity(classpath.len());
     for entry in classpath {
@@ -120,37 +122,27 @@ pub(crate) fn resolve_classpath(
     unique
 }
 
-/// The jars the last dependency sync resolved plus configured `jarPaths`.
-fn library_jars(root: &Path) -> Vec<PathBuf> {
-    let mut jars: Vec<PathBuf> = crate::dependency_sync::load_manifest(root)
-        .map(|manifest| manifest.jars())
-        .unwrap_or_default();
-    jars.extend(crate::workspace_json::load_configured_jar_paths(root));
-    jars.retain(|jar| jar.exists());
-    jars
-}
-
-/// Compiled-class directories a Gradle (JVM, JAVAK `jvm()` target, Android) or
-/// Maven module writes, the ones that exist.
+/// The compiled-class directories a Gradle (JVM, Kotlin `jvm()` target,
+/// Android) or Maven module writes, the ones that exist.
 pub(crate) fn output_dirs(module: &Path, scope: ClasspathScope) -> Vec<PathBuf> {
     let mut candidates: Vec<&str> = vec![
-        "build/classes/kotlin/jvm/main",
-        "build/classes/kotlin/main",
         "build/classes/java/main",
+        "build/classes/kotlin/main",
+        "build/classes/kotlin/jvm/main",
         "build/classes/java/jvm/main",
-        "build/processedResources/jvm/main",
         "build/resources/main",
+        "build/processedResources/jvm/main",
         "build/tmp/kotlin-classes/debug",
         "build/intermediates/javac/debug/classes",
         "target/classes",
     ];
     if scope == ClasspathScope::Test {
         candidates.extend([
-            "build/classes/kotlin/jvm/test",
-            "build/classes/kotlin/test",
             "build/classes/java/test",
-            "build/processedResources/jvm/test",
+            "build/classes/kotlin/test",
+            "build/classes/kotlin/jvm/test",
             "build/resources/test",
+            "build/processedResources/jvm/test",
             "build/tmp/kotlin-classes/debugUnitTest",
             "target/test-classes",
         ]);
@@ -162,7 +154,7 @@ pub(crate) fn output_dirs(module: &Path, scope: ClasspathScope) -> Vec<PathBuf> 
         .collect()
 }
 
-/// The build module a source file belongs to: its nearest ancestor (not
+/// The build module a source file belongs to: its nearest directory (not
 /// above `root`) holding a build file, else `root`.
 pub(crate) fn module_dir_of(file: &Path, root: &Path) -> PathBuf {
     let mut current = file.parent();
@@ -178,12 +170,12 @@ pub(crate) fn module_dir_of(file: &Path, root: &Path) -> PathBuf {
     root.to_path_buf()
 }
 
-/// `projectName` of a module: its path relative to `root`, or the root
+/// The `projectName` of a module: its path relative to `root`, or the root
 /// directory's own name for the root module.
 pub(crate) fn project_name(module: &Path, root: &Path) -> String {
     match module.strip_prefix(root) {
         Ok(relative) if !relative.as_os_str().is_empty() => {
-            crate::path_util::to_forward_slash(relative)
+            relative.to_string_lossy().replace('\\', "/")
         }
         _ => root
             .file_name()
@@ -199,27 +191,43 @@ fn module_dir_for_project(project_name: &str, root: &Path) -> Option<PathBuf> {
     if is_root_name {
         return Some(root.to_path_buf());
     }
-    // Gradle-style `:feature:login` names are accepted alongside paths.
+    // Gradle's `:feature:login` names are taken as well as paths.
     let relative = project_name.trim_start_matches(':').replace(':', "/");
     let candidate = root.join(relative);
     candidate.is_dir().then_some(candidate)
 }
 
-/// Every build module under `root` (including `root` when it has a build file).
+/// Every build module under `root`, `root` itself included when it has a
+/// build file.
 pub(crate) fn module_dirs(root: &Path) -> Vec<PathBuf> {
-    walkdir::WalkDir::new(root)
-        .max_depth(MODULE_SEARCH_DEPTH)
-        .into_iter()
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_string_lossy();
-            let is_hidden = name.starts_with('.') && entry.depth() > 0;
-            let is_skipped = SKIPPED_DIRECTORIES.contains(&name.as_ref());
-            entry.file_type().is_dir() && !is_hidden && !is_skipped
+    let mut modules = Vec::new();
+    collect_module_dirs(root, 0, &mut modules);
+    modules
+}
+
+fn collect_module_dirs(directory: &Path, depth: usize, modules: &mut Vec<PathBuf>) {
+    if has_build_file(directory) {
+        modules.push(directory.to_path_buf());
+    }
+    if depth >= MODULE_SEARCH_DEPTH {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut children: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            !name.starts_with('.') && !SKIPPED_DIRECTORIES.contains(&name.as_str())
         })
-        .filter_map(Result::ok)
-        .map(|entry| entry.into_path())
-        .filter(|directory| has_build_file(directory))
-        .collect()
+        .map(|entry| entry.path())
+        .collect();
+    children.sort();
+    for child in children {
+        collect_module_dirs(&child, depth + 1, modules);
+    }
 }
 
 fn has_build_file(directory: &Path) -> bool {
@@ -228,16 +236,17 @@ fn has_build_file(directory: &Path) -> bool {
         .any(|build_file| directory.join(build_file).is_file())
 }
 
-/// The `java` launcher to run the debuggee with: the configured `jdkHome`,
-/// then `JAVA_HOME` / `java` on the PATH / the login shell's JDK.
-pub(crate) fn java_executable(indexer: &Indexer) -> Option<PathBuf> {
-    let configured = crate::indexer::jdk_sources::configured_jdk_home(indexer);
-    if let Some(java) = configured.as_deref().and_then(java_in_home) {
+/// The `java` launcher to run the debug server and the debuggee with: the
+/// client's `javaHome`, then `$JAVA_HOME`, then the one the dependency sync
+/// would run (the `PATH`, the login shell's JDK).
+pub(crate) fn java_executable(configured_home: Option<&Path>) -> Option<PathBuf> {
+    if let Some(java) = configured_home.and_then(java_in_home) {
         return Some(java);
     }
-    crate::indexer::jdk_sources::environment_jdk_homes()
-        .find_map(|(_, home)| java_in_home(&home))
-        .or_else(crate::sidecar::find_java)
+    let from_environment = std::env::var_os("JAVA_HOME")
+        .filter(|home| !home.is_empty())
+        .and_then(|home| java_in_home(Path::new(&home)));
+    from_environment.or_else(crate::dependency_sync::decompile::java_executable)
 }
 
 fn java_in_home(home: &Path) -> Option<PathBuf> {
@@ -246,13 +255,13 @@ fn java_in_home(home: &Path) -> Option<PathBuf> {
     java.is_file().then_some(java)
 }
 
-/// The local path behind a `file://` index key.
+/// The local path behind a `file://` URI.
 pub(crate) fn file_path_of(uri: &str) -> Option<PathBuf> {
-    let url = tower_lsp::lsp_types::Url::parse(uri).ok()?;
+    let url = Url::parse(uri).ok()?;
     if url.scheme() != "file" {
         return None;
     }
-    crate::path_util::path_from_uri(&url)
+    url.to_file_path().ok()
 }
 
 #[cfg(test)]

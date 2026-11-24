@@ -27,9 +27,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 
-use super::jvm_names::{breakpoint_class_at, BreakpointClass, SourcePath};
+use super::jvm_names::{breakpoint_class, SourcePath};
+use crate::feature::semantic::FileView;
 use crate::indexer::Indexer;
-use crate::types::FileData;
+use crate::language::Language;
+use crate::parser::syntax;
 
 /// The debug server jar's file name, installed next to `javak-lsp`.
 pub(crate) const DEBUG_SERVER_JAR: &str = "javak-debug-server.jar";
@@ -61,12 +63,13 @@ impl std::fmt::Display for LaunchError {
         match self {
             Self::JarNotFound => write!(
                 formatter,
-                "{DEBUG_SERVER_JAR} not found next to javak-lsp, in ~/.cargo/bin, \
-                 or at ${DEBUG_SERVER_JAR_VARIABLE}"
+                "{DEBUG_SERVER_JAR} not found next to javak-lsp, in ../share/javak-lsp, \
+                 in ~/.cargo/bin, or at ${DEBUG_SERVER_JAR_VARIABLE} \
+                 (build it with `mvn -q package` in java-sidecar/debug-server)"
             ),
             Self::JavaNotFound => write!(
                 formatter,
-                "no `java` found (set jdkHome, JAVA_HOME or put java on the PATH)"
+                "no `java` found (set javaHome, JAVA_HOME or put java on the PATH)"
             ),
             Self::Spawn(error) => write!(formatter, "failed to start the debug server: {error}"),
             Self::NoPort(reason) => {
@@ -150,18 +153,32 @@ impl Drop for DebugServer {
     }
 }
 
-/// The jar: `$JAVAK_LSP_DEBUG_SERVER_JAR`, next to the running `javak-lsp`, or
-/// in `~/.cargo/bin` (so a `target/debug` build finds an installed one).
+/// The jar: `$JAVAK_LSP_DEBUG_SERVER_JAR`, next to the running `javak-lsp`,
+/// in `../share/javak-lsp` from it (a Homebrew or `/usr/local` install), in
+/// `~/.cargo/bin`, or where this checkout builds it
+/// (`java-sidecar/debug-server/target`), so a development build finds it.
 pub(crate) fn find_debug_server_jar() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(DEBUG_SERVER_JAR_VARIABLE).map(PathBuf::from) {
         return path.is_file().then_some(path);
     }
-    let beside_executable = std::env::current_exe()
+    let executable_dir = std::env::current_exe()
         .ok()
-        .and_then(|executable| executable.parent().map(|dir| dir.join(DEBUG_SERVER_JAR)));
+        .and_then(|executable| executable.parent().map(Path::to_path_buf));
+    let beside_executable = executable_dir.as_ref().map(|dir| dir.join(DEBUG_SERVER_JAR));
+    let in_share = executable_dir
+        .as_ref()
+        .and_then(|dir| dir.parent())
+        .map(|prefix| prefix.join("share").join("javak-lsp").join(DEBUG_SERVER_JAR));
     let in_cargo_bin =
         crate::util::home_dir().map(|home| home.join(".cargo").join("bin").join(DEBUG_SERVER_JAR));
-    [beside_executable, in_cargo_bin]
+    let in_checkout = Some(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("java-sidecar")
+            .join("debug-server")
+            .join("target")
+            .join(DEBUG_SERVER_JAR),
+    );
+    [beside_executable, in_share, in_cargo_bin, in_checkout]
         .into_iter()
         .flatten()
         .find(|path| path.is_file())
@@ -202,10 +219,10 @@ fn read_started_event(reader: &mut ServerOutput) -> Result<u16, String> {
         if read == 0 {
             return Err("the process exited".to_owned());
         }
-        if let Ok(started) = serde_json::from_str::<StartedEvent>(&line) {
-            if started.event == "started" {
-                return Ok(started.port);
-            }
+        if let Ok(started) = serde_json::from_str::<StartedEvent>(&line)
+            && started.event == "started"
+        {
+            return Ok(started.port);
         }
     }
 }
@@ -322,69 +339,82 @@ struct SourceUriParams {
 
 /// The JVM class to install each breakpoint line in; `None` where no class
 /// holds code on that line, or the file can't be read.
-pub(crate) fn breakpoint_classes(
-    indexer: &Indexer,
-    uri_or_path: &str,
-    lines: &[u32],
-) -> Vec<Option<String>> {
-    let Some((path, file_data)) = file_data_of(indexer, uri_or_path) else {
+pub(crate) fn breakpoint_classes(indexer: &Indexer, uri_or_path: &str, lines: &[u32]) -> Vec<Option<String>> {
+    let Some(file) = source_file(indexer, uri_or_path) else {
         return vec![None; lines.len()];
     };
-    let path_text = path.to_string_lossy();
+    let file_name = file.uri.path().to_owned();
     lines
         .iter()
-        .map(|line| {
-            let zero_based = line.saturating_sub(1);
-            match breakpoint_class_at(&path_text, &file_data, zero_based) {
-                BreakpointClass::Class(name) => Some(name),
-                BreakpointClass::NoClass => None,
-            }
-        })
+        .map(|line| breakpoint_class(file.language, &file_name, &file.text, &file.tree, line.saturating_sub(1)))
         .collect()
 }
 
-/// The indexed data of a file, or a fresh parse of it from disk.
-fn file_data_of(indexer: &Indexer, uri_or_path: &str) -> Option<(PathBuf, Arc<FileData>)> {
+/// The workspace's parse of a file, or a fresh one of it from disk.
+fn source_file(indexer: &Indexer, uri_or_path: &str) -> Option<FileView> {
     let url = Url::parse(uri_or_path)
         .ok()
         .filter(|url| url.scheme() == "file")
         .or_else(|| Url::from_file_path(uri_or_path).ok())?;
-    let path = crate::path_util::path_from_uri(&url)?;
-    if let Some(file_data) = indexer.file_data_for(url.as_str()) {
-        return Some((path, file_data));
+    if let Some(file) = indexer.workspace_file(&url) {
+        return Some(file);
     }
-    let content = std::fs::read_to_string(&path).ok()?;
-    let file_data = crate::parser::parse_by_extension(&path.to_string_lossy(), &content);
-    Some((path, Arc::new(file_data)))
+    let path = url.to_file_path().ok()?;
+    let language = Language::of_path(&path.to_string_lossy())?;
+    let text = std::fs::read_to_string(&path).ok()?;
+    let tree = syntax(language).tree(&text);
+    Some(FileView {
+        uri: url,
+        language,
+        text: Arc::new(text),
+        tree: Arc::new(tree),
+        library: false,
+    })
 }
 
-/// The source file a class was compiled from, as a `file://` URI.
+/// The source file a class was compiled from, as a `file://` URI: a
+/// workspace file, else a library's sources (the JDK's `src.zip` among
+/// them), extracted where go to definition extracts them.
 ///
-/// `source_path` is what JDI reports (`com/example/Main.kt`); without one the
-/// class name implies `com/example/Outer.{kt,java}`. Indexed files are
-/// matched by file name *and* package declaration, so a Kotlin file whose
-/// directory doesn't follow its package is still found.
-pub(crate) fn source_uri(
-    indexer: &Indexer,
-    class_name: &str,
-    source_path: Option<&str>,
-) -> Option<String> {
+/// `source_path` is what JDI reports (`com/example/Main.kt`); without one
+/// the class name implies `com/example/Outer.{java,kt}`. Files are matched
+/// by file name *and* declared package, so a Kotlin file whose directory
+/// doesn't follow its package is still found.
+pub(crate) fn source_uri(indexer: &Indexer, class_name: &str, source_path: Option<&str>) -> Option<String> {
     let candidates: Vec<SourcePath> = match source_path.and_then(SourcePath::parse) {
         Some(source_path) => vec![source_path],
         None => vec![
-            SourcePath::from_class_name(class_name, "kt"),
-            SourcePath::from_class_name(class_name, "java"),
+            SourcePath::of_class(class_name, "java"),
+            SourcePath::of_class(class_name, "kt"),
         ],
     };
+    let workspace = indexer.workspace_files();
     for candidate in &candidates {
-        let found = indexer.files.iter().find_map(|entry| {
-            let package = entry.value().package.as_deref();
-            candidate
-                .matches(entry.key(), package)
-                .then(|| entry.key().clone())
+        let found = workspace.iter().find(|file| {
+            let package = syntax(file.language).package(&file.text);
+            candidate.matches(file.uri.path(), package.as_deref())
         });
-        if found.is_some() {
-            return found;
+        if let Some(file) = found {
+            return Some(file.uri.to_string());
+        }
+    }
+    library_source_uri(indexer, class_name, &candidates)
+}
+
+fn library_source_uri(indexer: &Indexer, class_name: &str, candidates: &[SourcePath]) -> Option<String> {
+    let top_level = class_name.split('$').next().unwrap_or(class_name);
+    let simple = top_level.rsplit('.').next().unwrap_or(top_level);
+    // A Kotlin facade (`CollectionsKt`) declares no type of its name: look
+    // for the file instead, under the names a type of it would have.
+    let names = [simple.to_owned(), simple.trim_end_matches("Kt").to_owned()];
+    for name in names.iter().filter(|name| !name.is_empty()) {
+        for file in indexer.libraries.declaring(name) {
+            let matches = candidates.iter().any(|candidate| {
+                candidate.matches(&file.entry, Some(file.package.as_str()))
+            });
+            if matches {
+                return indexer.libraries.load(&file).map(|loaded| loaded.uri.to_string());
+            }
         }
     }
     None

@@ -1,84 +1,65 @@
 use super::*;
 
-fn indexed(indexer: &Indexer, path: &Path, content: &str) -> String {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, content).unwrap();
-    let uri = Url::from_file_path(path).unwrap();
-    indexer.index_content(&uri, content);
-    uri.to_string()
-}
-
-const MAIN_KT: &str = "package com.example\n\nfun main() {\n    Greeter().greet()\n}\n\nclass Greeter {\n    fun greet() {\n        println(\"hi\")\n    }\n}\n";
-
-#[test]
-fn breakpoint_classes_answer_each_one_based_line() {
+fn workspace_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Indexer) {
     let root = tempfile::tempdir().unwrap();
     let indexer = Indexer::new();
-    let uri = indexed(&indexer, &root.path().join("src/Main.kt"), MAIN_KT);
+    indexer.workspace_root.set(root.path().to_path_buf()).unwrap();
+    for (path, text) in files {
+        let path = root.path().join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+        assert!(indexer.reread(&Url::from_file_path(&path).unwrap()));
+    }
+    (root, indexer)
+}
 
-    let answer = answer(
+#[test]
+fn breakpoint_lines_are_one_based() {
+    let (root, indexer) = workspace_with(&[(
+        "src/com/demo/Main.java",
+        "package com.demo;\n\npublic class Main {\n    void run() {}\n}\n",
+    )]);
+    let uri = Url::from_file_path(root.path().join("src/com/demo/Main.java")).unwrap();
+    assert_eq!(
+        breakpoint_classes(&indexer, uri.as_str(), &[4, 1]),
+        vec![Some("com.demo.Main".to_owned()), None]
+    );
+    // A path works as well as a URI.
+    let path = root.path().join("src/com/demo/Main.java");
+    assert_eq!(breakpoint_classes(&indexer, &path.to_string_lossy(), &[4]), vec![Some("com.demo.Main".to_owned())]);
+}
+
+#[test]
+fn a_file_the_index_has_not_read_is_read_from_disk() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("Tool.kt");
+    std::fs::write(&path, "package tools\n\nfun main() {\n    println()\n}\n").unwrap();
+    let classes = breakpoint_classes(&Indexer::new(), &path.to_string_lossy(), &[4]);
+    assert_eq!(classes, vec![Some("tools.ToolKt".to_owned())]);
+}
+
+#[test]
+fn a_class_is_found_by_its_source_path_or_its_name() {
+    let (root, indexer) = workspace_with(&[
+        ("src/main/kotlin/app.kt", "package com.demo\n\nfun main() {}\n"),
+        ("src/main/java/com/demo/Greeter.java", "package com.demo;\n\nclass Greeter {}\n"),
+    ]);
+    let kotlin = Url::from_file_path(root.path().join("src/main/kotlin/app.kt")).unwrap();
+    let java = Url::from_file_path(root.path().join("src/main/java/com/demo/Greeter.java")).unwrap();
+    assert_eq!(source_uri(&indexer, "com.demo.AppKt", Some("com/demo/app.kt")), Some(kotlin.to_string()));
+    assert_eq!(source_uri(&indexer, "com.demo.Greeter$1", None), Some(java.to_string()));
+    assert_eq!(source_uri(&indexer, "com.other.Greeter", None), None);
+}
+
+#[test]
+fn the_control_channel_answers_in_its_own_shape() {
+    let (root, indexer) = workspace_with(&[("A.java", "class A {\n  void f() {}\n}\n")]);
+    let uri = Url::from_file_path(root.path().join("A.java")).unwrap();
+    let answer_for = answer(
         &indexer,
         "breakpointClasses",
-        &serde_json::json!({ "uri": uri, "lines": [4, 9] }),
+        &serde_json::json!({ "uri": uri.as_str(), "lines": [2] }),
     );
-    assert_eq!(
-        answer,
-        serde_json::json!({ "classNames": ["com.example.MainKt", "com.example.Greeter"] })
-    );
-}
-
-#[test]
-fn breakpoint_classes_parse_unindexed_files_from_disk() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("Launcher.java");
-    std::fs::write(
-        &path,
-        "package a;\n\nclass Launcher {\n    public static void main(String[] args) {\n        run();\n    }\n}\n",
-    )
-    .unwrap();
-    let indexer = Indexer::new();
-    // A plain path, as a client that sends paths rather than URIs gives it.
-    let classes = breakpoint_classes(&indexer, &path.to_string_lossy(), &[5, 1]);
-    assert_eq!(classes, vec![Some("a.Launcher".to_owned()), None]);
-}
-
-#[test]
-fn source_uri_matches_package_not_just_file_name() {
-    let root = tempfile::tempdir().unwrap();
-    let indexer = Indexer::new();
-    // Same file name in two packages; Kotlin files need not follow their package dirs.
-    indexed(
-        &indexer,
-        &root.path().join("one/Main.kt"),
-        "package com.other\n\nfun main() {}\n",
-    );
-    let wanted = indexed(&indexer, &root.path().join("two/Main.kt"), MAIN_KT);
-
-    let from_source_path = source_uri(&indexer, "com.example.Greeter", Some("com/example/Main.kt"));
-    assert_eq!(from_source_path, Some(wanted));
-}
-
-#[test]
-fn source_uri_falls_back_to_class_name() {
-    let root = tempfile::tempdir().unwrap();
-    let indexer = Indexer::new();
-    let wanted = indexed(
-        &indexer,
-        &root.path().join("src/com/example/Outer.java"),
-        "package com.example;\n\nclass Outer {\n    class Inner {}\n}\n",
-    );
-    assert_eq!(
-        source_uri(&indexer, "com.example.Outer$Inner", None),
-        Some(wanted)
-    );
-    assert_eq!(source_uri(&indexer, "com.example.Missing", None), None);
-}
-
-#[test]
-fn unknown_questions_answer_null() {
-    let indexer = Indexer::new();
-    assert_eq!(
-        answer(&indexer, "noSuchMethod", &serde_json::Value::Null),
-        serde_json::Value::Null
-    );
+    assert_eq!(answer_for, serde_json::json!({ "classNames": ["A"] }));
+    assert_eq!(answer(&indexer, "unknown", &serde_json::Value::Null), serde_json::Value::Null);
 }
