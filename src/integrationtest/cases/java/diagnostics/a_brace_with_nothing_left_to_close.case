@@ -5,4 +5,4 @@ class Ma$0in {
 }
 }
 //= expected
-/src/main/java/com/demo/Main.java:5:1  unexpected `}`
+/src/main/java/com/demo/Main.java:5:1  Syntax error on token "}", delete this token

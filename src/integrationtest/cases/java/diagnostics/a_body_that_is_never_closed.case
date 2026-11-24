@@ -4,4 +4,4 @@ class Ma$0in {
   void run() {
 }
 //= expected
-/src/main/java/com/demo/Main.java:4:2  missing `}`
+/src/main/java/com/demo/Main.java:4:1  Syntax error, insert "}" to complete ClassBody

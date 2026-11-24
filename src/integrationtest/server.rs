@@ -4,7 +4,7 @@
 //! through an in-memory pipe: no executable is spawned and no fixture file
 //! touches the disk — the sources arrive as `didOpen` text.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use tokio::time::{timeout_at, Instant};
 use tower_lsp::lsp_types::Url;
 use tower_lsp::{LspService, Server};
 
-use super::fixture::Fixture;
+use super::fixture::{Fixture, FixtureFile};
 use crate::indexer::Indexer;
 
 /// Where the server is told its workspace is. Nothing is there.
@@ -29,6 +29,8 @@ const PATIENCE: Duration = Duration::from_secs(5);
 /// The same, for a server in another process: a JVM answers its first
 /// requests while it is still warming up.
 const CHILD_PATIENCE: Duration = Duration::from_secs(30);
+/// How long pushed diagnostics must stay unchanged to be the answer.
+const QUIET: Duration = Duration::from_secs(3);
 /// `FileChangeType` of `workspace/didChangeWatchedFiles`.
 const CREATED: u8 = 1;
 const DELETED: u8 = 3;
@@ -61,6 +63,9 @@ pub(super) struct Session {
     next_id: u64,
     /// The URIs the server has published diagnostics for.
     diagnosed: HashSet<String>,
+    /// The latest diagnostics each URI was published with, for a server
+    /// that pushes them rather than answering `textDocument/diagnostic`.
+    published: HashMap<String, Value>,
     /// Where the fixture's files live, as the server sees them.
     root: Url,
     /// What `initialize` is told the workspace is: the same as [`Self::root`]
@@ -83,6 +88,7 @@ impl Session {
             incoming: frames(reader),
             next_id: 0,
             diagnosed: HashSet::new(),
+            published: HashMap::new(),
             project: root.clone(),
             root,
             disk: None,
@@ -122,6 +128,7 @@ impl Session {
             incoming: frames(Box::new(reader)),
             next_id: 0,
             diagnosed: HashSet::new(),
+            published: HashMap::new(),
             root: directory_url(source_root),
             project: directory_url(project_root),
             disk: Some(source_root.to_owned()),
@@ -136,44 +143,100 @@ impl Session {
     /// Puts the fixture in front of the server and waits until it has read
     /// it: on disk where there is one, and open either way.
     pub(super) async fn load(&mut self, fixture: &Fixture) {
+        let files = self.served(fixture);
         if let Some(disk) = self.disk.clone() {
-            for file in &fixture.files {
+            for file in &files {
                 let path = disk.join(&file.path);
                 let parent = path.parent().expect("a fixture path has a directory");
                 std::fs::create_dir_all(parent).expect("the fixture directory is writable");
                 std::fs::write(&path, &file.text).expect("the fixture file is writable");
             }
-            self.watched(fixture, CREATED).await;
+            self.watched(&files, CREATED).await;
         }
-        for file in &fixture.files {
+        for file in &files {
             self.did_open(&file.path, &file.text).await;
         }
-        self.wait_until_read(fixture).await;
+        self.wait_until_read(&files).await;
     }
 
     /// Takes the fixture away again, so the next case's `com.demo.Main` is
     /// the only one the server knows.
     pub(super) async fn unload(&mut self, fixture: &Fixture) {
-        for file in &fixture.files {
+        let files = self.served(fixture);
+        for file in &files {
             let document = json!({"uri": self.uri(&file.path)});
             self.notify("textDocument/didClose", json!({"textDocument": document}))
                 .await;
         }
         if let Some(disk) = self.disk.clone() {
-            for file in &fixture.files {
+            for file in &files {
                 let _ = std::fs::remove_file(disk.join(&file.path));
             }
-            self.watched(fixture, DELETED).await;
+            self.watched(&files, DELETED).await;
         }
         self.diagnosed.clear();
+        self.published.clear();
+    }
+
+    /// Whether the server runs in another process: one that is not this
+    /// crate's, so it may only push diagnostics (jdtls does).
+    pub(super) fn is_child(&self) -> bool {
+        self._child.is_some()
+    }
+
+    /// The diagnostics last pushed for `path`, waited for the way
+    /// [`Self::request_until`] waits for an answer: until `settled` accepts
+    /// them and nothing new has arrived for a moment, or patience runs out.
+    /// A server builds before it reports, and reports again as it learns
+    /// more, so the last word is the one that counts.
+    pub(super) async fn pushed_diagnostics(
+        &mut self,
+        path: &str,
+        settled: impl Fn(&Value) -> bool,
+    ) -> Value {
+        let uri = self.uri(path).to_string();
+        let deadline = Instant::now() + self.patience;
+        let mut quiet_until = Instant::now() + QUIET;
+        loop {
+            let current = self.published.get(&uri).cloned().unwrap_or(Value::Null);
+            let now = Instant::now();
+            if now >= deadline || (settled(&current) && now >= quiet_until) {
+                return current;
+            }
+            let wait = if settled(&current) { quiet_until } else { deadline };
+            match self.receive(wait).await {
+                Some(message) => {
+                    if message["method"] == "textDocument/publishDiagnostics" {
+                        quiet_until = Instant::now() + QUIET;
+                    }
+                    self.answer_server(&message).await;
+                }
+                None if Instant::now() >= deadline => return current,
+                None => {}
+            }
+        }
+    }
+
+    /// The fixture's files this server is handed. A case gives this crate's
+    /// server, which runs without a JDK, the JDK classes it uses as files
+    /// of their own (`/java/lang/Deprecated.java`); a server with a real
+    /// JDK refuses a second `java.lang`, so it is given its own instead.
+    fn served<'a>(&self, fixture: &'a Fixture) -> Vec<&'a FixtureFile> {
+        fixture
+            .files
+            .iter()
+            .filter(|file| {
+                self.disk.is_none()
+                    || !(file.path.starts_with("java/") || file.path.starts_with("javax/"))
+            })
+            .collect()
     }
 
     /// Tells the server the fixture's files appeared or went away, the way
     /// an editor would: a server that reads a disk indexes what it is told
     /// about, not what it is handed.
-    async fn watched(&mut self, fixture: &Fixture, change: u8) {
-        let changes: Vec<Value> = fixture
-            .files
+    async fn watched(&mut self, files: &[&FixtureFile], change: u8) {
+        let changes: Vec<Value> = files
             .iter()
             .map(|file| json!({"uri": self.uri(&file.path), "type": change}))
             .collect();
@@ -182,6 +245,16 @@ impl Session {
             json!({"changes": changes}),
         )
         .await;
+    }
+
+    /// Reads the fixture's paths from `directory` from now on: a case that
+    /// spells its source root itself (`/src/main/java/…`) is placed at the
+    /// project, every other one under the source root.
+    pub(super) fn place_at(&mut self, directory: &Path) {
+        self.root = directory_url(directory);
+        if self.disk.is_some() {
+            self.disk = Some(directory.to_owned());
+        }
     }
 
     pub(super) fn uri(&self, path: &str) -> Url {
@@ -222,11 +295,10 @@ impl Session {
     /// Opening a file only hands it over; the server reads it afterwards,
     /// and reports the file's diagnostics once it has. Waits for those, for
     /// every file, or until patience runs out.
-    async fn wait_until_read(&mut self, fixture: &Fixture) {
+    async fn wait_until_read(&mut self, files: &[&FixtureFile]) {
         let deadline = Instant::now() + self.patience;
         let all_read = |session: &Self| {
-            fixture
-                .files
+            files
                 .iter()
                 .all(|file| session.diagnosed.contains(session.uri(&file.path).as_str()))
         };
@@ -292,6 +364,8 @@ impl Session {
         if message["method"] == "textDocument/publishDiagnostics" {
             if let Some(uri) = message["params"]["uri"].as_str() {
                 self.diagnosed.insert(uri.to_owned());
+                self.published
+                    .insert(uri.to_owned(), message["params"]["diagnostics"].clone());
             }
         }
         Some(message)
@@ -321,6 +395,10 @@ impl Session {
                 "uri": self.project.as_str().trim_end_matches('/'),
                 "name": "fixture",
             }],
+            // jdtls answers signature help only when it is switched on.
+            "initializationOptions": {
+                "settings": {"java": {"signatureHelp": {"enabled": true}}},
+            },
             "capabilities": {
                 "textDocument": {
                     "hover": {"contentFormat": ["markdown", "plaintext"]},

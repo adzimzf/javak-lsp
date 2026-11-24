@@ -42,13 +42,14 @@ impl LanguageFeatures for Java {
         format!("{}{spread} {}", parameter.written, parameter.name)
     }
 
-    /// A type's own members in source order, then what it inherits by name.
-    fn member_rank(&self, depth: usize, index: usize, name: &str) -> String {
-        if depth == 0 {
-            format!("0{index:04}")
-        } else {
-            format!("1{name}")
-        }
+    /// As jdtls ranks them: fields and constants before methods, each by
+    /// name, wherever in the hierarchy the member is declared.
+    fn member_rank(&self, _depth: usize, _index: usize, name: &str, kind: &str) -> String {
+        let group = match kind {
+            "field_declaration" | "constant_declaration" | "enum_constant" => 0,
+            _ => 1,
+        };
+        format!("{group}{name}")
     }
 
     fn member_keywords(&self) -> &'static [&'static str] {

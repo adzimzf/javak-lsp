@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use crate::language::Language;
 use crate::parser::{syntax, Position, Syn};
 use crate::feature::features;
 use crate::feature::semantic::{
@@ -254,7 +255,15 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
         .type_named(receiver.text.trim(), file)
         .filter(|_| !is_value);
     if let Some(declaration) = as_a_type {
-        return visible(snapshot, file, &declaration, Wanted::Static);
+        let mut offers = visible(snapshot, file, &declaration, Wanted::Static);
+        // `Suit.class`: a class literal, after the members.
+        if file.language == Language::Java {
+            offers.push(Offer {
+                name: "class".to_owned(),
+                rank: "9class".to_owned(),
+            });
+        }
+        return offers;
     }
     // A package as a receiver offers the types it holds.
     if !is_value && is_package(snapshot, receiver.text.trim()) {
@@ -276,7 +285,7 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
         .enumerate()
     {
         if !offers.iter().any(|offer| offer.name == name) {
-            let rank = features(file.language).member_rank(depth + 1, index, &name);
+            let rank = features(file.language).member_rank(depth + 1, index, &name, "method_declaration");
             offers.push(Offer { name, rank });
         }
     }
@@ -384,7 +393,7 @@ fn visible(
                 continue;
             }
             seen.push(named.text.clone());
-            let rank = features(from.language).member_rank(depth, index, &named.text);
+            let rank = features(from.language).member_rank(depth, index, &named.text, &member.kind);
             offers.push(Offer {
                 name: named.text.clone(),
                 rank,

@@ -104,9 +104,18 @@ impl Kind {
             Settles::Immediately => true,
             Settles::WhenAnswered => has_content(answer),
         };
-        let answer = session
-            .request_until(self.method(), params, self.on_error(), settled)
-            .await;
+        let answer = if matches!(self, Self::Diagnostics) && session.is_child() {
+            // Another server may only push them: what it last published.
+            session
+                .pushed_diagnostics(&fixture.cursor.path, |answer| {
+                    matches!(settles, Settles::Immediately) || has_content(answer)
+                })
+                .await
+        } else {
+            session
+                .request_until(self.method(), params, self.on_error(), settled)
+                .await
+        };
         let view = View {
             session,
             fixture,
@@ -464,7 +473,17 @@ fn qualified_name_prefix(label: &str) -> &str {
     let end = label
         .find(|character: char| !character.is_alphanumeric() && !matches!(character, '_' | '.'))
         .unwrap_or(label.len());
-    label[..end].trim_end_matches('.')
+    let name = label[..end].trim_end_matches('.');
+    // A nested type is `IFoo` to one server and `Foo.IFoo` to another; a
+    // package (`java.util`) is lower case and kept whole.
+    let nested = name.contains('.')
+        && name
+            .split('.')
+            .all(|segment| segment.starts_with(|character: char| character.is_uppercase()));
+    if nested {
+        return name.rsplit('.').next().unwrap_or(name);
+    }
+    name
 }
 
 fn identifier_prefix(label: &str) -> &str {

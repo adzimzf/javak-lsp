@@ -19,5 +19,5 @@ public class Test extends Baz {
     }
 }
 //= expected
-run
 describe
+run

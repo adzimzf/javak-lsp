@@ -3,5 +3,5 @@ class Ma$0in {
   void run() { int x = 1 }
 }
 //= expected
-/src/main/java/com/demo/Main.java:1:1  Missing package declaration (`com.demo`)
-/src/main/java/com/demo/Main.java:2:25  missing `;`
+/src/main/java/com/demo/Main.java:1:1  The declared package "" does not match the expected package "com.demo"
+/src/main/java/com/demo/Main.java:2:24  Syntax error, insert ";" to complete BlockStatements

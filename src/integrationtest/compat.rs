@@ -4,7 +4,9 @@
 //! The same question put to `jdtls` says whether that answer is the one
 //! Java tooling agrees on — but a JVM costs more to start than every case
 //! costs to run, so this is not a test that runs with the others: it is a
-//! recorder, run by hand, whose output is committed.
+//! recorder, run by hand. Its output is a reference to compare against and
+//! is not committed: where the server should answer what jdtls answers,
+//! the case's own `//= expected` block is changed to say so.
 //!
 //! ```text
 //! JDTLS_CMD=jdtls cargo test compat -- --ignored --nocapture
@@ -21,7 +23,8 @@
 //! /com/demo/Greeter.java:2:24  class Greeter { String greet() { return ""; } }
 //! ```
 //!
-//! So one case is one file, `git diff` is the report, and the normal suite
+//! So one case is one file, `git diff` is the report (strip the `//= jdtls`
+//! blocks again before committing), and the normal suite
 //! never sees those blocks: it reads the answer up to the next `//=` line
 //! and nothing below it ([`super::cases`]). A run without `JDTLS_CMD`
 //! touches none of it.
@@ -97,11 +100,23 @@ async fn record(command: &str, suffix: &str, language: &str) -> usize {
     for (number, (file, kind)) in cases.iter().enumerate() {
         let case = Case::read(file);
         let fixture = Fixture::parse(&case.fixture);
+        // A diagnostics case names its files from the project down, source
+        // root included, so it decides itself what is under a source root.
+        let spells_its_source_root = matches!(kind, Kind::Diagnostics);
+        session.place_at(&if spells_its_source_root {
+            project_root.clone()
+        } else {
+            project_root.join(SOURCE_DIRECTORY)
+        });
         session.load(&fixture).await;
         let actual = kind
             .ask(&mut session, &fixture, &case.expected, case.settles())
             .await;
         session.unload(&fixture).await;
+        if fixture.files.iter().any(|file| file.path == "pom.xml") {
+            // The case brought its own build file and took it away again.
+            write_project_marks(&project_root, language);
+        }
         write_answer_block(file, suffix, &actual);
         if actual != case.expected {
             disagreements.push(format!(

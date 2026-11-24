@@ -39,7 +39,7 @@ impl LanguageFeatures for Kotlin {
     }
 
     /// Members by name, nearest type first.
-    fn member_rank(&self, depth: usize, _index: usize, name: &str) -> String {
+    fn member_rank(&self, depth: usize, _index: usize, name: &str, _kind: &str) -> String {
         format!("{depth}{name}")
     }
 
