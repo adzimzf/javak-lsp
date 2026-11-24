@@ -1,0 +1,10 @@
+//- /com/demo/Main.java
+package com.demo;
+
+import java.util.function.BiFunction;
+
+class Main {
+    BiFunction<Integer, Integer, Integer> sum = (left, right) -> left + rig$0ht;
+}
+//= expected
+/com/demo/Main.java:6:56  BiFunction<Integer, Integer, Integer> sum = (left, right) -> left + right;
