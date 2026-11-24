@@ -423,6 +423,7 @@ impl Session {
                     "documentSymbol": {"hierarchicalDocumentSymbolSupport": true},
                     "rename": {"prepareSupport": true},
                     "signatureHelp": {},
+                    "callHierarchy": {},
                 },
                 "workspace": {
                     "workspaceEdit": {"documentChanges": true},

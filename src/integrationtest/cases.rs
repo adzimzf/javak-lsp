@@ -110,6 +110,7 @@ suites! {
         folding_range => FoldingRange,
         workspace_symbol => WorkspaceSymbol,
         diagnostics => Diagnostics,
+        call_hierarchy => CallHierarchy,
     }
     kotlin {
         definition => Definition,

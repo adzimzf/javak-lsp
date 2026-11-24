@@ -411,3 +411,28 @@ two of jdtls's worded as jdtls words them (source level, calls).
 | `static_and_instance_initializer_blocks_parse` | nothing |
 | `try_with_resources_and_a_multi_catch_parse` | nothing |
 | `varargs_an_array_initializer_and_a_cast_parse` | nothing |
+
+## call_hierarchy
+
+The answer is the `item` prepared at the cursor, then the `incoming` and
+`outgoing` calls of that first item: `name  /path:line:column  source line`.
+jdtls names a member as `of(T) <T> : Opt<T>`, `Base()`, `protectedField`,
+`Opt<T>`, and shows a caller at its first call of the item (the `new` of a
+creation, the `super` of a chained constructor), not at its own name; a
+callee is shown at its name. The expectations were recorded with jdtls
+1.63.0 (`compat.rs`).
+
+| case | jdtls test |
+| --- | --- |
+| `incoming_calls_maven` | `CallHierarchyHandlerTest#incomingCalls_maven` |
+| `incoming_calls_on_interface_method` | `CallHierarchyHandlerTest#incomingCalls_OnInterfaceMethod` |
+| `incoming_calls_on_interface_method_return_type` | `CallHierarchyHandlerTest#incomingCalls_OnInterfaceMethodReturnType` |
+| `incoming_calls_project_only` | `CallHierarchyHandlerTest#incomingCalls_projectOnly` |
+| `incoming_calls_search_scope_changed` | `CallHierarchyHandlerTest#incomingCalls_searchScopeChanged` |
+| `incoming_calls_src` | `CallHierarchyHandlerTest#incomingCalls_src` |
+| `outgoing_calls_src` | `CallHierarchyHandlerTest#outgoingCalls_src` |
+| `outgoing_jar` | `CallHierarchyHandlerTest#outgoing_jar` |
+| `prepare_call_hierarchy` | `CallHierarchyHandlerTest#prepareCallHierarchy` |
+| `prepare_call_hierarchy_no_item_at_location` | `CallHierarchyHandlerTest#prepareCallHierarchy_noItemAtLocation` |
+| `prepare_call_hierarchy_src_enclosing` | `CallHierarchyHandlerTest#prepareCallHierarchy_src_enclosing` |
+| `selection_range` | `CallHierarchyHandlerTest#testSelectionRange` |

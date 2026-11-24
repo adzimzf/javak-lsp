@@ -35,6 +35,9 @@ pub(super) enum Kind {
     /// Every diagnostic of the cursor's file, pulled; the cursor itself is
     /// not used.
     Diagnostics,
+    /// Prepared at the cursor, then the calls into and out of the first
+    /// item.
+    CallHierarchy,
 }
 
 impl Kind {
@@ -54,6 +57,7 @@ impl Kind {
             Self::FoldingRange => "textDocument/foldingRange",
             Self::WorkspaceSymbol => "workspace/symbol",
             Self::Diagnostics => "textDocument/diagnostic",
+            Self::CallHierarchy => "textDocument/prepareCallHierarchy",
         }
     }
 
@@ -81,10 +85,11 @@ impl Kind {
     }
 
     /// A server says "this cannot be renamed" with an error as often as
-    /// with `null`; for the two rename requests both read as nothing.
+    /// with `null`; for the two rename requests both read as nothing, as
+    /// does an error from a call hierarchy: "no item here".
     fn on_error(self) -> OnError {
         match self {
-            Self::PrepareRename | Self::Rename => OnError::AnswerNothing,
+            Self::PrepareRename | Self::Rename | Self::CallHierarchy => OnError::AnswerNothing,
             _ => OnError::Panic,
         }
     }
@@ -116,6 +121,10 @@ impl Kind {
                 .request_until(self.method(), params, self.on_error(), settled)
                 .await
         };
+        let answer = match self {
+            Self::CallHierarchy => call_hierarchy(session, &answer).await,
+            _ => answer,
+        };
         let view = View {
             session,
             fixture,
@@ -135,6 +144,7 @@ impl Kind {
             Self::FoldingRange => folded_lines(&answer),
             Self::WorkspaceSymbol => view.workspace_types(&answer),
             Self::Diagnostics => view.reported(&fixture.cursor.path, &answer),
+            Self::CallHierarchy => view.call_hierarchy(&answer),
         };
         if lines.is_empty() {
             lines.push(NOTHING.to_owned());
@@ -614,4 +624,52 @@ fn folded_lines(answer: &Value) -> Vec<String> {
         .into_iter()
         .map(|(start, end)| format!("{}..{}", start + 1, end + 1))
         .collect()
+}
+
+/// The prepared items of a call hierarchy, and the calls into and out of
+/// the first one, as `{"items": [...], "incomingCalls": [...],
+/// "outgoingCalls": [...]}`.
+async fn call_hierarchy(session: &mut Session, prepared: &Value) -> Value {
+    let mut answer = json!({"items": prepared.clone()});
+    if let Some(item) = as_list(prepared).first().copied().cloned() {
+        for direction in ["incomingCalls", "outgoingCalls"] {
+            answer[direction] = session
+                .request_until(
+                    &format!("callHierarchy/{direction}"),
+                    json!({"item": item}),
+                    OnError::AnswerNothing,
+                    |_| true,
+                )
+                .await;
+        }
+    }
+    answer
+}
+
+impl View<'_> {
+    /// `item`, `incoming` and `outgoing` lines: `name  /path:line:column
+    /// source line`, each group sorted.
+    fn call_hierarchy(&self, answer: &Value) -> Vec<String> {
+        let show = |item: &Value| -> Option<String> {
+            let uri = item["uri"].as_str()?;
+            let range = item.get("selectionRange").or_else(|| item.get("range"))?;
+            let place = Place::new(self.session.display(uri), range);
+            Some(format!("{}  {}", item["name"].as_str()?, self.show(&place)))
+        };
+        let mut lines = Vec::new();
+        for (group, key, inner) in [
+            ("item", "items", None),
+            ("incoming", "incomingCalls", Some("from")),
+            ("outgoing", "outgoingCalls", Some("to")),
+        ] {
+            let mut shown: Vec<String> = as_list(&answer[key])
+                .into_iter()
+                .filter_map(|entry| show(inner.map_or(entry, |field| &entry[field])))
+                .map(|line| format!("{group} {line}"))
+                .collect();
+            shown.sort();
+            lines.extend(shown);
+        }
+        lines
+    }
 }

@@ -1,0 +1,19 @@
+//- /src/main/java/org/sample/CallHierarchyOther.java
+package org.sample;
+
+public class CallHierarchyOther {
+
+  static {
+    new CallHierarchy.FooBuilder();
+    new CallHierarchy.FooBuilder();
+    new CallHierarchy.FooBuilder();
+  }
+  
+  
+  @Deprecated public static class $0X {
+    
+  }
+  
+}
+//= expected
+item X  /src/main/java/org/sample/CallHierarchyOther.java:12:35  @Deprecated public static class X {
