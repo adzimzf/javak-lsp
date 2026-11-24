@@ -16,3 +16,4 @@ public class CallHierarchyOther {
   
 }
 //= expected
+item X  /src/main/java/org/sample/CallHierarchyOther.java:12:35  @Deprecated public static class X {

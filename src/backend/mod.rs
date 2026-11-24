@@ -16,8 +16,10 @@ use tower_lsp::lsp_types::*;
 use serde_json::Value;
 use tower_lsp::{Client, LanguageServer};
 
+use crate::feature::call_hierarchy;
 use crate::debugger::commands::{self as debug_commands, CommandOutcome, DebugCommands};
 use crate::feature::features;
+use crate::feature::semantic::{Found, Snapshot};
 use crate::indexer::Indexer;
 use crate::language::Language;
 use crate::parser::{Fold, Kind, Outline, Position};
@@ -321,6 +323,7 @@ impl LanguageServer for Backend {
                     ..CompletionOptions::default()
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: debug_commands::COMMANDS.iter().map(|command| (*command).to_owned()).collect(),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
@@ -716,6 +719,57 @@ impl LanguageServer for Backend {
         Ok(Some(self.indexer.types_matching(&params.query)))
     }
 
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let at = params.text_document_position_params;
+        let snapshot = self.indexer.snapshot();
+        let Some(found) =
+            call_hierarchy::item_at(&snapshot, &at.text_document.uri, cursor(at.position))
+        else {
+            return Ok(None);
+        };
+        Ok(Some(vec![call_item(&snapshot, &found, None)]))
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let snapshot = self.indexer.snapshot();
+        let Some(of) = item_of(&snapshot, &params.item) else {
+            return Ok(None);
+        };
+        let calls = call_hierarchy::incoming(&snapshot, &of)
+            .into_iter()
+            .map(|calls| CallHierarchyIncomingCall {
+                // As jdtls does: the caller is shown at its first call.
+                from: call_item(&snapshot, &calls.member, calls.at.first().copied()),
+                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
+            })
+            .collect();
+        Ok(Some(calls))
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let snapshot = self.indexer.snapshot();
+        let Some(of) = item_of(&snapshot, &params.item) else {
+            return Ok(None);
+        };
+        let calls = call_hierarchy::outgoing(&snapshot, &of)
+            .into_iter()
+            .map(|calls| CallHierarchyOutgoingCall {
+                to: call_item(&snapshot, &calls.member, None),
+                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
+            })
+            .collect();
+        Ok(Some(calls))
+    }
+
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let uri = params.text_document.uri;
         let Some(text) = self.indexer.text(&uri) else {
@@ -724,6 +778,62 @@ impl LanguageServer for Backend {
         let language = self.indexer.language(&uri).unwrap_or(Language::Java);
         let folds = self.indexer.syntax(language).folds(&text);
         Ok(Some(folds.into_iter().map(folding_range).collect()))
+    }
+}
+
+/// A member as a call hierarchy item, selected at its name — or at
+/// `shown_at`, a call it makes. `data` keeps where its name is, so the
+/// item is found again whatever it is shown at.
+fn call_item(
+    snapshot: &Snapshot,
+    found: &Found<'_>,
+    shown_at: Option<(Position, Position)>,
+) -> CallHierarchyItem {
+    let name_end = Position {
+        line: found.name.start.line,
+        column: found.name.start.column
+            + if std::ptr::eq(found.name, found.node) {
+                0
+            } else {
+                found.name.text.encode_utf16().count() as u32
+            },
+    };
+    let selection = shown_at.unwrap_or((found.name.start, name_end));
+    let package = snapshot.package(found.file);
+    CallHierarchyItem {
+        name: call_hierarchy::label(snapshot, found),
+        kind: symbol_kind(call_hierarchy::kind_of(found).unwrap_or(Kind::Method)),
+        tags: None,
+        detail: package,
+        uri: found.file.uri.clone(),
+        range: span_range((found.node.start, found.node.end)),
+        selection_range: span_range(selection),
+        data: Some(serde_json::json!({
+            "line": found.selection().line,
+            "character": found.selection().column,
+        })),
+    }
+}
+
+/// The member a call hierarchy item stands for, found again where its
+/// name is.
+fn item_of<'a>(snapshot: &'a Snapshot, item: &CallHierarchyItem) -> Option<Found<'a>> {
+    let data = item.data.as_ref();
+    let at = Position {
+        line: data
+            .and_then(|data| data["line"].as_u64())
+            .map_or(item.selection_range.start.line, |line| line as u32),
+        column: data
+            .and_then(|data| data["character"].as_u64())
+            .map_or(item.selection_range.start.character, |column| column as u32),
+    };
+    call_hierarchy::item_at(snapshot, &item.uri, at)
+}
+
+fn span_range((start, end): (Position, Position)) -> Range {
+    Range {
+        start: lsp_position(start),
+        end: lsp_position(end),
     }
 }
 

@@ -1044,6 +1044,12 @@ Answer: `/path:line:column  source line` of each lens, with `[title]` when the s
 
 Answer: `item`, `incoming` and `outgoing` lines: `name  /path:line:column  source line`, for the first item prepared at the cursor.
 
+jdtls names a member as `of(T) <T> : Opt<T>`, `Base()`, `protectedField`,
+`Opt<T>`, and shows a caller at its first call of the item (the `new` of a
+creation, the `super` of a chained constructor), not at its own name; a
+callee is shown at its name. The expectations were recorded with jdtls
+1.63.0 (`compat.rs`).
+
 | case | jdtls test |
 | --- | --- |
 | `incoming_calls_maven` | `CallHierarchyHandlerTest#incomingCalls_maven` |

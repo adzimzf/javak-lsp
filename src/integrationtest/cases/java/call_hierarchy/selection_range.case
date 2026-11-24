@@ -10,3 +10,4 @@ public class Foo {
 	public void $0someMethod() {}
 }
 //= expected
+item someMethod() : void  /src/org/sample/Foo.java:9:14  public void someMethod() {}

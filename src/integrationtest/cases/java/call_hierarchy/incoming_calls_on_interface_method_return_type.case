@@ -11,3 +11,5 @@ public interface CallHierarchyGH2771 {
     }
 }
 //= expected
+item Opt<T>  /src/org/sample/CallHierarchyGH2771.java:6:25  public static class Opt<T> {
+incoming of(T) <T> : Opt<T>  /src/org/sample/CallHierarchyGH2771.java:8:20  return new Opt();

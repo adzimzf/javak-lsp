@@ -67,3 +67,8 @@ public class CallHierarchy {
   }
 }
 //= expected
+item bar() : void  /src/org/sample/CallHierarchy.java:27:17  public void bar() {
+incoming Child()  /src/org/sample/CallHierarchy.java:46:7  bar();
+incoming main(String[]) : void  /src/org/sample/CallHierarchy.java:8:17  new Child().bar();
+incoming method_1() : void  /src/org/sample/CallHierarchy.java:36:7  bar();
+outgoing Child()  /src/org/sample/CallHierarchy.java:43:5  Child() {
