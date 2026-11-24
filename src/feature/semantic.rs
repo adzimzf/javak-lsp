@@ -906,6 +906,30 @@ impl Snapshot {
         constructor.or(Some(class))
     }
 
+    /// The constructor `new Circle(…)` calls, else — for a class that
+    /// declares none — the class itself, standing for its default one.
+    pub fn created<'a>(&'a self, creation: &'a Syn, file: &'a FileView) -> Option<Found<'a>> {
+        let created = creation.child("type")?;
+        let declaration = self.type_named(&type_of_node(created).name, file)?;
+        let constructor =
+            self.member(&declaration, &declaration.name.text, creation.child("arguments"));
+        constructor.or(Some(declaration))
+    }
+
+    /// The constructor `super(…)` or `this(…)` calls, else the class it
+    /// would be in.
+    pub fn chained<'a>(&'a self, invocation: &'a Syn, file: &'a FileView) -> Option<Found<'a>> {
+        let enclosing = self.enclosing(file, invocation.start)?;
+        let declaration = if invocation.child("constructor")?.kind == "super" {
+            self.supertype_of(&enclosing)?
+        } else {
+            enclosing
+        };
+        let constructor =
+            self.member(&declaration, &declaration.name.text, invocation.child("arguments"));
+        constructor.or(Some(declaration))
+    }
+
     /// The one of several declarations a call's arguments pick, else the
     /// first.
     fn chosen<'a>(
@@ -1795,13 +1819,7 @@ impl Snapshot {
                     .and_then(|owner| self.member(&owner, &name.text, None));
                 member.or_else(|| self.name_in_scope(&name.text, file, name.start))
             }
-            "object_creation_expression" => {
-                let created = parent.child("type")?;
-                let declaration = self.type_named(&type_of_node(created).name, file)?;
-                let constructor =
-                    self.member(&declaration, &declaration.name.text, parent.child("arguments"));
-                constructor.or(Some(declaration))
-            }
+            "object_creation_expression" => self.created(parent, file),
             "method_reference" => {
                 let receiver = parent.children.first()?;
                 let owner = if receiver.start == name.start {
@@ -2069,7 +2087,7 @@ fn type_parameter_names(declaration: &Syn) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn type_parameters_of(declaration: &Syn) -> Vec<String> {
+pub(crate) fn type_parameters_of(declaration: &Syn) -> Vec<String> {
     declaration
         .child("type_parameters")
         .map(|parameters| {

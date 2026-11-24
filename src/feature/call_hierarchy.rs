@@ -1,0 +1,353 @@
+//! Call hierarchy: who calls a method, constructor or field, and what a
+//! method calls, answered as jdtls answers it.
+//!
+//! - An item is a method, a constructor, a field (its readers and writers
+//!   are its callers), a type (its instances' creators, which call its
+//!   default constructor) or an initializer. On no name, the cursor's
+//!   enclosing method, constructor or initializer; between members, nothing.
+//! - A caller is listed once, at its first call; its other calls are
+//!   further ranges of the same entry. The same goes for what a member
+//!   calls.
+
+use tower_lsp::lsp_types::Url;
+
+use super::semantic::{
+    is_type_declaration, parameters, path_to, type_of_node, type_parameters_of, Bindings, FileView,
+    Found, Snapshot,
+};
+use crate::parser::{Kind, Position, Syn};
+
+/// One entry of either direction: the member at the other end, and where
+/// the calls between the two are written.
+pub struct Calls<'a> {
+    pub member: Found<'a>,
+    /// Start and end of each call, in source order, in [`Self::file`].
+    pub at: Vec<(Position, Position)>,
+    /// The file the calls are written in.
+    pub file: &'a Url,
+}
+
+/// The item the cursor asks about.
+pub fn item_at<'a>(snapshot: &'a Snapshot, uri: &Url, at: Position) -> Option<Found<'a>> {
+    let named = snapshot.declaration_at(uri, at);
+    if let Some(found) = named.filter(|found| kind_of(found).is_some()) {
+        return Some(found);
+    }
+    let file = snapshot.file(uri)?;
+    enclosing_member(file, at, false)
+}
+
+/// The member a call written at `at` belongs to: the method, constructor,
+/// initializer or field around it. A lambda belongs to the member it is in,
+/// a method of an anonymous class is a member of its own.
+fn enclosing_member(file: &FileView, at: Position, fields_too: bool) -> Option<Found<'_>> {
+    let path = path_to(&file.tree, at);
+    for &node in path.iter().rev() {
+        let named = |name| Found {
+            file,
+            node,
+            name,
+            bindings: Bindings::new(),
+        };
+        match node.kind.as_str() {
+            "method_declaration"
+            | "constructor_declaration"
+            | "compact_constructor_declaration" => {
+                return Some(named(node.child("name")?));
+            }
+            "static_initializer" => return Some(named(node)),
+            "block" if is_initializer(node, &path) => return Some(named(node)),
+            "field_declaration" if fields_too => {
+                let declarator = node
+                    .all("variable_declarator")
+                    .find(|declarator| declarator.covers(at))?;
+                return Some(Found {
+                    file,
+                    node: declarator,
+                    name: declarator.child("name")?,
+                    bindings: Bindings::new(),
+                });
+            }
+            "class_body" | "interface_body" | "enum_body" | "record_body" => return None,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A block right inside a class body: an instance initializer.
+fn is_initializer(block: &Syn, path: &[&Syn]) -> bool {
+    let at = path.iter().position(|node| std::ptr::eq(*node, block));
+    at.and_then(|at| at.checked_sub(1))
+        .and_then(|parent| path.get(parent))
+        .is_some_and(|parent| parent.kind.ends_with("_body") && parent.kind != "constructor_body")
+}
+
+/// What a member is, for the client; `None` for a name that is not one.
+pub fn kind_of(found: &Found<'_>) -> Option<Kind> {
+    let node = found.node;
+    Some(match node.kind.as_str() {
+        "method_declaration" | "annotation_type_element_declaration" => Kind::Method,
+        "constructor_declaration" | "compact_constructor_declaration" => Kind::Constructor,
+        "static_initializer" | "block" => Kind::Method,
+        "field_declaration" | "constant_declaration" => Kind::Field,
+        "variable_declarator" if is_field(found) => Kind::Field,
+        "enum_constant" => Kind::EnumMember,
+        "interface_declaration" | "annotation_type_declaration" => Kind::Interface,
+        "enum_declaration" => Kind::Enum,
+        _ if is_type_declaration(node) => Kind::Class,
+        _ => return None,
+    })
+}
+
+/// A variable declared in a class body, not in a method.
+fn is_field(found: &Found<'_>) -> bool {
+    let path = path_to(&found.file.tree, found.name.start);
+    path.iter()
+        .rev()
+        .find(|node| {
+            node.kind.ends_with("_declaration") || node.kind == "local_variable_declaration"
+        })
+        .is_some_and(|node| {
+            matches!(
+                node.kind.as_str(),
+                "field_declaration" | "constant_declaration"
+            )
+        })
+}
+
+/// How jdtls names a member: `of(T) <T> : Opt<T>`, `Base()`,
+/// `protectedField`, `Opt<T>`, `{...}`.
+pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
+    let node = found.node;
+    let name = &found.name.text;
+    let parameter_types = || -> String {
+        parameters(node, &Bindings::new())
+            .iter()
+            .map(|parameter| {
+                let spread = if parameter.spread { "..." } else { "" };
+                format!("{}{spread}", parameter.written)
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match node.kind.as_str() {
+        "method_declaration" | "annotation_type_element_declaration" => {
+            let introduced = type_parameters_of(node);
+            let introduced = if introduced.is_empty() {
+                String::new()
+            } else {
+                format!(" <{}>", introduced.join(", "))
+            };
+            let returns = node
+                .child("type")
+                .map(|written| type_of_node(written).written())
+                .unwrap_or_else(|| "void".to_owned());
+            format!("{name}({}){introduced} : {returns}", parameter_types())
+        }
+        "constructor_declaration" | "compact_constructor_declaration" => {
+            format!("{name}({})", parameter_types())
+        }
+        "static_initializer" | "block" => "{...}".to_owned(),
+        _ if is_type_declaration(node) => {
+            snapshot.signature_of(found).unwrap_or_else(|| name.clone())
+        }
+        _ => name.clone(),
+    }
+}
+
+/// Who calls `of`: each member with a call of it, at its first call.
+pub fn incoming<'a>(snapshot: &'a Snapshot, of: &Found<'_>) -> Vec<Calls<'a>> {
+    let wanted = identity(of);
+    let mut sites: Vec<(&'a FileView, Position, Position)> = Vec::new();
+    match kind_of(of) {
+        Some(Kind::Field | Kind::EnumMember) => {
+            for (uri, at) in snapshot.uses_of(of) {
+                if (uri, at) == (wanted.0, wanted.1) {
+                    continue;
+                }
+                let Some(file) = snapshot.file(uri) else {
+                    continue;
+                };
+                let end = Position {
+                    line: at.line,
+                    column: at.column + of.name.text.encode_utf16().count() as u32,
+                };
+                sites.push((file, at, end));
+            }
+        }
+        Some(Kind::Method | Kind::Constructor | Kind::Class | Kind::Interface | Kind::Enum) => {
+            // A constructor and its type are called by the type's name.
+            let name = match of.node.kind.as_str() {
+                "constructor_declaration" | "compact_constructor_declaration" => {
+                    enclosing_type_name(of).unwrap_or_else(|| of.name.text.clone())
+                }
+                _ => of.name.text.clone(),
+            };
+            for file in snapshot.files.iter().filter(|file| !file.library) {
+                if !file.text.contains(name.as_str()) {
+                    continue;
+                }
+                for node in file.tree.walk() {
+                    if !may_call(node, &name) {
+                        continue;
+                    }
+                    let Some((called, start, end)) = call_of(snapshot, node, file) else {
+                        continue;
+                    };
+                    if identity(&called) == wanted {
+                        sites.push((file, start, end));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    sites
+        .sort_by(|left, right| (left.0.uri.as_str(), left.1).cmp(&(right.0.uri.as_str(), right.1)));
+    let mut callers: Vec<Calls<'a>> = Vec::new();
+    for (file, start, end) in sites {
+        let Some(caller) = enclosing_member(file, start, true) else {
+            continue;
+        };
+        let key = identity(&caller);
+        match callers
+            .iter_mut()
+            .find(|calls| identity(&calls.member) == key)
+        {
+            Some(calls) => calls.at.push((start, end)),
+            None => callers.push(Calls {
+                member: caller,
+                at: vec![(start, end)],
+                file: &file.uri,
+            }),
+        }
+    }
+    callers
+}
+
+/// What `of` calls, each callee once, in the order first called.
+pub fn outgoing<'a>(snapshot: &'a Snapshot, of: &Found<'a>) -> Vec<Calls<'a>> {
+    let body: Vec<&Syn> = match of.node.kind.as_str() {
+        "method_declaration"
+        | "constructor_declaration"
+        | "compact_constructor_declaration"
+        | "static_initializer"
+        | "block" => vec![of.node],
+        "variable_declarator" => of.node.child("value").into_iter().collect(),
+        _ => Vec::new(),
+    };
+    let mut callees: Vec<Calls<'a>> = Vec::new();
+    for root in body {
+        for node in calls_within(root) {
+            let Some((called, start, end)) = call_of(snapshot, node, of.file) else {
+                continue;
+            };
+            let key = identity(&called);
+            match callees
+                .iter_mut()
+                .find(|calls| identity(&calls.member) == key)
+            {
+                Some(calls) => calls.at.push((start, end)),
+                None => callees.push(Calls {
+                    member: called,
+                    at: vec![(start, end)],
+                    file: &of.file.uri,
+                }),
+            }
+        }
+    }
+    callees
+}
+
+/// The calls written in `root`, leaving out the bodies of classes declared
+/// in it: their methods are members of their own.
+fn calls_within(root: &Syn) -> Vec<&Syn> {
+    let mut calls = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if is_call(node) {
+            calls.push(node);
+        }
+        for child in node.children.iter().rev() {
+            if child.kind != "class_body" && !is_type_declaration(child) {
+                pending.push(child);
+            }
+        }
+    }
+    calls
+}
+
+fn is_call(node: &Syn) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "method_invocation"
+            | "object_creation_expression"
+            | "explicit_constructor_invocation"
+            | "method_reference"
+    )
+}
+
+/// Whether `node` is a call that may be of something called `name`: only
+/// those are resolved.
+fn may_call(node: &Syn, name: &str) -> bool {
+    match node.kind.as_str() {
+        "method_invocation" => node.child("name").is_some_and(|called| called.text == name),
+        "object_creation_expression" => node
+            .child("type")
+            .is_some_and(|created| simple_name(&type_of_node(created).name) == name),
+        "explicit_constructor_invocation" => true,
+        "method_reference" => node.children.last().is_some_and(|last| last.text == name),
+        _ => false,
+    }
+}
+
+/// What a call calls, and where the call is written: a method's name, the
+/// `new` of a creation, the `super` or `this` of a chained constructor.
+fn call_of<'a>(
+    snapshot: &'a Snapshot,
+    call: &'a Syn,
+    file: &'a FileView,
+) -> Option<(Found<'a>, Position, Position)> {
+    match call.kind.as_str() {
+        "method_invocation" => {
+            let name = call.child("name")?;
+            Some((snapshot.invoked(call, file)?, name.start, name.end))
+        }
+        "object_creation_expression" => {
+            let end = call
+                .child("arguments")
+                .map_or(call.end, |arguments| arguments.end);
+            Some((snapshot.created(call, file)?, call.start, end))
+        }
+        "explicit_constructor_invocation" => {
+            Some((snapshot.chained(call, file)?, call.start, call.end))
+        }
+        "method_reference" => {
+            let name = call.children.last()?;
+            let called = snapshot.declaration_at(&file.uri, name.start)?;
+            kind_of(&called)?;
+            Some((called, name.start, name.end))
+        }
+        _ => None,
+    }
+}
+
+/// The name of the type a constructor belongs to.
+fn enclosing_type_name(constructor: &Found<'_>) -> Option<String> {
+    let path = path_to(&constructor.file.tree, constructor.node.start);
+    let owner = path
+        .iter()
+        .rev()
+        .find(|node| is_type_declaration(node) && !std::ptr::eq(**node, constructor.node))?;
+    Some(owner.child("name")?.text.clone())
+}
+
+fn simple_name(written: &str) -> &str {
+    written.rsplit('.').next().unwrap_or(written)
+}
+
+/// What tells two declarations apart: their file and where their name is.
+fn identity<'a>(found: &Found<'a>) -> (&'a Url, Position) {
+    (&found.file.uri, found.selection())
+}
