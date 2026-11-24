@@ -1,0 +1,15 @@
+//- /test1/X.java
+package test1;
+class X {
+	public static void main(string[] arg$0s) {
+
+	}
+
+	static void fun() {
+		int a
+		for (l < 10) {
+
+		}
+	}
+}
+//= expected

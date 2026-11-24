@@ -1,0 +1,12 @@
+//- /Foo.java
+$0public class Foo {
+	void foo(Double doubleParam) {}
+	void foo(Integer intParam) {}
+	void bar() {
+		Double d = 0.0;
+		Integer i = 0;
+		foo(d);
+		foo(i);
+	}
+}
+//= expected

@@ -1,0 +1,13 @@
+//- /Foo.java
+$0public class Foo {
+	void foo(String s) {}
+	void bar(int i) {
+		foo(switch (i) {
+			case 1:
+				yield "foo";
+			default:
+				yield "unknown"
+		});
+	}
+}
+//= expected

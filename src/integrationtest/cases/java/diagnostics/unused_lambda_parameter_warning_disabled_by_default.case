@@ -1,0 +1,11 @@
+//- /src/main/java/test1/LambdaWarning.java
+$0package test1;
+import java.util.Map;
+public class LambdaWarning {
+    void foo() {
+        Map.of("foo", "bar").forEach((key, value) -> {
+            System.out.println(key);
+        });
+    }
+}
+//= expected

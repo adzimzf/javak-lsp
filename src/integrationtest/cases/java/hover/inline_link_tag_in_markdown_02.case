@@ -1,0 +1,5 @@
+//- /test/Markdown.java
+package test;
+/// {@linkplain #newMethodBeingLinkedToo}
+public class M$0arkdown{}
+//= expected

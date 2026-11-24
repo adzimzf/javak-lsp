@@ -1,0 +1,14 @@
+//- /org/sample/Foo.java
+package org.sample;
+
+public class Foo {
+	private $0String foo;$1
+	public String getFoo() {
+	  return foo;
+	}
+   
+	public void setFoo(String newFoo) {
+	  foo = newFoo;
+	}
+}
+//= expected

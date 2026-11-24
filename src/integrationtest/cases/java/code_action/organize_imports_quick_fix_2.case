@@ -1,0 +1,7 @@
+//- /Foo.java
+import java.util.List;
+public class Foo {
+	void foo() {
+		$0String bar$1 = "astring";	}
+}
+//= expected

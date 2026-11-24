@@ -1,0 +1,5 @@
+//- /src/main/java/test1/E123.java
+$0package test1;
+public class E123 {
+}
+//= expected

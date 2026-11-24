@@ -1,0 +1,10 @@
+//- /src/main/java/test1/E.java
+package test1;
+public interface E {
+    void foo();
+}
+//- /src/main/java/test1/F.java
+$0package test1;
+public class F implements E {
+}
+//= expected

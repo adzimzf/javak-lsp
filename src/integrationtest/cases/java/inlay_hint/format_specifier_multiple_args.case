@@ -1,0 +1,9 @@
+//- /Foo.java
+$0public class Foo {
+	void bar() {
+		String name = "Alice";
+		int age = 30;
+		String result = String.format("Hello %s, you are %d years old", name, age);
+	}
+}
+//= expected

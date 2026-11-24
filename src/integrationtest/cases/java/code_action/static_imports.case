@@ -1,0 +1,9 @@
+//- /p1/C.java
+$0package p1;
+
+public class C {
+    List list = List.of(1).stream().collect(toList());
+    double i = abs(-1);
+    double pi = PI;
+}
+//= expected

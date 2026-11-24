@@ -1,0 +1,6 @@
+//- /foo/bar/BaseTest.java
+package foo.bar;
+
+public class BaseTest extends AbstractTe$0 {
+}
+//= expected

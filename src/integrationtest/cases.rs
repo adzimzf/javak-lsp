@@ -110,7 +110,15 @@ suites! {
         folding_range => FoldingRange,
         workspace_symbol => WorkspaceSymbol,
         diagnostics => Diagnostics,
+        declaration => Declaration,
+        code_action => CodeAction,
+        formatting => Formatting,
+        inlay_hint => InlayHint,
+        code_lens => CodeLens,
         call_hierarchy => CallHierarchy,
+        type_hierarchy => TypeHierarchy,
+        semantic_tokens => SemanticTokens,
+        selection_range => SelectionRange,
     }
     kotlin {
         definition => Definition,

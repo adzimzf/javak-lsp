@@ -1,0 +1,8 @@
+//- /org/sample/Foo.java
+package org.sample;
+public class Foo {
+	public static void main(String[] args) {
+		new $0javax.activity$1
+	}
+}
+//= expected

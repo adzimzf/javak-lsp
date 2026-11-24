@@ -1,0 +1,9 @@
+//- /Foo.java
+$0public class Foo {
+	void foo(String str) {}
+	void bar() {
+		String str = "";
+		foo((CharSequence) str);
+	}
+}
+//= expected

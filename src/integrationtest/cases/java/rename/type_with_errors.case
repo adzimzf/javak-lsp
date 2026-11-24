@@ -1,0 +1,17 @@
+//- /test1/Newname.java
+package test1;
+public class Newname {
+   }
+}
+//- /test1/E.java
+$0package test1;
+public class E|* {
+   public E() {
+   }
+   public int bar() {
+   }
+   public int foo() {
+		this.bar();
+   }
+}
+//= expected

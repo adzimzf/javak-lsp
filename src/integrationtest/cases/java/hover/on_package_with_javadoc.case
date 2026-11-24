@@ -1,0 +1,8 @@
+//- /src/main/java/foo/Bar.java
+package foo;
+
+import org.apache.comm$0ons.cli.CommandLine;
+
+public class Bar {
+}
+//= expected

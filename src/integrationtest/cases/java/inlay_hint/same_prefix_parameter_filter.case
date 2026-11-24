@@ -1,0 +1,9 @@
+//- /Foo.java
+$0import java.util.stream.Stream;
+class Foo {
+	public static void process(String s1, String s2, String s3) {}
+	public static void main(String[] args) {
+		print("first", "second", "third");
+	}
+}
+//= expected

@@ -1,0 +1,9 @@
+//- /org/sample/Test.java
+package org.sample;
+import static java.util.Arrays.sort;
+public class Test {
+	public static void main(String[] args) {
+		asList$0
+	}
+}
+//= expected

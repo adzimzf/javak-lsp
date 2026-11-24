@@ -1,0 +1,12 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+  public void test () {
+    String foo = """
+    test1
+    test2
+    test3
+    """.$0;
+  }
+}
+//= expected

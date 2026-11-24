@@ -1,0 +1,11 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+
+	void test() {
+
+		List l; 
+		l.clea$0 
+	}
+}
+//= expected

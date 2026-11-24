@@ -1,0 +1,7 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	public void testMethod(Object obj) {
+		ifnull$0	}
+}
+//= expected

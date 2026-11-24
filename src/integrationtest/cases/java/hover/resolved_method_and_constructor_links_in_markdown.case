@@ -1,0 +1,10 @@
+//- /test/Markdown.java
+package test;
+class Ball {
+	Ball(int x) {}
+	void abc() {}
+}
+/// Method: {@link Ball#abc()}
+/// Constructor: {@link Ball#Ball(int x)}
+public class M$0arkdown {}
+//= expected

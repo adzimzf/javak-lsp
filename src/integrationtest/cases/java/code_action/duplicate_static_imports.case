@@ -1,0 +1,27 @@
+//- /src/test/java/org/sample/MyTest.java
+package org.sample;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+
+import org.junit.Test;
+
+public class MyTest {
+    @Test
+    public void test() {
+        assertThat("test", true);
+    }
+}
+//- /src/test/java/org/sample/MyTest2.java
+$0package org.sample;
+
+import static org.hamcrest.MatcherAssert.*;
+
+import org.junit.Test;
+
+public class MyTest2 {
+    @Test
+    public void test() {
+        assertThat("test", true);
+    }
+}
+//= expected

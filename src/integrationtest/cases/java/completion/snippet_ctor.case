@@ -1,0 +1,7 @@
+//- /org/sample/Test.java
+package org.sample;
+public class MainClass {
+}class AnotherClass {
+ctor$0
+}
+//= expected

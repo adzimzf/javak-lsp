@@ -1,0 +1,13 @@
+//- /Test.java
+package org.sample
+class Test extends TestSuper {
+	public void test(String x){}
+	public static void main(String[] args) {
+		  Test obj = new Test();
+		  obj.test$0
+	}
+}
+public class TestSuper {
+	public void test(String x, int y){}
+}
+//= expected

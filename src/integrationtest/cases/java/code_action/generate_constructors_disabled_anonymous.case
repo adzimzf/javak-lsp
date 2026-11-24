@@ -1,0 +1,13 @@
+//- /p/A.java
+package p;
+
+public class A {
+	public Runnable getRunnable() {
+		return new Runnable() {
+			@Override
+			public void $0run()$1 {
+			}
+		};
+	}
+}
+//= expected

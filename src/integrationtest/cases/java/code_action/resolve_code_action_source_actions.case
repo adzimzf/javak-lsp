@@ -1,0 +1,6 @@
+//- /E.java
+public class E {
+    private void $0hello$1() {
+    }
+}
+//= expected

@@ -1,0 +1,11 @@
+//- /Foo.java
+public class Foo {
+    public static void main(String[] args) {
+        IFoo foo = new $0
+    } 
+    interface IFoo {
+        String getName();
+        void setName(String name);
+    }
+}
+//= expected

@@ -1,0 +1,9 @@
+//- /p/A.java
+package p;
+
+public class A {
+	private $0String name$1;
+	private String getPrivateStr() { return "private"; }
+	public String publicName;
+}
+//= expected

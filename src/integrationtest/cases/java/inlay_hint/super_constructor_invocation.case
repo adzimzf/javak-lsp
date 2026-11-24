@@ -1,0 +1,10 @@
+//- /Foo.java
+$0public class Foo {
+	public Foo(Integer a, Integer b) {}
+}
+class Bar extends Foo {
+	public Bar() {
+		super(1, 2);
+	}
+}
+//= expected

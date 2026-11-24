@@ -1,0 +1,11 @@
+//- /test1/E.java
+package test1;
+import java.util.HashMap;
+public class E {
+	public void foo(Object o1) {}
+	public void foo(Object o1, Object o2) {}
+	public void bar() {
+		foo(new HashMap<String, S$0tring>());
+	}
+}
+//= expected

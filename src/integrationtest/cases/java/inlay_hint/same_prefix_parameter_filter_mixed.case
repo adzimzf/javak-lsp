@@ -1,0 +1,10 @@
+//- /Foo.java
+$0public class Foo {
+	void mixedParams(String s1, String description, String s2) {}
+	void descriptiveParams(String name, String description, String value) {}
+	void bar() {
+		mixedParams("first", "desc", "second");
+		descriptiveParams("name", "desc", "value");
+	}
+}
+//= expected

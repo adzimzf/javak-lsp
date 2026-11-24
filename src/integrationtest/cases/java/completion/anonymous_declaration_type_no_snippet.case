@@ -1,0 +1,7 @@
+//- /Foo.java
+public class Foo {
+    public static void main(String[] args) {
+        new Runnable($0)
+    }
+}
+//= expected

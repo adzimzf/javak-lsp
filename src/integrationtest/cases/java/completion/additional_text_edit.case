@@ -1,0 +1,8 @@
+//- /Foo.java
+public class Foo {
+	private Object o;
+	void foo() {
+		o.toStr$0
+	}
+}
+//= expected

@@ -1,0 +1,10 @@
+//- /Foo.java
+public class Foo {
+	void foo() {
+System.out.print("Hello");
+System.out.println(" World!");
+HashMap<String, String> map = new HashMap<>();
+map.pu$0
+	}
+}
+//= expected

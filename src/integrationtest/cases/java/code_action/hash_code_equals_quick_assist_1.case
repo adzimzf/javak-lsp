@@ -1,0 +1,7 @@
+//- /p/A.java
+package p;
+
+public class $0A$1 {
+	public final String name = "test";
+}
+//= expected

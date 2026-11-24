@@ -1,0 +1,12 @@
+//- /src/test/java/org/sample/MyTest.java
+package org.sample;
+
+public class MyTest {
+    @$0Test
+    public void test() {
+        assertEquals(1, 1, "message");
+        assertThat("test", true);
+        any();
+    }
+}
+//= expected

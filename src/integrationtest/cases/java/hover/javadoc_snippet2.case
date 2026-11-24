@@ -1,0 +1,11 @@
+//- /test1/Test.java
+package test1;
+/**
+ * A simple program.
+ * {@snippet :
+ *   int x = 1;
+ * }
+ */
+public class Te$0st {
+}
+//= expected

@@ -1,0 +1,10 @@
+//- /Foo.java
+public class Foo {
+	static void test(int i, int j) {}
+	public static void main(String[] args) {
+		int one=1;
+		int two=2;
+		tes$0
+	}
+}
+//= expected

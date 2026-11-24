@@ -1,0 +1,16 @@
+//- /foo/bar/BaseTest.java
+package foo.bar;
+
+public class BaseTest {
+    public int testInt;
+
+    public boolean method(int x, int y, int z) {
+        return true;
+    } 
+
+    public void update() {
+        BaseTest t = new BaseTest();
+        t.method(t.$0this.testInt, this.testInt);
+    }
+}
+//= expected

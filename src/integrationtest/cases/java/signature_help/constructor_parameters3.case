@@ -1,0 +1,9 @@
+//- /test1/E.java
+package test1;
+import java.text.StringCharacterIterator;
+public class E {
+   public void bar() {
+     new StringCharacterIterator("", 0,$0  , 2);
+   }
+}
+//= expected

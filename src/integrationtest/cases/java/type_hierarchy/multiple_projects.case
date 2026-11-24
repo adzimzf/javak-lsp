@@ -1,0 +1,10 @@
+//- /project1/src/org/sample/First.java
+package org.sample;
+public abstract class $0First 
+{}
+//- /project2/src/org/sample/Second.java
+package org.sample;
+
+public class Second extends First{
+}
+//= expected

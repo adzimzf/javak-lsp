@@ -1,0 +1,5 @@
+//- /test/MarkdownLiteral.java
+package test;
+/// {@literal List<String> <>*^&`[]}
+public class M$0arkdownLiteral {}
+//= expected

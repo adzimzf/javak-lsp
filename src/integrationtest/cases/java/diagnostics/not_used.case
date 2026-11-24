@@ -1,0 +1,6 @@
+//- /src/main/java/test1/E.java
+$0package test1;
+public class E {
+    private int i;
+}
+//= expected

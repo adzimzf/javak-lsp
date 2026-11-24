@@ -1,0 +1,5 @@
+//- /test/MarkdownCode.java
+package test;
+/// Use {@code List<String>} safely.
+public class M$0arkdownCode {}
+//= expected

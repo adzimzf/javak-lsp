@@ -1,0 +1,13 @@
+//- /Foo.java
+public class Foo {
+    public static boo(IntChain chain) {
+		Integer variable = $0;
+    }
+
+	static class IntChain {
+		public Integer newInt() {
+			return 1;
+		}
+	}
+}
+//= expected

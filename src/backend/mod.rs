@@ -13,9 +13,11 @@ use std::sync::Arc;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
+use serde_json::Value;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::feature::call_hierarchy;
+use crate::debugger::commands::{self as debug_commands, CommandOutcome, DebugCommands};
 use crate::feature::features;
 use crate::feature::semantic::{Found, Snapshot};
 use crate::indexer::Indexer;
@@ -39,10 +41,12 @@ pub fn protocol(language: Language) -> &'static dyn LanguageProtocol {
 }
 
 pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
+    let indexer_for_debug = Arc::clone(&indexer);
     Backend {
         indexer,
         client,
         dependencies: Arc::new(DependencySync::default()),
+        debug: Arc::new(DebugCommands::new(indexer_for_debug)),
     }
 }
 
@@ -50,6 +54,8 @@ pub struct Backend {
     indexer: Arc<Indexer>,
     client: Client,
     dependencies: Arc<DependencySync>,
+    /// The `vscode.java.*` commands of jdtls' debug plugin.
+    debug: Arc<DebugCommands>,
 }
 
 impl Backend {
@@ -266,6 +272,7 @@ impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         self.dependencies
             .configure(params.initialization_options.as_ref());
+        self.debug.configure(params.initialization_options.as_ref());
         if !self.indexer.workspace_pinned.load(Ordering::Relaxed) {
             if let Some(root) = params
                 .root_uri
@@ -317,6 +324,10 @@ impl LanguageServer for Backend {
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: debug_commands::COMMANDS.iter().map(|command| (*command).to_owned()).collect(),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
                     DiagnosticOptions {
                         inter_file_dependencies: false,
@@ -379,6 +390,20 @@ impl LanguageServer for Backend {
             .is_ok_and(|path| DependencySync::is_build_file(&path))
         {
             self.build_file_changed().await;
+        }
+    }
+
+    /// jdtls' debug plugin's delegate commands, which nvim-jdtls, Zed and
+    /// vscode-java-debug drive a debug session with.
+    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<Value>> {
+        match self.debug.execute(&params.command, &params.arguments).await {
+            CommandOutcome::Answered(value) => Ok(Some(value)),
+            CommandOutcome::Failed(reason) => Err(tower_lsp::jsonrpc::Error {
+                code: tower_lsp::jsonrpc::ErrorCode::InternalError,
+                message: reason.into(),
+                data: None,
+            }),
+            CommandOutcome::NotDebugCommand => Err(tower_lsp::jsonrpc::Error::method_not_found()),
         }
     }
 

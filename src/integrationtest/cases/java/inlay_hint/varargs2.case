@@ -1,0 +1,8 @@
+//- /Foo.java
+$0public class Foo {
+	void foo2(Integer i, String... args) {}
+	void bar() {
+		foo2(1);
+	}
+}
+//= expected

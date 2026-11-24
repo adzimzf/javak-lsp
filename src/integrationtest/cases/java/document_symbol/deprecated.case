@@ -1,0 +1,252 @@
+//- /src/main/java/org/sample/Bar.java
+$0package org.sample;
+
+/**
+ * This is Bar
+ */
+public class Bar {
+
+	public static void main(String[] args) {
+      System.out.print( "Hello world! from "+Bar.class);
+	}
+	
+	@Deprecated
+	public static interface MyInterface {
+		
+		void foo();
+	}
+	
+	public static class MyClass {
+		
+		void bar() {}
+	}
+	
+	public static final String EMPTY = "";
+	
+	
+	public enum Foo {
+		Bar, Zoo
+	}
+}
+//- /src/main/java/java/Foo.java (not open)
+package java;
+
+import org.apache.commons.lang3.StringUtils;
+
+/**
+ * This is foo
+ */
+public class Foo {
+
+	public static void main(String[] args) {
+      System.out.print( StringUtils.capitalize("Hello world! from "+Foo.class));
+	}
+
+	public void linkedFromFoo2() {
+
+	}
+}
+//- /src/main/java/java/Foo3.java (not open)
+package java;
+
+import java.util.HashSet;
+import java.util.Set;
+
+import org.apache.commons.lang3.StringUtils;
+
+public class Foo3 {
+
+	private Set<String> properties;
+
+	public Foo3() {
+		this.properties = new HashSet<String>();
+	}
+
+	public void localVariable() {
+		StringUtils util = new StringUtils();
+		System.out.println(this.properties);
+		System.out.println(util);
+	}
+}
+//- /src/main/java/java/Foo2.java (not open)
+package java;
+
+import java.io.IOException;
+
+import org.apache.commons.lang3.AnnotationUtils;
+
+public class Foo2 {
+
+
+	/**
+	 * {@value #mySimpleString} is a simple String
+	 */
+	public static final String mySimpleString =
+	 	"SimpleStringData";
+
+	/**
+	 * {@link #newMethodBeingLinkedToo}
+	 */
+	public void javadocLinkToMethodInClass() {
+
+	}
+
+	private void newMethodBeingLinkedToo() {
+
+	}
+
+	/**
+	 * {@link Foo#linkedFromFoo2()}
+	 */
+	private void javadocLinkToMethodInOtherClass() {
+
+	}
+
+	/**
+	 * This Javadoc contains a link to
+	 * {@link #newMethodBeingLinkedToo}
+	 * @see <a href="https://docs.oracle.com/javase/7/docs/api/">Online docs for java</a>
+	 * @param someString the string to enter
+	 * @since 0.0.1
+	 * @version 0.0.1
+	 * @author jpinkney
+	 * @return String
+	 * @throws IOException
+	 * @apiNote This is a note
+	 */
+    private String javadocLink(String someString) throws IOException {
+		return null;
+	}
+
+    /**
+     * This link doesnt work {@link LinkToSomethingNotFound}
+     */
+    private void linkDoesNotExist() {
+
+    }
+
+}
+//- /src/main/java/org/sample/CallHierarchyOther.java (not open)
+package org.sample;
+
+public class CallHierarchyOther {
+
+  static {
+    new CallHierarchy.FooBuilder();
+    new CallHierarchy.FooBuilder();
+    new CallHierarchy.FooBuilder();
+  }
+  
+  
+  @Deprecated public static class X {
+    
+  }
+  
+}
+//- /src/main/java/org/sample/Foo4.java (not open)
+package org.sample;
+
+/**
+ * This is the test data for SelectionRangeHandlerTest. To ask for a selection range, we need to specify a position.
+ * To make those positions visible, >< pairs are used if possible, and a position is what's between > and <.
+ * All other positions are specified in the test code dierectly.
+ */
+class Foo4 {
+	/**
+	 * Class constructor to test >< Javadoc
+	 */
+	Foo4() {
+		System.out.println("string >< literal"); // test line >< comment
+
+		/* test block >< comment */
+		memberFunc(1, 0.0);
+	}
+
+	void memberFunc(int paramA/* test block >< comment in param list */, double paramB) {
+		try {
+			switch(paramA) {
+				case 0:
+					System.out.println(paramB);
+					break;
+				default:
+					System.out.println();
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+}
+//- /src/main/java/org/sample/CallHierarchy.java (not open)
+package org.sample;
+
+import org.apache.commons.lang3.builder.Builder;
+import org.apache.commons.lang3.text.WordUtils;
+
+public class CallHierarchy {
+
+  public static class FooBuilder implements Builder<Object> {
+
+    public FooBuilder() {
+      new CallHierarchyOther.X();
+    }
+
+    @Override
+    public Object build() {
+      WordUtils.capitalize("a");
+      WordUtils.capitalize("b");
+      return null;
+    }
+
+  }
+
+}
+//- /src/main/java/org/sample/TestBreakContinue.java (not open)
+package org.sample;
+
+public class TestBreakContinue {
+
+	public static void main(String[] args) {
+		int i = 0;
+		outer: while (true) {
+			System.out.println(i);
+			while (true) {
+				i++;
+				if (i == 1) {
+					continue; // inner
+				}
+				if (i == 3) {
+					continue outer;
+				}
+				if (i == 5) {
+					break; //inner
+				}
+				if (i == 7) {
+					break outer;
+				}
+			}
+		}
+	}
+}
+//- /src/main/java/org/sample/TestJavadoc.java (not open)
+package org.sample;
+import org.apache.commons.lang3.text.WordUtils;
+public class TestJavadoc {
+
+	private String foo() {
+		Inner inner = new Inner();
+		return inner.test;
+	}
+
+	public class Inner {
+		/** Test */
+		public String test;
+	}
+	
+	/**
+	 * Uses {@link WordUtils} 
+	 */
+	public void commonsLang() {
+		
+	}
+}
+//= expected

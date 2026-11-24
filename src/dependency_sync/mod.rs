@@ -416,8 +416,8 @@ pub(crate) struct DependencyManifest {
     pub(crate) saved_at: u64,
 }
 
-// `jars` and `covers_whole_classpath` serve a scan of the shared Gradle
-// cache, which this server does not do yet; their rules are tested.
+// `covers_whole_classpath` serves a scan of the shared Gradle cache, which
+// this server does not do yet; its rules are tested.
 #[allow(dead_code)]
 impl DependencyManifest {
     /// Compiled jars that still exist on disk.
@@ -841,6 +841,33 @@ impl BuildToolFailure {
 impl From<String> for BuildToolFailure {
     fn from(message: String) -> Self {
         BuildToolFailure::Failed(message)
+    }
+}
+
+/// Compile the workspace's main and test sources with its own build tool,
+/// so a debug launch runs the code as it is now: javak-lsp has no compiler
+/// of its own, where jdtls builds incrementally. `Ok(false)` where the
+/// workspace has no build tool javak-lsp knows.
+pub(crate) fn compile(root: &Path) -> Result<bool, String> {
+    let Some(tool) = BuildTool::detect(root) else {
+        return Ok(false);
+    };
+    let (launcher, arguments): (&Path, &[&str]) = match &tool {
+        BuildTool::Gradle { launcher } => (
+            launcher,
+            &["--quiet", "--console=plain", "classes", "testClasses"],
+        ),
+        BuildTool::Maven { launcher } => (launcher, &["-q", "-B", "test-compile"]),
+    };
+    let mut command = launch(launcher);
+    command.current_dir(root).args(arguments);
+    let description = format!("`{} {}`", launcher.display(), arguments.join(" "));
+    match run_build_tool(command, &description) {
+        Ok(()) => Ok(true),
+        Err(BuildToolFailure::NotFound(program)) => {
+            Err(format!("{program} not found: {}", tool.not_found_hint()))
+        }
+        Err(BuildToolFailure::Failed(message)) => Err(message),
     }
 }
 

@@ -1,0 +1,8 @@
+//- /org/sample/Baz.java
+package org.sample;
+
+    public      class     Baz {  
+String          name       ;
+}  
+   $0
+//= expected

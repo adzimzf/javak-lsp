@@ -1,0 +1,13 @@
+//- /src/TestSame.java
+public class TestSame implements Test{
+    public void some$0Method(){
+    
+    }
+
+    public String model;
+}
+
+public interface Test {
+    public void someMethod();
+}
+//= expected

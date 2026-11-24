@@ -1,15 +1,18 @@
 //! The `vscode.java.*` delegate commands of java-debug's jdtls plugin
 //! (`com.microsoft.java.debug.plugin/plugin.xml`), answered by javak-lsp.
 //!
-//! Commands whose jdtls answer needs the Eclipse build (hot code replace,
-//! `buildWorkspace`, `resolveElementAtSelection`, inline values) are not
-//! offered; editors fall back without them.
+//! Commands whose jdtls answer needs the JDT compiler (hot code replace,
+//! `resolveElementAtSelection`, inline values) are not offered; editors
+//! fall back without them. `buildWorkspace` runs the project's own build
+//! tool instead of JDT's incremental build.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde_json::Value;
+use tower_lsp::lsp_types::Url;
 
+use super::jvm_names::main_methods;
 use super::launch::{self, ClasspathScope};
 use super::server::DebugServer;
 use crate::indexer::Indexer;
@@ -27,6 +30,9 @@ pub(crate) const COMMANDS: &[&str] = &[
     FETCH_PLATFORM_SETTINGS,
     INFER_LAUNCH_COMMAND_LENGTH,
     RESOLVE_SOURCE_URI,
+    RESOLVE_MAIN_METHOD,
+    BUILD_WORKSPACE,
+    FETCH_USAGE_DATA,
 ];
 
 const START_DEBUG_SESSION: &str = "vscode.java.startDebugSession";
@@ -40,6 +46,13 @@ const IS_ON_CLASSPATH: &str = "vscode.java.isOnClasspath";
 const FETCH_PLATFORM_SETTINGS: &str = "vscode.java.fetchPlatformSettings";
 const INFER_LAUNCH_COMMAND_LENGTH: &str = "vscode.java.inferLaunchCommandLength";
 const RESOLVE_SOURCE_URI: &str = "vscode.java.resolveSourceUri";
+const RESOLVE_MAIN_METHOD: &str = "vscode.java.resolveMainMethod";
+const BUILD_WORKSPACE: &str = "vscode.java.buildWorkspace";
+const FETCH_USAGE_DATA: &str = "vscode.java.fetchUsageData";
+
+/// jdtls' `BuildWorkspaceStatus`.
+const BUILD_FAILED: u32 = 0;
+const BUILD_SUCCEEDED: u32 = 1;
 
 /// The newest Java release the debug server's JDI handles, as jdtls'
 /// `fetchPlatformSettings` reports it.
@@ -56,6 +69,9 @@ pub(crate) enum CommandOutcome {
 /// The debug half of javak-lsp's `workspace/executeCommand`.
 pub(crate) struct DebugCommands {
     indexer: Arc<Indexer>,
+    /// The client's `javaHome`: the JDK the debug server and the debuggee
+    /// run on.
+    java_home: std::sync::Mutex<Option<PathBuf>>,
     server: tokio::sync::Mutex<Option<DebugServer>>,
     /// The last `updateDebugSettings` JSON, replayed into a restarted server.
     settings: std::sync::Mutex<Option<String>>,
@@ -65,9 +81,34 @@ impl DebugCommands {
     pub(crate) fn new(indexer: Arc<Indexer>) -> Self {
         Self {
             indexer,
+            java_home: std::sync::Mutex::new(None),
             server: tokio::sync::Mutex::new(None),
             settings: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Reads `javaHome` from the client's `initializationOptions`.
+    pub(crate) fn configure(&self, options: Option<&Value>) {
+        let home = options
+            .and_then(|options| options.get("javaHome"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|home| !home.is_empty());
+        if let Some(home) = home {
+            *self
+                .java_home
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(PathBuf::from(home));
+        }
+    }
+
+    fn java(&self) -> Option<PathBuf> {
+        let home = self
+            .java_home
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        launch::java_executable(home.as_deref())
     }
 
     pub(crate) async fn execute(&self, command: &str, arguments: &[Value]) -> CommandOutcome {
@@ -101,7 +142,7 @@ impl DebugCommands {
                 CommandOutcome::Answered(serde_json::json!([[], classpath]))
             }
             RESOLVE_JAVA_EXECUTABLE => {
-                let java = launch::java_executable(&self.indexer);
+                let java = self.java();
                 CommandOutcome::Answered(
                     java.map(|path| Value::from(path.to_string_lossy().into_owned()))
                         .unwrap_or(Value::Null),
@@ -137,6 +178,25 @@ impl DebugCommands {
                     blocking(move || super::server::source_uri(&indexer, &class_name, None)).await;
                 CommandOutcome::Answered(uri.map(Value::from).unwrap_or(Value::Null))
             }
+            RESOLVE_MAIN_METHOD => {
+                let uri = string_argument(arguments, 0).and_then(|uri| Url::parse(uri).ok());
+                let indexer = Arc::clone(&self.indexer);
+                let found = blocking(move || uri.map(|uri| resolve_main_method(&indexer, &uri))).await;
+                CommandOutcome::Answered(Value::Array(found.unwrap_or_default()))
+            }
+            BUILD_WORKSPACE => {
+                let Some(root) = self.indexer.workspace_root.get().cloned() else {
+                    return CommandOutcome::Answered(Value::from(BUILD_SUCCEEDED));
+                };
+                match blocking(move || crate::dependency_sync::compile(&root)).await {
+                    Ok(_) => CommandOutcome::Answered(Value::from(BUILD_SUCCEEDED)),
+                    Err(reason) => {
+                        log::warn!("debug: the build failed: {reason}");
+                        CommandOutcome::Answered(Value::from(BUILD_FAILED))
+                    }
+                }
+            }
+            FETCH_USAGE_DATA => CommandOutcome::Answered(Value::Array(Vec::new())),
             _ => CommandOutcome::NotDebugCommand,
         }
     }
@@ -150,7 +210,8 @@ impl DebugCommands {
             }
             log::warn!("debug: javak-debug-server exited — restarting it");
         }
-        let java = launch::java_executable(&self.indexer)
+        let java = self
+            .java()
             .ok_or_else(|| super::server::LaunchError::JavaNotFound.to_string())?;
         let settings = self
             .settings
@@ -192,6 +253,31 @@ fn path_of_argument(argument: &str) -> Option<PathBuf> {
     }
     let path = PathBuf::from(argument);
     path.is_absolute().then_some(path)
+}
+
+/// The `main` methods of one file, as jdtls' `resolveMainMethod` lists them
+/// for the Run / Debug code lens: `{range, mainClass, projectName}`.
+fn resolve_main_method(indexer: &Indexer, uri: &Url) -> Vec<Value> {
+    let Some(file) = indexer.workspace_file(uri) else {
+        return Vec::new();
+    };
+    let Ok(path) = uri.to_file_path() else {
+        return Vec::new();
+    };
+    let project_name = indexer.workspace_root.get().map_or_else(String::new, |root| {
+        launch::project_name(&launch::module_dir_of(&path, root), root)
+    });
+    let position = |at: crate::parser::Position| serde_json::json!({ "line": at.line, "character": at.column });
+    main_methods(file.language, &path.to_string_lossy(), &file.text, &file.tree)
+        .into_iter()
+        .map(|method| {
+            serde_json::json!({
+                "range": { "start": position(method.name_start), "end": position(method.name_end) },
+                "mainClass": method.class_name,
+                "projectName": project_name,
+            })
+        })
+        .collect()
 }
 
 /// jdtls prefixes a main class with its Java module (`my.module/com.Main`).

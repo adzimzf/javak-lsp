@@ -1,0 +1,30 @@
+//- /Foo.java
+$0public class Foo {
+
+	@SuppressWarnings("unused")
+    public void varImplicitTypes() {
+        //Should show var inlayhints
+        var _greeting= getGreeting();
+        var _string = "foo" + "1";
+
+        //Should NOT show var inlayhints
+        var _int = 1;
+        var _boolean = true;
+        var _double = 1.0;
+        var _float = 1.0f;
+        var _char = 'a';
+        var _long = 1L;
+        var _object = new Object();
+        var _exception= new RuntimeException("Foo");
+        var _castString= (String) getGreeting();
+        var _byte= (byte) 1;
+        var _short = (short) 1;
+        var _array = new int[1];
+        var _arrayInit = new int[] {1, 2, 3};
+	}
+
+    private String getGreeting() {
+        return "Hello";
+    }
+}
+//= expected

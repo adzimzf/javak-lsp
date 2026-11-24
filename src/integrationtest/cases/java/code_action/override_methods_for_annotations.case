@@ -1,0 +1,5 @@
+//- /p/A.java
+package p;
+
+public @interface My$0A$1nnotation {}
+//= expected

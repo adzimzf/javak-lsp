@@ -11,7 +11,8 @@
 //!   core + javak-lsp's providers, see `java-sidecar/debug-server`) and returns
 //!   the port of its Debug Adapter Protocol socket.
 //! * `vscode.java.resolveMainClass`, `resolveClasspath`,
-//!   `resolveJavaExecutable` fill in launch configurations from the index.
+//!   `resolveJavaExecutable` fill in launch configurations from the index;
+//!   `buildWorkspace` compiles with the project's build tool.
 //!
 //! What jdtls answers *inside* a debug session through the JDT Java model —
 //! which class holds the code on a line (breakpoints) and which file a class

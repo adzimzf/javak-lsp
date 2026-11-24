@@ -1,0 +1,9 @@
+//- /test1/E.java
+package test1;
+public class E {
+/**
+ * @see String#substring($0)
+ */
+   public int test() {}
+}
+//= expected

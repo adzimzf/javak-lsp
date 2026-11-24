@@ -1,0 +1,7 @@
+//- /org/sample/Test.java
+package org.sample;
+public class Test {
+	public void testMethod(boolean a) {
+		a.if$0	}
+}
+//= expected

@@ -1,0 +1,8 @@
+//- /Foo.java
+$0public class Foo {
+	String format(String pattern, Object... args) { return pattern; }
+	void bar() {
+		String result = format("Hello %s", "World");
+	}
+}
+//= expected

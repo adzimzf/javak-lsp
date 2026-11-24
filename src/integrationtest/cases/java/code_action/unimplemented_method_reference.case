@@ -1,0 +1,11 @@
+//- /test1/Foo.java
+package test1;
+import java.util.Comparator;
+class Foo {
+    void foo(Comparator<String> c) {
+    }
+    void bar() {
+        foo(this::$0action$1);
+    }
+}
+//= expected

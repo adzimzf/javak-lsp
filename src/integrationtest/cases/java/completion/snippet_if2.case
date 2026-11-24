@@ -1,0 +1,14 @@
+//- /Test.java
+public class Test {
+  private boolean flag;
+  private void test(List<String> c) {
+    if (flag) {
+      
+      $0List<String> scs = c.subList(0, 1);
+    }
+  }
+  String test() {
+    return null;
+  } 
+}
+//= expected
