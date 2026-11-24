@@ -2,6 +2,8 @@
 //! requests. It reads `Syn` trees only, so it holds for any parser that
 //! names its nodes the way the Java grammar does.
 
+mod checks;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -16,7 +18,9 @@ use crate::parser::{Position, Syn};
 /// How many library files declaring one name are read to find it.
 const LIBRARY_FILES_PER_NAME: usize = 4;
 
-/// The open files, each parsed, and the library files they name.
+/// The workspace's source files, each parsed — the open ones as the editor
+/// has them, the others as they are on disk — and the library files the
+/// open ones name.
 ///
 /// A library file nothing named when the snapshot was taken is read when
 /// an answer needs it — the `PrintStream` of `System.out`, the `String` a
@@ -368,12 +372,24 @@ impl Snapshot {
         found: &mut Vec<Found<'a>>,
         depth: &mut usize,
     ) {
+        self.members_where(of, &|member| member == name, found, depth);
+    }
+
+    /// Every member of this type and its supertypes whose name `wanted`
+    /// accepts, nearest first.
+    fn members_where<'a>(
+        &'a self,
+        of: &Found<'a>,
+        wanted: &dyn Fn(&str) -> bool,
+        found: &mut Vec<Found<'a>>,
+        depth: &mut usize,
+    ) {
         if *depth > 8 {
             return;
         }
         *depth += 1;
         for (member, identifier) in members_of(of.node) {
-            if identifier.text == name {
+            if wanted(&identifier.text) {
                 found.push(Found {
                     file: of.file,
                     node: member,
@@ -383,7 +399,7 @@ impl Snapshot {
             }
         }
         for supertype in self.supertypes(of) {
-            self.members_named(&supertype, name, found, depth);
+            self.members_where(&supertype, wanted, found, depth);
         }
     }
 
@@ -1320,19 +1336,23 @@ pub fn members_of(declaration: &Syn) -> Vec<(&Syn, &Syn)> {
 /// list with the method's name somewhere in front of it.
 fn recovered_members(body: &Syn) -> Vec<(&Syn, &Syn)> {
     let nodes = body.walk();
+    // Where each finished declaration's parameters start, looked up once
+    // per parameter list: a large class has thousands of nodes.
+    let owned: std::collections::BTreeSet<Position> = nodes
+        .iter()
+        .filter(|node| {
+            matches!(
+                node.kind.as_str(),
+                "method_declaration" | "constructor_declaration"
+            )
+        })
+        .filter_map(|node| node.child("parameters"))
+        .map(|own| own.start)
+        .collect();
     let orphaned = nodes
         .iter()
         .filter(|node| node.kind == "formal_parameters")
-        .filter(|parameters| {
-            !nodes.iter().any(|node| {
-                matches!(
-                    node.kind.as_str(),
-                    "method_declaration" | "constructor_declaration"
-                ) && node
-                    .child("parameters")
-                    .is_some_and(|own| own.start == parameters.start)
-            })
-        });
+        .filter(|parameters| !owned.contains(&parameters.start));
     orphaned
         .filter_map(|parameters| {
             let name = nodes

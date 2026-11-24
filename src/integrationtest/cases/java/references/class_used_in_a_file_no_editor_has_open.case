@@ -1,0 +1,14 @@
+//- /src/main/java/com/demo/Greeter.java
+package com.demo;
+
+public class Gre$0eter {
+}
+//- /src/main/java/com/demo/Main.java (not open)
+package com.demo;
+
+class Main {
+    Greeter greeter;
+}
+//= expected
+/src/main/java/com/demo/Greeter.java:3:14  public class Greeter {
+/src/main/java/com/demo/Main.java:4:5  Greeter greeter;

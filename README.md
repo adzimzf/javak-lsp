@@ -13,6 +13,21 @@ module behind an interface of its own:
 | `src/indexer` | `SourceLayout` | source roots, what a library source file declares |
 | `src/backend` | `LanguageProtocol` | the protocol's language ids |
 
+## The workspace
+
+Like jdtls, the server reads the whole project, not only the files the
+editor has open: every `.java` and `.kt` file below the workspace root
+(build output, `.git` and other hidden directories aside) is read at
+`initialize`, so a name resolves into a file nobody has opened, and its
+references and renames reach it. An open file is the editor's text; the
+others are read again when the client reports them changed
+(`workspace/didChangeWatchedFiles`) or saved.
+
+Beside its syntax errors and a missing `package`, a Java file is told what
+jdtls would tell it where the server can be sure: a feature its build
+file's source level does not have (a text block below 15), and a call no
+method of its name takes (`parse(test)` of `parse(String, Parser)`).
+
 ## Libraries
 
 On startup the server asks the project's own build tool (Gradle or Maven) for

@@ -41,19 +41,22 @@ Notes on how an answer is written down:
 - **hover** is the signature line as jdtls words it, with the hovered name
   unqualified.
 - **diagnostics** is the whole file's report (`textDocument/diagnostic`),
-  written as `path:line:column  message` — not jdtls's: the two servers word
-  and number their checks differently. javak-lsp reports a Java file's syntax
-  errors and its missing `package` declaration, so a case either names those
-  or expects `(nothing)`; a `(nothing)` case is the regression guard that a
-  shape the parser handles stays unflagged. The missing-package check reads
-  the package out of the path, so those cases live under `/src/main/java/`.
+  written as `path:line:column  message`. javak-lsp reports a Java file's
+  syntax errors and its missing `package` declaration in its own words, and
+  in jdtls's words a feature the build file's source level does not have
+  (a text block below 15) and a call no method of its name takes; a case
+  either names those or expects `(nothing)`. A `(nothing)` case is the
+  regression guard that a shape the parser handles stays unflagged. The
+  missing-package check reads the package out of the path, so those cases
+  live under `/src/main/java/`.
+- A file whose header ends in `(not open)` is on disk and never opened, as
+  is a build file: the server has to find it the way it finds the rest of a
+  project. jdtls reads the whole project, not only the open files.
 - **signature_help** cases that end in a syntax error do so on purpose, as
   the jdtls tests do: help is asked while a call is being typed.
 - A case marked `//= expected (pending)` writes down what jdtls answers
   where javak-lsp has no such check yet: it passes while the two differ and
-  fails the day the server answers it, so the marker comes off then. The
-  pending diagnostics cases below ask for checks javak-lsp does not have
-  (a type checker, a source level read from the build file).
+  fails the day the server answers it, so the marker comes off then.
 
 ## definition
 
@@ -79,6 +82,7 @@ jdtls: `NavigateToDefinitionHandlerTest`.
 | `local_declared_with_var` | — |
 | `local_variable` | — |
 | `method_at_the_end_of_a_call_chain` | — |
+| `method_of_a_type_in_a_file_no_editor_has_open` | — |
 | `method_called_after_a_cast` | — |
 | `method_called_on_an_array_element` | — |
 | `method_linked_from_javadoc` | — |
@@ -101,6 +105,7 @@ jdtls: `NavigateToDefinitionHandlerTest`.
 | `type_follows_the_import_not_the_same_name_elsewhere` | — |
 | `type_imported_on_demand_not_the_same_name_elsewhere` | — |
 | `type_in_a_declaration` | — |
+| `type_in_a_file_no_editor_has_open` | — |
 | `type_parameter` | — |
 | `variable_of_an_enhanced_for` | — |
 
@@ -147,6 +152,7 @@ jdtls: `ReferencesHandlerTest`.
 | `class_everywhere_its_name_is_written` | — |
 | `class_extended_in_another_file` | `testReference` |
 | `class_nothing_uses_is_only_its_declaration` | `testPotentialMatch` (vscode-java#2227) |
+| `class_used_in_a_file_no_editor_has_open` | — |
 | `enum_constant_with_its_case_label` | — |
 | `field_asked_from_a_use` | — |
 | `field_read_and_written` | — |
@@ -351,14 +357,18 @@ jdtls: `WorkspaceSymbolHandlerTest`.
 
 ## diagnostics
 
-jdtls: none — javak-lsp's own checks (syntax errors, missing `package`).
+jdtls: none — javak-lsp's own checks (syntax errors, missing `package`), and
+two of jdtls's worded as jdtls words them (source level, calls).
 
 | case | what it asks |
 | --- | --- |
 | `a_body_that_is_never_closed` | the unclosed brace of a method body |
 | `a_brace_with_nothing_left_to_close` | a `}` past the end of the class |
 | `a_call_whose_parenthesis_is_never_closed` | the `)` a call never gets |
-| `a_call_missing_an_argument_is_reported` | the call `parse(test)` has no applicable overload of `parse(String, Parser)` — **pending** |
+| `a_call_missing_an_argument_is_reported` | the call `parse(test)` has no applicable overload of `parse(String, Parser)` |
+| `a_call_of_a_method_an_unknown_superclass_may_declare_is_not_reported` | nothing: the superclass may have the overload |
+| `a_call_of_an_overload_that_takes_its_arguments_is_not_reported` | nothing: another overload, or varargs, takes them |
+| `a_call_with_too_many_arguments_is_reported` | `this.count(test, 1)` of `count()` |
 | `a_class_declared_without_a_body` | a class header with no `{}` after it |
 | `a_deeply_nested_package_is_named_in_full` | `com.demo.data.local`, every segment of the path |
 | `a_directory_that_is_not_an_identifier_names_no_package` | nothing: `my-demo` is no package segment |
@@ -381,7 +391,8 @@ jdtls: none — javak-lsp's own checks (syntax errors, missing `package`).
 | `a_switch_statement_with_fall_through_and_a_default_parses` | nothing |
 | `a_test_source_root_is_read_the_same_way` | the missing package of a `src/test/java` file |
 | `a_text_block_containing_quotes_and_braces_parses` | nothing: `"""` is not an unclosed string |
-| `a_text_block_under_source_level_15_is_reported` | a text block in a project whose `pom.xml` says source level 11 — **pending** |
+| `a_text_block_at_source_level_15_is_not_reported` | nothing: `pom.xml` says 17 |
+| `a_text_block_under_source_level_15_is_reported` | a text block in a project whose `pom.xml` says source level 11 |
 | `a_type_annotated_generic_field_parses` | nothing: nested generics and a `? super` bound |
 | `a_unicode_identifier_parses` | nothing: `café` is a name |
 | `an_annotation_declaration_with_elements_parses` | nothing: `@interface` with `default` values |

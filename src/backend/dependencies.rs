@@ -365,35 +365,21 @@ fn manifest_sources(manifest: Option<&DependencyManifest>) -> (Vec<PathBuf>, Std
     (jars, stdlib)
 }
 
-/// Directories never searched for Kotlin sources.
-const NOT_SOURCES: &[&str] = &[".git", ".gradle", ".idea", "build", "target", "out", "node_modules"];
-
 /// Whether a `.kt` file sits below `root`, looking at a few thousand
-/// entries at most.
+/// files at most.
 fn has_kotlin_sources(root: &Path) -> bool {
-    let mut pending = vec![root.to_path_buf()];
     let mut budget = 5_000usize;
-    while let Some(directory) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if budget == 0 {
-                return false;
-            }
-            budget -= 1;
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if path.is_dir() {
-                if !NOT_SOURCES.contains(&name.as_str()) && !name.starts_with('.') {
-                    pending.push(path);
-                }
-            } else if name.ends_with(".kt") {
-                return true;
-            }
+    let mut found = false;
+    crate::indexer::walk_sources(root, |path| {
+        found = path.extension().is_some_and(|extension| extension == "kt");
+        budget = budget.saturating_sub(1);
+        if found || budget == 0 {
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
         }
-    }
-    false
+    });
+    found
 }
 
 #[cfg(test)]

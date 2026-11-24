@@ -1,0 +1,18 @@
+//- /pom.xml
+<project>
+  <properties>
+    <maven.compiler.release>17</maven.compiler.release>
+  </properties>
+</project>
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+  String text() {
+    return """
+        hello
+        """;
+  }
+}
+//= expected
+(nothing)

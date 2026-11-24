@@ -51,8 +51,10 @@ pub struct Backend {
 }
 
 impl Backend {
-    /// Everything the server has to say about one file: its syntax errors
-    /// and, where its path names a package it does not declare, that.
+    /// Everything the server has to say about one file: its syntax errors;
+    /// where its path names a package it does not declare, that; what it
+    /// writes that the project's Java level does not have; and the calls
+    /// no method of their name can take.
     fn diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
         let Some(text) = self.indexer.text(uri) else {
             return Vec::new();
@@ -69,13 +71,32 @@ impl Backend {
                 syntax.outline(&text).is_empty(),
             ));
         }
+        let mut findings = syntax.syntax_errors(&text);
+        let snapshot = self.indexer.snapshot();
+        if let Some(file) = snapshot.file(uri) {
+            if let Some(level) = self.indexer.java_level() {
+                findings.extend(syntax.above_java_level(&file.tree, level));
+            }
+            findings.extend(snapshot.inapplicable_calls(file));
+        }
+        findings.sort_by_key(|finding| finding.at);
         diagnostics.extend(
-            syntax
-                .syntax_errors(&text)
+            findings
                 .into_iter()
                 .map(|finding| reported(finding.at, finding.message)),
         );
         diagnostics
+    }
+
+    /// A build file changed: its source level may have, and the
+    /// dependencies it names.
+    async fn build_file_changed(&self) {
+        self.indexer.read_java_level();
+        self.dependencies
+            .start(Arc::clone(&self.indexer), self.client.clone());
+        for uri in self.indexer.open_uris() {
+            self.publish(uri).await;
+        }
     }
 
     async fn publish(&self, uri: Url) {
@@ -222,8 +243,12 @@ fn language_of(id: &str, uri: &Url) -> Language {
         .unwrap_or(Language::Java)
 }
 
-/// The build files whose change can change the dependencies.
-const BUILD_FILE_GLOBS: &[&str] = &[
+/// The files the server is told about when they change: the build files,
+/// whose change can change the dependencies, and the source files, which
+/// the server reads from disk while no editor has them open.
+const WATCHED_GLOBS: &[&str] = &[
+    "**/*.java",
+    "**/*.kt",
     "**/build.gradle",
     "**/build.gradle.kts",
     "**/settings.gradle",
@@ -248,6 +273,14 @@ impl LanguageServer for Backend {
                 let _ = self.indexer.workspace_root.set(root);
             }
         }
+        // jdtls compiles the whole project, not only what is open: a name
+        // resolves into a file no editor has opened yet.
+        let indexer = Arc::clone(&self.indexer);
+        let _ = tokio::task::spawn_blocking(move || {
+            indexer.read_java_level();
+            indexer.read_workspace()
+        })
+        .await;
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
@@ -293,7 +326,7 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let watchers = BUILD_FILE_GLOBS
+        let watchers = WATCHED_GLOBS
             .iter()
             .map(|glob| FileSystemWatcher {
                 glob_pattern: GlobPattern::String((*glob).to_owned()),
@@ -325,21 +358,22 @@ impl LanguageServer for Backend {
                 .to_file_path()
                 .is_ok_and(|path| DependencySync::is_build_file(&path))
         });
+        for change in &params.changes {
+            self.indexer.reread(&change.uri);
+        }
         if build_file_changed {
-            self.dependencies
-                .start(Arc::clone(&self.indexer), self.client.clone());
+            self.build_file_changed().await;
         }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        let is_build_file = params
-            .text_document
-            .uri
+        let uri = params.text_document.uri;
+        self.indexer.reread(&uri);
+        if uri
             .to_file_path()
-            .is_ok_and(|path| DependencySync::is_build_file(&path));
-        if is_build_file {
-            self.dependencies
-                .start(Arc::clone(&self.indexer), self.client.clone());
+            .is_ok_and(|path| DependencySync::is_build_file(&path))
+        {
+            self.build_file_changed().await;
         }
     }
 

@@ -1,8 +1,10 @@
 //! The server a case is asked of, and the LSP conversation with it.
 //!
 //! The server is this crate's own, run inside the test process and reached
-//! through an in-memory pipe: no executable is spawned and no fixture file
-//! touches the disk — the sources arrive as `didOpen` text.
+//! through an in-memory pipe: no executable is spawned, and the sources
+//! arrive as `didOpen` text. Only a fixture with a file the editor does not
+//! open (a build file, a source marked `(not open)`) is written to disk, in
+//! a directory of its own that the server is told is the workspace.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -78,11 +80,26 @@ pub(super) struct Session {
     patience: Duration,
     _host: Option<Host>,
     _child: Option<tokio::process::Child>,
+    /// The directory an in-memory server reads unopened files from, removed
+    /// with the session.
+    _scratch: Option<tempfile::TempDir>,
 }
 
 impl Session {
     pub(super) async fn open(fixture: &Fixture) -> Self {
-        let (reader, writer, root, host) = in_memory();
+        // A file the editor does not open is one the server reads from
+        // disk: the whole fixture goes there, as a project would be.
+        let scratch = fixture.files.iter().any(|file| !file.is_opened()).then(|| {
+            let directory = tempfile::tempdir().expect("a temporary directory");
+            for file in &fixture.files {
+                write_file(directory.path(), file);
+            }
+            directory
+        });
+        let workspace = scratch
+            .as_ref()
+            .map_or_else(|| PathBuf::from(MEMORY_ROOT), |directory| directory.path().to_owned());
+        let (reader, writer, root, host) = in_memory(workspace);
         let mut session = Self {
             writer,
             incoming: frames(reader),
@@ -95,6 +112,7 @@ impl Session {
             patience: PATIENCE,
             _host: Some(host),
             _child: None,
+            _scratch: scratch,
         };
         session.initialize().await;
         session.load(fixture).await;
@@ -135,35 +153,35 @@ impl Session {
             patience: CHILD_PATIENCE,
             _host: None,
             _child: Some(child),
+            _scratch: None,
         };
         session.initialize().await;
         session
     }
 
     /// Puts the fixture in front of the server and waits until it has read
-    /// it: on disk where there is one, and open either way.
+    /// it: on disk where there is one, and the files an editor would have
+    /// open opened.
     pub(super) async fn load(&mut self, fixture: &Fixture) {
         let files = self.served(fixture);
         if let Some(disk) = self.disk.clone() {
             for file in &files {
-                let path = disk.join(&file.path);
-                let parent = path.parent().expect("a fixture path has a directory");
-                std::fs::create_dir_all(parent).expect("the fixture directory is writable");
-                std::fs::write(&path, &file.text).expect("the fixture file is writable");
+                write_file(&disk, file);
             }
             self.watched(&files, CREATED).await;
         }
-        for file in &files {
+        let opened: Vec<&FixtureFile> = files.into_iter().filter(|file| file.is_opened()).collect();
+        for file in &opened {
             self.did_open(&file.path, &file.text).await;
         }
-        self.wait_until_read(&files).await;
+        self.wait_until_read(&opened).await;
     }
 
     /// Takes the fixture away again, so the next case's `com.demo.Main` is
     /// the only one the server knows.
     pub(super) async fn unload(&mut self, fixture: &Fixture) {
         let files = self.served(fixture);
-        for file in &files {
+        for file in files.iter().filter(|file| file.is_opened()) {
             let document = json!({"uri": self.uri(&file.path)});
             self.notify("textDocument/didClose", json!({"textDocument": document}))
                 .await;
@@ -446,28 +464,37 @@ fn directory_url(directory: &Path) -> Url {
     Url::from_directory_path(directory).expect("an absolute directory")
 }
 
-/// This crate's server on the other end of an in-memory pipe.
-fn in_memory() -> (Reader, Writer, Url, Host) {
+/// Writes a fixture file below `directory`.
+fn write_file(directory: &Path, file: &FixtureFile) {
+    let path = directory.join(&file.path);
+    let parent = path.parent().expect("a fixture path has a directory");
+    std::fs::create_dir_all(parent).expect("the fixture directory is writable");
+    std::fs::write(&path, &file.text).expect("the fixture file is writable");
+}
+
+/// This crate's server on the other end of an in-memory pipe, its
+/// workspace pinned at `workspace`.
+fn in_memory(workspace: PathBuf) -> (Reader, Writer, Url, Host) {
     let (client_side, server_side) = tokio::io::duplex(PIPE_CAPACITY);
     let (server_reader, server_writer) = tokio::io::split(server_side);
-    let (service, socket) =
-        LspService::new(|client| crate::backend_over(Arc::new(rootless_indexer()), client));
+    let root = directory_url(&workspace);
+    let (service, socket) = LspService::new(move |client| {
+        crate::backend_over(Arc::new(pinned_indexer(workspace.clone())), client)
+    });
     let server = tokio::spawn(Server::new(server_reader, server_writer, socket).serve(service));
     let (reader, writer) = tokio::io::split(client_side);
-    let root = Url::parse(&format!("file://{MEMORY_ROOT}/")).expect("a file URI");
     (Box::new(reader), Box::new(writer), root, Host(server))
 }
 
-/// An src/indexer that never looks for a workspace: with a root pinned to
-/// nowhere, opening a file indexes its text and nothing else — no directory
-/// scan, no Gradle cache, no JDK sources. The root is still the fixture's,
-/// so what the server derives from it (a file's package from its directory)
-/// and what it searches below it (nothing is there) is the fixture's alone,
-/// never the directory the tests run in.
-fn rootless_indexer() -> Indexer {
+/// An indexer whose workspace is pinned at the fixture's: it reads what is
+/// below it (nothing, at [`MEMORY_ROOT`]) and nothing else — no Gradle
+/// cache, no JDK sources. What the server derives from the root (a file's
+/// package from its directory) and what it reads below it are the
+/// fixture's alone, never the directory the tests run in.
+fn pinned_indexer(workspace: PathBuf) -> Indexer {
     let indexer = Indexer::new();
     indexer.workspace_pinned.store(true, Ordering::Relaxed);
-    let _ = indexer.workspace_root.set(PathBuf::from(MEMORY_ROOT));
+    let _ = indexer.workspace_root.set(workspace);
     indexer
 }
 
