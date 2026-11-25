@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Commit work in small, frequent steps with messages that explain the background. Use after every self-contained change (a fix, a feature slice, a test, a refactor) instead of batching work into one large commit, and whenever writing code comments or README text.
+description: Commit work in small, frequent steps with messages that explain the background. Use after every self-contained change (a fix, a feature slice, a test, a refactor) instead of batching work into one large commit.
 ---
 
 # Commit often, explain why
@@ -36,15 +36,3 @@ jdtls/KotlinLSP, is it slower, does it use more memory.>
 
 Every commit body must state the background. A message with only a summary
 line is not acceptable, even for small changes.
-
-## Comments and README
-
-Do not add comments that restate what the code does, narrate changes
-("added X", "fixed Y"), or describe the task. Do not add README sections for
-internal details.
-
-Add a comment only when:
-- the item is exposed to other modules (public API: `pub` items, LSP handlers,
-  sidecar protocol), to document its contract, or
-- there is a non-obvious reason for a decision (matching a jdtls quirk, a
-  performance or memory trade-off, a workaround) that the code cannot show.
