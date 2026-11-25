@@ -14,6 +14,7 @@ pub mod kotlin;
 pub mod outline;
 pub mod query;
 pub mod semantic;
+pub mod selection;
 pub mod signature;
 
 use crate::language::Language;

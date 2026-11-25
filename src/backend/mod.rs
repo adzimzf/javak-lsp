@@ -431,6 +431,7 @@ impl LanguageServer for Backend {
                     ..CompletionOptions::default()
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
@@ -1011,6 +1012,37 @@ impl LanguageServer for Backend {
         let language = self.indexer.language(&uri).unwrap_or(Language::Java);
         let folds = self.indexer.syntax(language).folds(&text);
         Ok(Some(folds.into_iter().map(folding_range).collect()))
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let answers = params
+            .positions
+            .into_iter()
+            .filter_map(|position| {
+                let spans = crate::feature::selection::ranges(&file.tree, &file.text, cursor(position));
+                spans.into_iter().rev().fold(None, |parent, (start, end)| {
+                    Some(SelectionRange {
+                        range: Range {
+                            start: lsp_position(start),
+                            end: lsp_position(end),
+                        },
+                        parent: parent.map(Box::new),
+                    })
+                })
+            })
+            .collect();
+        Ok(Some(answers))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
