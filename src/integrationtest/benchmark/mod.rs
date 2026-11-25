@@ -120,10 +120,7 @@ fn javak_answers_what_jdtls_answers_on_real_projects() {
     if let Some(replay) = &replay {
         eprintln!("random questions: {replay}");
     }
-    let mut body = report::markdown(&reports);
-    if let Some(replay) = &replay {
-        body.push_str(&format!("\nRandom questions: {replay}.\n"));
-    }
+    let mut body = report::markdown(&reports, budget.seed);
     if !failures.is_empty() {
         body.push_str("\n**Not compared:**\n");
         for failure in &failures {

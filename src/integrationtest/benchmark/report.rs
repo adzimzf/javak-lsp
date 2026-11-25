@@ -239,11 +239,20 @@ fn summary_table(reports: &[RepoReport]) -> String {
 
 /// The report as a pull request comment: the summary, then each project's
 /// differences folded away.
-pub(super) fn markdown(reports: &[RepoReport]) -> String {
+/// The report as Markdown. `seed`, when the questions were random, is
+/// shown under the heading with the command that asks them again.
+pub(super) fn markdown(reports: &[RepoReport], seed: Option<u64>) -> String {
     let agreed: usize = reports.iter().map(RepoReport::agreed).sum();
     let total: usize = reports.iter().map(|report| report.total).sum();
+    let questions = match seed {
+        Some(seed) => format!(
+            "Random questions, seed **`{seed}`**. Replay: `just benchmark \"\" {seed}` \
+             (`JDTLS_COMPAT_SEED={seed}`), or run this workflow with seed `{seed}`.\n\n"
+        ),
+        None => "Evenly spaced questions.\n\n".to_owned(),
+    };
     let mut body = format!(
-        "{COMMENT_MARK}\n## javak-lsp vs jdtls\n\n**{agreed}/{total}** answers agree with jdtls.\n\n{}",
+        "{COMMENT_MARK}\n## javak-lsp vs jdtls\n\n{questions}**{agreed}/{total}** answers agree with jdtls.\n\n{}",
         summary_table(reports)
     );
     let mut truncated = false;

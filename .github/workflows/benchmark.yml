@@ -15,6 +15,10 @@ on:
         description: "Pull request to comment on (empty: the branch's open one)"
         required: false
         default: ""
+      seed:
+        description: "Seed of the random questions, to replay a run (empty: a new random one)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -64,6 +68,9 @@ jobs:
           JDTLS_COMPAT_COMMENT: "1"
           JDTLS_COMPAT_REPOS: ${{ inputs.repos }}
           JDTLS_COMPAT_PR: ${{ inputs.pr || github.event.pull_request.number }}
+          # A new random seed each run, printed and shown in the report so
+          # the run can be replayed; the `seed` input replays one.
+          JDTLS_COMPAT_SEED: ${{ inputs.seed || 'random' }}
           GH_TOKEN: ${{ github.token }}
         run: >
           cargo test --release --lib
