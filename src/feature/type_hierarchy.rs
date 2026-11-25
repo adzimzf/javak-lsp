@@ -107,7 +107,7 @@ pub fn supertypes<'a>(snapshot: &'a Snapshot, item: &Item<'a>) -> Vec<Item<'a>> 
 /// The direct subtypes of an item.
 pub fn subtypes<'a>(snapshot: &'a Snapshot, item: &Item<'a>) -> Vec<Item<'a>> {
     let wanted = (&item.of.file.uri, item.of.name.start);
-    let below = snapshot
+    let mut below: Vec<Found<'a>> = snapshot
         .subtypes_of(&item.of)
         .into_iter()
         .filter(|candidate| {
@@ -117,6 +117,8 @@ pub fn subtypes<'a>(snapshot: &'a Snapshot, item: &Item<'a>) -> Vec<Item<'a>> {
                 .any(|supertype| (&supertype.file.uri, supertype.name.start) == wanted)
         })
         .collect();
+    // The libraries' too, as jdtls searches them.
+    below.extend(snapshot.library_subtypes_of(&item.of, true));
     related(snapshot, item, below)
 }
 

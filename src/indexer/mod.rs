@@ -8,6 +8,7 @@
 pub mod java;
 pub mod kotlin;
 pub mod library;
+pub mod words;
 pub mod project;
 
 use std::collections::HashSet;

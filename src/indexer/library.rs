@@ -18,6 +18,7 @@ use dashmap::DashMap;
 use tower_lsp::lsp_types::Url;
 
 use super::layout;
+use super::words::WordIndex;
 use crate::language::Language;
 use crate::parser::{syntax, Syn};
 
@@ -33,6 +34,17 @@ pub struct LibraryFile {
     /// Which of several files declaring the same name is read first:
     /// lower first ([`rank`]).
     pub rank: u8,
+}
+
+/// A type a library declares, where it is once extracted.
+pub struct LibraryType {
+    pub name: String,
+    /// Its package and the types it is nested in.
+    pub container: String,
+    pub kind: super::words::TypeKind,
+    pub uri: Url,
+    pub line: u32,
+    pub column: u32,
 }
 
 /// A library file, extracted and parsed.
@@ -59,6 +71,13 @@ pub struct Libraries {
     loaded: DashMap<LibraryFile, Arc<Loaded>>,
     /// Where library files are extracted.
     extracted: PathBuf,
+    /// The jars indexed.
+    jars: RwLock<Vec<PathBuf>>,
+    /// Each jar's words ([`WordIndex`]), read or built when first asked.
+    words: DashMap<PathBuf, Arc<WordIndex>>,
+    /// Each jar opened once: opening reads its whole directory, fifteen
+    /// thousand entries for the JDK.
+    archives: DashMap<PathBuf, Arc<std::sync::Mutex<zip::ZipArchive<std::fs::File>>>>,
 }
 
 impl Default for Libraries {
@@ -78,6 +97,9 @@ impl Libraries {
             by_name: RwLock::default(),
             loaded: DashMap::new(),
             extracted: directory,
+            jars: RwLock::default(),
+            words: DashMap::new(),
+            archives: DashMap::new(),
         }
     }
 
@@ -98,7 +120,180 @@ impl Libraries {
             *indexed = listing;
         }
         self.loaded.clear();
+        self.words.retain(|jar, _| jars.contains(jar));
+        self.archives.clear();
+        if let Ok(mut indexed) = self.jars.write() {
+            *indexed = jars.to_vec();
+        }
         count
+    }
+
+    /// The word index of `jar`: read from the cache, else built and kept
+    /// there.
+    fn word_index(&self, jar: &Path) -> Option<Arc<WordIndex>> {
+        if let Some(index) = self.words.get(jar) {
+            return Some(index.clone());
+        }
+        let stem = jar.file_stem()?.to_string_lossy().into_owned();
+        let cached = self
+            .extracted
+            .join(format!("{stem}-{:016x}.words", jar_fingerprint(jar)?));
+        let index = match WordIndex::load(&cached) {
+            Ok(index) => index,
+            Err(_) => {
+                let index = WordIndex::build(jar).ok()?;
+                if let Err(error) = index.save(&cached) {
+                    log::warn!("libraries: cannot keep the words of {}: {error}", jar.display());
+                }
+                index
+            }
+        };
+        let index = Arc::new(index);
+        self.words.insert(jar.to_path_buf(), index.clone());
+        Some(index)
+    }
+
+    /// Builds (or reads) the word index of every jar, so the first search
+    /// does not wait for it.
+    pub fn warm_word_indexes(&self) {
+        let jars = self.jars.read().map(|jars| jars.clone()).unwrap_or_default();
+        for jar in jars {
+            let _ = self.word_index(&jar);
+        }
+    }
+
+    /// Every library source file that writes `word`, with its text — read,
+    /// not extracted nor kept.
+    pub fn files_containing(&self, word: &str) -> Vec<(LibraryFile, String)> {
+        self.files_where(|index| index.entries_with(word))
+    }
+
+    /// Every library source file that calls (or declares) a method called
+    /// `name`, with its text.
+    pub fn files_calling(&self, name: &str) -> Vec<(LibraryFile, String)> {
+        self.files_where(|index| index.entries_calling(name))
+    }
+
+    /// Every library source file whose types may extend a type called
+    /// `name`, or that creates an anonymous class of it, with its text.
+    pub fn files_extending(&self, name: &str) -> Vec<(LibraryFile, String)> {
+        self.files_where(|index| index.entries_extending(name))
+    }
+
+    fn files_where(&self, entries_of: impl Fn(&WordIndex) -> Vec<&str>) -> Vec<(LibraryFile, String)> {
+        let jars = self.jars.read().map(|jars| jars.clone()).unwrap_or_default();
+        let mut found = Vec::new();
+        for jar in jars {
+            let Some(index) = self.word_index(&jar) else {
+                continue;
+            };
+            let entries = entries_of(&index);
+            if entries.is_empty() {
+                continue;
+            }
+            for entry in entries {
+                let Some(language) = Language::of_path(entry) else {
+                    continue;
+                };
+                // Examples kept beside the JDK's documentation, never
+                // compiled: no class of theirs is searched.
+                if entry.contains("/snippet-files/") || entry.contains("/doc-files/") {
+                    continue;
+                }
+                let Some(text) = self.read_entry(&jar, entry) else {
+                    continue;
+                };
+                let file = LibraryFile {
+                    jar: jar.clone(),
+                    entry: entry.to_owned(),
+                    language,
+                    package: layout(language).library_package(entry, &text),
+                    rank: rank(entry),
+                };
+                found.push((file, text));
+            }
+        }
+        found
+    }
+
+    /// The Java types the jars declare whose name the workspace-symbol
+    /// `query` matches, each extracted so a client can open it: what jdtls
+    /// lists of the libraries.
+    pub fn types_matching(&self, query: &str) -> Vec<LibraryType> {
+        let jars = self.jars.read().map(|jars| jars.clone()).unwrap_or_default();
+        let mut found = Vec::new();
+        for jar in jars {
+            let Some(index) = self.word_index(&jar) else {
+                continue;
+            };
+            let mut archive = None;
+            for (declared, entry) in index.declared_types() {
+                if Language::of_path(entry) != Some(Language::Java)
+                    || !crate::feature::query::matches(query, &declared.name)
+                    || entry.contains("/snippet-files/")
+                    || entry.contains("/doc-files/")
+                {
+                    continue;
+                }
+                let Some(path) = self.extracted_path(&jar, entry) else {
+                    continue;
+                };
+                if !path.is_file() {
+                    let archive = archive.get_or_insert_with(|| {
+                        std::fs::File::open(&jar).ok().and_then(|file| zip::ZipArchive::new(file).ok())
+                    });
+                    let mut text = String::new();
+                    let read = archive
+                        .as_mut()
+                        .and_then(|archive| archive.by_name(entry).ok())
+                        .is_some_and(|mut file| file.read_to_string(&mut text).is_ok());
+                    if !read {
+                        continue;
+                    }
+                    if let Some(parent) = path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    let _ = std::fs::write(&path, text);
+                }
+                let Ok(uri) = Url::from_file_path(&path) else {
+                    continue;
+                };
+                let package = layout(Language::Java).library_package(entry, "");
+                let container = [package.as_str(), declared.outer.as_str()]
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                found.push(LibraryType {
+                    name: declared.name.clone(),
+                    container,
+                    kind: declared.kind,
+                    uri,
+                    line: declared.line,
+                    column: declared.column,
+                });
+            }
+        }
+        found
+    }
+
+    /// The URI a library file has once extracted.
+    pub fn uri_of(&self, file: &LibraryFile) -> Option<Url> {
+        Url::from_file_path(self.extracted_path(&file.jar, &file.entry)?).ok()
+    }
+
+    /// Writes a library file into the cache where [`Self::uri_of`] says,
+    /// so a client can open it.
+    pub fn extract(&self, file: &LibraryFile, text: &str) {
+        let Some(path) = self.extracted_path(&file.jar, &file.entry) else {
+            return;
+        };
+        if !path.is_file() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, text);
+        }
     }
 
     /// The library files that declare a type called `name`, best first.
@@ -173,7 +368,7 @@ impl Libraries {
         if let Some(loaded) = self.loaded.get(file) {
             return Some(loaded.clone());
         }
-        let text = read_entry(&file.jar, &file.entry).ok()?;
+        let text = self.read_entry(&file.jar, &file.entry)?;
         let path = self.extracted_path(&file.jar, &file.entry)?;
         if !path.is_file() {
             std::fs::create_dir_all(path.parent()?).ok()?;
@@ -284,16 +479,26 @@ fn rank(entry: &str) -> u8 {
     rank
 }
 
-fn read_entry(jar: &Path, entry: &str) -> Result<String, String> {
-    let file = std::fs::File::open(jar).map_err(|error| error.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let mut found = archive.by_name(entry).map_err(|error| error.to_string())?;
-    let mut text = String::new();
-    found
-        .read_to_string(&mut text)
-        .map_err(|error| error.to_string())?;
-    Ok(text)
+impl Libraries {
+    /// An entry's text, through the jar opened once.
+    fn read_entry(&self, jar: &Path, entry: &str) -> Option<String> {
+        let archive = match self.archives.get(jar) {
+            Some(archive) => archive.clone(),
+            None => {
+                let opened = zip::ZipArchive::new(std::fs::File::open(jar).ok()?).ok()?;
+                let archive = Arc::new(std::sync::Mutex::new(opened));
+                self.archives.insert(jar.to_path_buf(), archive.clone());
+                archive
+            }
+        };
+        let mut archive = archive.lock().ok()?;
+        let mut found = archive.by_name(entry).ok()?;
+        let mut text = String::new();
+        found.read_to_string(&mut text).ok()?;
+        Some(text)
+    }
 }
+
 
 impl Libraries {
     /// Where a library file is extracted, so a client can open it:
@@ -330,7 +535,7 @@ pub fn jar_fingerprint(jar: &Path) -> Option<u64> {
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::Write;
 

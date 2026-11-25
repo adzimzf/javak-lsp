@@ -824,8 +824,23 @@ impl LanguageServer for Backend {
         if language == Language::Java {
             match found.node.kind.as_str() {
                 // jdtls goes to the type of a variable, not of what a
-                // method returns.
-                "method_declaration" | "constructor_declaration" => return Ok(None),
+                // method returns; a constructor's is its class.
+                "method_declaration" => return Ok(None),
+                "constructor_declaration" | "compact_constructor_declaration" => {
+                    let path = crate::feature::semantic::path_to(&found.file.tree, found.node.start);
+                    let Some(class) = path
+                        .iter()
+                        .rev()
+                        .find(|node| !std::ptr::eq(**node, found.node) && crate::feature::semantic::is_type_declaration(node))
+                        .and_then(|class| class.child("name"))
+                    else {
+                        return Ok(None);
+                    };
+                    return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
+                        uri: found.file.uri.clone(),
+                        range: at_name(class.start),
+                    })));
+                }
                 // A type variable is a type: its own declaration.
                 "type_parameter" => {
                     return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
@@ -906,26 +921,47 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
+        let java = found.file.language == Language::Java;
+        // jdtls searches the libraries' sources too: the JDK calls a method
+        // of the JDK.
+        let everywhere = |of: &Found<'_>| {
+            let mut uses = snapshot.uses_of(of);
+            if java {
+                uses.extend(snapshot.library_uses_of(of));
+            }
+            uses
+        };
         let mut uses = snapshot.uses_of(&found);
         let also = features(found.file.language).also_referenced(&snapshot, &found);
-        if found.file.language == Language::Java && found.node.kind == "method_declaration" {
-            // A call of a method it overrides or is overridden by may run
-            // it: jdtls lists those calls too — but not `super.m()`, which
-            // runs the one it names.
-            for related in snapshot.dispatching_to(&found) {
-                let declared = (&related.file.uri, related.selection());
-                uses.extend(snapshot.uses_of(&related).into_iter().filter(|(uri, at)| {
-                    (*uri, *at) != declared && !is_super_call(&snapshot, uri, *at)
-                }));
+        let related = if java && found.node.kind == "method_declaration" {
+            snapshot.dispatching_to(&found)
+        } else {
+            Vec::new()
+        };
+        // A call of a method it overrides or is overridden by may run it:
+        // jdtls lists those calls too — but not `super.m()`, which runs the
+        // one it names.
+        for related in &related {
+            let declared = (&related.file.uri, related.selection());
+            uses.extend(snapshot.uses_of(related).into_iter().filter(|(uri, at)| {
+                (*uri, *at) != declared && !is_super_call(&snapshot, uri, *at)
+            }));
+        }
+        if java {
+            let mut family: Vec<&Found<'_>> = vec![&found];
+            family.extend(related.iter());
+            for (uri, at, index) in snapshot.library_uses_of_any(&family) {
+                let declared = (&family[index].file.uri, family[index].selection());
+                if index == 0 || ((uri, at) != declared && !is_super_call(&snapshot, uri, at)) {
+                    uses.push((uri, at));
+                }
             }
         }
-        let java = found.file.language == Language::Java;
         for also in also {
             // In Java their uses, not where they are declared.
             let declared = (&also.file.uri, also.selection());
             uses.extend(
-                snapshot
-                    .uses_of(&also)
+                everywhere(&also)
                     .into_iter()
                     .filter(|(uri, at)| !java || (*uri, *at) != declared),
             );
@@ -943,9 +979,12 @@ impl LanguageServer for Backend {
         uses.dedup();
         let places = uses
             .into_iter()
-            .map(|(uri, at)| Location {
-                uri: uri.clone(),
-                range: at_name(at),
+            .map(|(uri, at)| {
+                snapshot.extract_if_searched(uri);
+                Location {
+                    uri: uri.clone(),
+                    range: at_name(at),
+                }
             })
             .collect();
         Ok(Some(places))
@@ -1202,7 +1241,32 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
-        Ok(Some(self.indexer.types_matching(&params.query)))
+        let mut symbols = self.indexer.types_matching(&params.query);
+        // jdtls lists the libraries' types too.
+        #[allow(deprecated)]
+        symbols.extend(self.indexer.libraries.types_matching(&params.query).into_iter().map(|declared| {
+            use crate::indexer::words::TypeKind;
+            let start = tower_lsp::lsp_types::Position {
+                line: declared.line,
+                character: declared.column,
+            };
+            SymbolInformation {
+                name: declared.name,
+                kind: match declared.kind {
+                    TypeKind::Interface | TypeKind::Annotation => SymbolKind::INTERFACE,
+                    TypeKind::Enum => SymbolKind::ENUM,
+                    TypeKind::Class | TypeKind::Record => SymbolKind::CLASS,
+                },
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: declared.uri,
+                    range: Range { start, end: start },
+                },
+                container_name: Some(declared.container),
+            }
+        }));
+        Ok(Some(symbols))
     }
 
     async fn prepare_call_hierarchy(
@@ -1231,7 +1295,10 @@ impl LanguageServer for Backend {
             .into_iter()
             .map(|calls| CallHierarchyIncomingCall {
                 // As jdtls does: the caller is shown at its first call.
-                from: call_item(&snapshot, &calls.member, calls.at.first().copied()),
+                from: {
+                    snapshot.extract_if_searched(&calls.member.file.uri);
+                    call_item(&snapshot, &calls.member, calls.at.first().copied())
+                },
                 from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
             })
             .collect();

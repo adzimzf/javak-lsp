@@ -50,6 +50,12 @@ pub struct Snapshot {
     /// among them, as the index of their file and the child indices to
     /// their node: what [`Self::subtypes_of`] looks through, listed once.
     extending: std::sync::OnceLock<Vec<(usize, Vec<u32>)>>,
+    /// The library files that write a word, by the word, as searched once
+    /// per snapshot ([`Self::library_files_containing`]).
+    searched: elsa::sync::FrozenMap<String, Vec<Url>>,
+    /// Which library file each searched one is, to extract it when an
+    /// answer names it.
+    searched_files: dashmap::DashMap<Url, LibraryFile>,
 }
 
 /// Where a type is declared: the address of its file, and the child
@@ -161,6 +167,107 @@ impl Snapshot {
             types_named: elsa::sync::FrozenMap::new(),
             ancestors: elsa::sync::FrozenMap::new(),
             extending: std::sync::OnceLock::new(),
+            searched: elsa::sync::FrozenMap::new(),
+            searched_files: dashmap::DashMap::new(),
+        }
+    }
+
+    /// Every library source file that writes `word`, read into the
+    /// snapshot (not extracted): what a search for uses looks through
+    /// beyond the workspace, as jdtls searches the libraries too.
+    pub fn library_files_containing(&self, word: &str) -> Vec<&FileView> {
+        self.library_files_where(word.to_owned(), |libraries| libraries.files_containing(word))
+    }
+
+    /// The library files that call (or declare) a method called `name`,
+    /// read into the snapshot.
+    pub fn library_files_calling(&self, name: &str) -> Vec<&FileView> {
+        self.library_files_where(format!("calls {name}"), |libraries| libraries.files_calling(name))
+    }
+
+    /// The library files whose types may extend a type called `name`
+    /// ([`crate::indexer::words::supertype_names`]), read into the
+    /// snapshot.
+    pub fn library_files_extending(&self, name: &str) -> Vec<&FileView> {
+        self.library_files_where(format!("extends {name}"), |libraries| libraries.files_extending(name))
+    }
+
+    fn library_files_where(
+        &self,
+        key: String,
+        search: impl Fn(&Libraries) -> Vec<(LibraryFile, String)>,
+    ) -> Vec<&FileView> {
+        let uris: &[Url] = match self.searched.get(&key) {
+            Some(uris) => uris,
+            None => {
+                let Some(libraries) = self.libraries.as_ref() else {
+                    return Vec::new();
+                };
+                let found = search(libraries);
+                let unread: Vec<(LibraryFile, String, Url)> = found
+                    .into_iter()
+                    .filter_map(|(file, text)| {
+                        let uri = libraries.uri_of(&file)?;
+                        Some((file, text, uri))
+                    })
+                    .collect();
+                // Parsed on every core: a common name is written in
+                // hundreds of the JDK's files.
+                let threads = std::thread::available_parallelism()
+                    .map_or(4, std::num::NonZero::get)
+                    .min(unread.len().max(1));
+                let chunk = unread.len().div_ceil(threads).max(1);
+                let parsed: Vec<(LibraryFile, Url, Option<FileView>)> = std::thread::scope(|scope| {
+                    let workers: Vec<_> = unread
+                        .chunks(chunk)
+                        .map(|chunk| {
+                            scope.spawn(move || {
+                                chunk
+                                    .iter()
+                                    .map(|(file, text, uri)| {
+                                        let known = self.every_file().any(|known| known.uri == *uri);
+                                        let view = (!known).then(|| FileView {
+                                            uri: uri.clone(),
+                                            language: file.language,
+                                            text: Arc::new(text.clone()),
+                                            tree: Arc::new(crate::parser::syntax(file.language).tree(text)),
+                                            library: true,
+                                        });
+                                        (file.clone(), uri.clone(), view)
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                        })
+                        .collect();
+                    workers
+                        .into_iter()
+                        .flat_map(|worker| worker.join().unwrap_or_default())
+                        .collect()
+                });
+                let mut uris = Vec::new();
+                for (file, uri, view) in parsed {
+                    if let Some(view) = view
+                        && !self.every_file().any(|known| known.uri == uri)
+                    {
+                        self.read.push(Box::new(view));
+                    }
+                    self.searched_files.insert(uri.clone(), file);
+                    uris.push(uri);
+                }
+                self.searched.insert(key, uris)
+            }
+        };
+        uris.iter().filter_map(|uri| self.file(uri)).collect()
+    }
+
+    /// Writes a library file an answer names into the cache, so a client
+    /// can open it: a searched file is read, not extracted.
+    pub fn extract_if_searched(&self, uri: &Url) {
+        let (Some(libraries), Some(file)) = (self.libraries.as_ref(), self.searched_files.get(uri)) else {
+            return;
+        };
+        if let Some(view) = self.file(uri) {
+            libraries.extract(&file, &view.text);
         }
     }
 
@@ -2839,6 +2946,118 @@ impl Snapshot {
         places
     }
 
+    /// [`Self::uses_of`] in the libraries' sources: where they write the
+    /// name meaning the declaration.
+    pub fn library_uses_of<'a>(&'a self, declaration: &Found<'_>) -> Vec<(&'a Url, Position)> {
+        self.library_uses_of_any(&[declaration])
+            .into_iter()
+            .map(|(uri, at, _)| (uri, at))
+            .collect()
+    }
+
+    /// [`Self::library_uses_of`] for several declarations of one name at
+    /// once (a method and those it overrides or is overridden by), each
+    /// use resolved once, with which of `declarations` it means.
+    pub fn library_uses_of_any<'a>(&'a self, declarations: &[&Found<'_>]) -> Vec<(&'a Url, Position, usize)> {
+        let mut files: Vec<&FileView> = Vec::new();
+        for declaration in declarations {
+            for file in self.library_files_for(declaration) {
+                if !files.iter().any(|known| std::ptr::eq(*known, file)) {
+                    files.push(file);
+                }
+            }
+        }
+        let Some(first) = declarations.first() else {
+            return Vec::new();
+        };
+        let name = first.name.text.as_str();
+        let wanted: Vec<(&Url, Position)> = declarations
+            .iter()
+            .map(|declaration| (&declaration.file.uri, declaration.selection()))
+            .collect();
+        let threads = std::thread::available_parallelism()
+            .map_or(4, std::num::NonZero::get)
+            .min(files.len().max(1));
+        let chunk = files.len().div_ceil(threads).max(1);
+        let wanted = &wanted;
+        let mut places: Vec<(&'a Url, Position, usize)> = std::thread::scope(|scope| {
+            let workers: Vec<_> = files
+                .chunks(chunk)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        chunk
+                            .iter()
+                            .flat_map(|file| self.uses_in_file_any(file, name, wanted))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().unwrap_or_default())
+                .collect()
+        });
+        places.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
+        places.dedup();
+        places
+    }
+
+    /// The library files that may use a declaration: none for the
+    /// workspace's (a library is compiled without it), its own file for a
+    /// private member, its package for a package-private one, and else
+    /// those calling or writing its name.
+    fn library_files_for(&self, declaration: &Found<'_>) -> Vec<&FileView> {
+        if !declaration.file.library {
+            return Vec::new();
+        }
+        let name = declaration.name.text.as_str();
+        let modifiers = declaration.node.first("modifiers").map(|modifiers| modifiers.text.as_str()).unwrap_or_default();
+        let says = |word: &str| modifiers.split_whitespace().any(|written| written == word);
+        let package = self.package(declaration.file).unwrap_or_default();
+        let owner_is_interface = path_to(&declaration.file.tree, declaration.node.start)
+            .iter()
+            .rev()
+            .filter(|node| !std::ptr::eq(**node, declaration.node))
+            .find(|node| is_type_declaration(node))
+            .is_some_and(|owner| matches!(owner.kind.as_str(), "interface_declaration" | "annotation_type_declaration"));
+        let package_private = !says("public") && !says("protected") && !owner_is_interface;
+        let files = if says("private") {
+            self.file(&declaration.file.uri).into_iter().collect()
+        } else if is_callable(declaration.node) && declaration.node.kind != "constructor_declaration" {
+            self.library_files_calling(name)
+        } else {
+            self.library_files_containing(name)
+        };
+        files
+            .into_iter()
+            .filter(|file| !package_private || self.package(file).unwrap_or_default() == package)
+            .collect()
+    }
+
+    /// Where `file` writes `name` meaning one of the declarations at
+    /// `wanted`, and which.
+    fn uses_in_file_any<'a>(
+        &'a self,
+        file: &'a FileView,
+        name: &str,
+        wanted: &[(&Url, Position)],
+    ) -> Vec<(&'a Url, Position, usize)> {
+        let mut places = Vec::new();
+        for node in file.tree.walk() {
+            if !is_identifier(node) || node.text != name {
+                continue;
+            }
+            let Some(found) = self.declaration_at(&file.uri, node.start) else {
+                continue;
+            };
+            let here = (&found.file.uri, found.selection());
+            if let Some(index) = wanted.iter().position(|wanted| *wanted == here) {
+                places.push((&file.uri, node.start, index));
+            }
+        }
+        places
+    }
+
     /// Where `file` writes `name` meaning the declaration at `wanted`.
     fn uses_in_file<'a>(
         &'a self,
@@ -3351,15 +3570,29 @@ impl Snapshot {
             .collect()
     }
 
-    /// The method `method` overrides or implements: the nearest one of the
-    /// same name and arity up its supertypes, the superclass's side first —
-    /// what jdtls answers a declaration request with.
+    /// The method `method` overrides or implements, at the top of the
+    /// chain — what jdtls answers a declaration request with.
     pub fn overridden<'a>(&'a self, method: &Found<'a>) -> Option<Found<'a>> {
         if method.node.kind != "method_declaration" {
             return None;
         }
+        // The original declaration, which overrides nothing itself, as
+        // JDT's `findDeclaringMethod` finds it: `InputStream.read`, not the
+        // `FilterInputStream.read` between.
+        let mut declaring = self.overridden_once(method)?;
+        for _ in 0..16 {
+            match self.overridden_once(&declaring) {
+                Some(above) => declaring = above,
+                None => break,
+            }
+        }
+        Some(declaring)
+    }
+
+    /// The nearest method `method` overrides, the superclass's side first.
+    fn overridden_once<'a>(&'a self, method: &Found<'a>) -> Option<Found<'a>> {
         let owner = self.owning_type(method)?;
-        let arity = parameters_of(method.node).len();
+        let wanted = self.erased_parameter_types(method);
         let mut seen = vec![(owner.file.uri.clone(), owner.name.start)];
         let mut queue: std::collections::VecDeque<Found<'a>> = self.supertypes(&owner).into();
         while let Some(supertype) = queue.pop_front() {
@@ -3368,13 +3601,16 @@ impl Snapshot {
                 continue;
             }
             seen.push(place);
-            let same = members_of(supertype.node)
-                .into_iter()
-                .find(|(member, named)| {
-                    member.kind == "method_declaration"
-                        && named.text == method.name.text
-                        && parameters_of(member).len() == arity
-                });
+            let same = members_of(supertype.node).into_iter().find(|(member, named)| {
+                member.kind == "method_declaration"
+                    && named.text == method.name.text
+                    && self.erased_parameter_types(&Found {
+                        file: supertype.file,
+                        node: member,
+                        name: named,
+                        bindings: Bindings::new(),
+                    }) == wanted
+            });
             if let Some((member, named)) = same {
                 return Some(Found {
                     file: supertype.file,
@@ -3587,6 +3823,82 @@ impl Snapshot {
         below
     }
 
+    /// The types below `of` in the workspace, and in Java in the
+    /// libraries too.
+    pub fn subtypes_everywhere<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
+        let mut below = self.subtypes_of(of);
+        if of.file.language == Language::Java {
+            below.extend(self.library_subtypes_of(of, false));
+        }
+        below
+    }
+
+    /// The library types below `of`: those naming it among their
+    /// supertypes, then those naming one of them, and so on — each found
+    /// from the library files that write its name. Only the first ones
+    /// with `direct`.
+    pub fn library_subtypes_of<'a>(&'a self, of: &Found<'a>, direct: bool) -> Vec<Found<'a>> {
+        let mut found: Vec<Found<'a>> = Vec::new();
+        let mut queue = vec![of.clone()];
+        let mut seen: Vec<(Url, Position)> = vec![(of.file.uri.clone(), of.name.start)];
+        while let Some(above) = queue.pop() {
+            let place = (&above.file.uri, above.name.start);
+            let name = above.name.text.split('<').next().unwrap_or_default().trim().to_owned();
+            for file in self.library_files_extending(&name) {
+                let declarations = file.tree.walk().into_iter().filter_map(|node| {
+                    let named = if is_type_declaration(node) {
+                        node.child("name")?
+                    } else if is_anonymous_class(node) {
+                        node.child("type")?
+                    } else {
+                        return None;
+                    };
+                    // A cheap look before resolving: the name is written in
+                    // what it extends.
+                    let lists = node.children.iter().filter(|child| {
+                        matches!(
+                            child.kind.as_str(),
+                            "superclass" | "super_interfaces" | "extends_interfaces" | "interface_type_list"
+                        )
+                    });
+                    let names_it = if is_anonymous_class(node) {
+                        named.text.contains(name.as_str())
+                    } else {
+                        lists.into_iter().any(|list| list.text.contains(name.as_str()))
+                    };
+                    names_it.then_some((node, named))
+                });
+                for (node, named) in declarations {
+                    let candidate = Found {
+                        file,
+                        node,
+                        name: named,
+                        bindings: Bindings::new(),
+                    };
+                    let here = (candidate.file.uri.clone(), candidate.name.start);
+                    if seen.contains(&here) {
+                        continue;
+                    }
+                    let extends_it = self
+                        .supertypes(&candidate)
+                        .iter()
+                        .any(|supertype| (&supertype.file.uri, supertype.name.start) == place);
+                    if extends_it {
+                        seen.push(here);
+                        if !direct && !is_anonymous_class(candidate.node) {
+                            queue.push(candidate.clone());
+                        }
+                        found.push(candidate);
+                    }
+                }
+            }
+            if seen.len() > 5000 {
+                break;
+            }
+        }
+        found
+    }
+
     /// Every type above `of`, however far, as places; worked out once per
     /// snapshot.
     fn ancestors(&self, of: &Found<'_>) -> &[(Url, Position)] {
@@ -3618,6 +3930,13 @@ impl Snapshot {
             return Vec::new();
         };
         let at_its_declaration = found.file.uri == *uri && (found.name.covers(at) || found.name.end == at);
+        // `new Point(…)` asks of the class, as jdtls answers it.
+        let found = match found.node.kind.as_str() {
+            "constructor_declaration" | "compact_constructor_declaration" if !at_its_declaration => {
+                self.owning_type(&found).unwrap_or(found)
+            }
+            _ => found,
+        };
         let itself = || Found {
             file: found.file,
             node: found.node,
@@ -3637,7 +3956,7 @@ impl Snapshot {
             if !at_its_declaration && concrete {
                 answer.push(itself());
             }
-            answer.extend(self.subtypes_of(&found));
+            answer.extend(self.subtypes_everywhere(&found));
             if answer.is_empty() && !at_its_declaration {
                 answer.push(itself());
             }
@@ -3661,7 +3980,7 @@ impl Snapshot {
             return answer;
         };
         let wanted = self.erased_parameter_types(&found);
-        for subtype in self.subtypes_of(&owner) {
+        for subtype in self.subtypes_everywhere(&owner) {
             let implementing = members_of(subtype.node).into_iter().find(|(member, named)| {
                 member.kind == "method_declaration"
                     && named.text == found.name.text

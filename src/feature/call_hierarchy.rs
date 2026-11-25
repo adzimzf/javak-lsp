@@ -224,16 +224,19 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
 /// counts too (not through `super`), and a call in a lambda is the
 /// lambda's, as jdtls lists them.
 pub fn incoming<'a>(snapshot: &'a Snapshot, of: &Found<'_>) -> Vec<Calls<'a>> {
-    let mut sites = call_sites(snapshot, of);
-    if of.file.language == crate::language::Language::Java && of.node.kind == "method_declaration" {
-        for related in snapshot.dispatching_to(of) {
-            sites.extend(
-                call_sites(snapshot, &related)
-                    .into_iter()
-                    .filter(|(file, start, _)| !is_super_call(file, *start)),
-            );
-        }
-    }
+    let related = if of.file.language == crate::language::Language::Java && of.node.kind == "method_declaration" {
+        snapshot.dispatching_to(of)
+    } else {
+        Vec::new()
+    };
+    let mut targets: Vec<&Found<'_>> = vec![of];
+    targets.extend(related.iter());
+    let mut sites: Vec<(&FileView, Position, Position)> = call_sites_of_any(snapshot, &targets)
+        .into_iter()
+        // A call of a related method through `super` runs that one.
+        .filter(|(file, start, _, index)| *index == 0 || !is_super_call(file, *start))
+        .map(|(file, start, end, _)| (file, start, end))
+        .collect();
     // A caller is shown at the call JDT meets first walking the tree: the
     // outer of two chained calls (`a.first().second()` at `second`).
     let call_span = |file: &FileView, start: Position| {
@@ -279,22 +282,40 @@ pub fn call_sites<'a>(
     snapshot: &'a Snapshot,
     of: &Found<'_>,
 ) -> Vec<(&'a FileView, Position, Position)> {
-    let wanted = identity(of);
-    let mut sites: Vec<(&'a FileView, Position, Position)> = Vec::new();
+    call_sites_of_any(snapshot, &[of])
+        .into_iter()
+        .map(|(file, start, end, _)| (file, start, end))
+        .collect()
+}
+
+/// [`call_sites`] of several members of one name at once — a method and
+/// the ones it overrides or is overridden by — each call resolved once,
+/// with which of `targets` it calls.
+pub fn call_sites_of_any<'a>(
+    snapshot: &'a Snapshot,
+    targets: &[&Found<'_>],
+) -> Vec<(&'a FileView, Position, Position, usize)> {
+    let mut sites: Vec<(&'a FileView, Position, Position, usize)> = Vec::new();
+    let Some(of) = targets.first() else {
+        return sites;
+    };
+    let wanted: Vec<(&Url, Position)> = targets.iter().map(|target| identity(target)).collect();
     match kind_of(of) {
         Some(Kind::Field | Kind::EnumMember) => {
-            for (uri, at) in snapshot.uses_of(of) {
-                if (uri, at) == (wanted.0, wanted.1) {
-                    continue;
+            for (index, target) in targets.iter().enumerate() {
+                for (uri, at) in snapshot.uses_of(target) {
+                    if (uri, at) == (wanted[index].0, wanted[index].1) {
+                        continue;
+                    }
+                    let Some(file) = snapshot.file(uri) else {
+                        continue;
+                    };
+                    let end = Position {
+                        line: at.line,
+                        column: at.column + target.name.text.encode_utf16().count() as u32,
+                    };
+                    sites.push((file, at, end, index));
                 }
-                let Some(file) = snapshot.file(uri) else {
-                    continue;
-                };
-                let end = Position {
-                    line: at.line,
-                    column: at.column + of.name.text.encode_utf16().count() as u32,
-                };
-                sites.push((file, at, end));
             }
         }
         Some(Kind::Method | Kind::Constructor | Kind::Class | Kind::Interface | Kind::Enum) => {
@@ -305,10 +326,27 @@ pub fn call_sites<'a>(
                 }
                 _ => of.name.text.clone(),
             };
-            for file in snapshot.files.iter().filter(|file| !file.library) {
-                if !file.text.contains(name.as_str()) {
-                    continue;
-                }
+            // In Java the libraries' sources too, as jdtls searches them. A
+            // library calls only its own declarations and its
+            // dependencies', never the workspace's.
+            let library = if of.file.language == crate::language::Language::Java
+                && targets.iter().any(|target| target.file.library)
+            {
+                // A method is called by its name before `(`; a type or a
+                // constructor by its name after `new`, also before `(`.
+                snapshot.library_files_calling(&name)
+            } else {
+                Vec::new()
+            };
+            let files: Vec<&'a FileView> = snapshot
+                .files
+                .iter()
+                .filter(|file| !file.library)
+                .chain(library)
+                .filter(|file| file.text.contains(name.as_str()))
+                .collect();
+            let in_file = |file: &'a FileView| {
+                let mut found = Vec::new();
                 for node in file.tree.walk() {
                     if !may_call(node, &name) {
                         continue;
@@ -316,11 +354,28 @@ pub fn call_sites<'a>(
                     let Some((called, start, end)) = call_of(snapshot, node, file) else {
                         continue;
                     };
-                    if identity(&called) == wanted {
-                        sites.push((file, start, end));
+                    if let Some(index) = wanted.iter().position(|wanted| identity(&called) == *wanted) {
+                        found.push((file, start, end, index));
                     }
                 }
-            }
+                found
+            };
+            // On every core: a common name is called in thousands of the
+            // JDK's files.
+            let threads = std::thread::available_parallelism()
+                .map_or(4, std::num::NonZero::get)
+                .min(files.len().max(1));
+            let chunk = files.len().div_ceil(threads).max(1);
+            sites = std::thread::scope(|scope| {
+                let workers: Vec<_> = files
+                    .chunks(chunk)
+                    .map(|chunk| scope.spawn(|| chunk.iter().flat_map(|file| in_file(file)).collect::<Vec<_>>()))
+                    .collect();
+                workers
+                    .into_iter()
+                    .flat_map(|worker| worker.join().unwrap_or_default())
+                    .collect()
+            });
         }
         _ => {}
     }
