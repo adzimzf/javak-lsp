@@ -291,7 +291,17 @@ fn chosen<'a>(
                 .count()
         })
         .unwrap_or(0);
-    let wanted = written.max(index + 1);
+    // An empty argument list means the overload without parameters, where
+    // there is one, as it does to jdtls.
+    let wanted = if written == 0
+        && candidates
+            .iter()
+            .any(|candidate| parameters_of(candidate.node).is_empty() && candidate.node.kind == "method_declaration")
+    {
+        0
+    } else {
+        written.max(index + 1)
+    };
     let with_room: Vec<&Found<'a>> = candidates
         .iter()
         .filter(|candidate| {

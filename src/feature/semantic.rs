@@ -90,6 +90,9 @@ pub struct Type {
     pub name: String,
     pub arguments: Vec<Type>,
     pub dimensions: usize,
+    /// `? extends ` or `? super ` in front of a type argument that is a
+    /// bounded wildcard, the type being its bound; a bare `?` is named `?`.
+    pub wildcard: Option<&'static str>,
 }
 
 impl Type {
@@ -107,7 +110,12 @@ impl Type {
             let inner: Vec<String> = self.arguments.iter().map(Type::written).collect();
             format!("<{}>", inner.join(", "))
         };
-        format!("{}{arguments}{}", self.name, "[]".repeat(self.dimensions))
+        format!(
+            "{}{}{arguments}{}",
+            self.wildcard.unwrap_or_default(),
+            self.name,
+            "[]".repeat(self.dimensions)
+        )
     }
 }
 
@@ -1272,6 +1280,7 @@ fn substituted(written: Type, bindings: &Bindings) -> Type {
     if let Some(bound) = bindings.get(&written.name) {
         let mut bound = bound.clone();
         bound.dimensions += written.dimensions;
+        bound.wildcard = bound.wildcard.or(written.wildcard);
         return bound;
     }
     Type {
@@ -1282,6 +1291,7 @@ fn substituted(written: Type, bindings: &Bindings) -> Type {
             .map(|argument| substituted(argument, bindings))
             .collect(),
         dimensions: written.dimensions,
+        wildcard: written.wildcard,
     }
 }
 
@@ -1308,7 +1318,7 @@ pub fn type_of_node(node: &Syn) -> Type {
             Type {
                 name,
                 arguments,
-                dimensions: 0,
+                ..Type::default()
             }
         }
         "array_type" => {
@@ -1319,12 +1329,24 @@ pub fn type_of_node(node: &Syn) -> Type {
             element.dimensions += 1;
             element
         }
-        "wildcard" => node
-            .children
-            .iter()
-            .find(|child| child.kind.ends_with("type") || child.kind.ends_with("identifier"))
-            .map(type_of_node)
-            .unwrap_or_default(),
+        "wildcard" => {
+            let bound = node
+                .children
+                .iter()
+                .find(|child| child.kind.ends_with("type") || child.kind.ends_with("identifier"));
+            match bound {
+                Some(bound) => {
+                    let mut written = type_of_node(bound);
+                    written.wildcard = Some(if node.children.iter().any(|child| child.kind == "super") {
+                        "? super "
+                    } else {
+                        "? extends "
+                    });
+                    written
+                }
+                None => Type::named("?"),
+            }
+        }
         _ => Type::named(last_segment(node.text.trim())),
     }
 }
@@ -2306,7 +2328,7 @@ impl Snapshot {
             "field_declaration" | "constant_declaration" => {
                 let written = self.type_of_declaration(found)?.written();
                 let value = assigned_value(node, &found.name.text);
-                let is_constant = node.text.contains("final");
+                let is_constant = is_compile_time_constant(node, &found.name.text, &written);
                 match value.filter(|_| is_constant) {
                     Some(value) => Some(format!("{written} {} = {value}", found.name.text)),
                     None => Some(format!("{written} {}", found.name.text)),
@@ -2478,6 +2500,43 @@ pub(crate) fn type_parameters_of(declaration: &Syn) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Whether a field is a constant whose value jdtls shows on hover: final
+/// (an interface's fields are), of a primitive type or `String`, and set to
+/// an expression of literals and names — no call, no `new`.
+fn is_compile_time_constant(declaration: &Syn, name: &str, written: &str) -> bool {
+    let is_final = declaration.kind == "constant_declaration"
+        || declaration.first("modifiers").is_some_and(|modifiers| {
+            modifiers.children.iter().any(|modifier| modifier.kind == "final")
+        });
+    let constant_type = matches!(
+        written,
+        "boolean" | "byte" | "char" | "short" | "int" | "long" | "float" | "double" | "String"
+    );
+    let Some(value) = declaration
+        .all("variable_declarator")
+        .find(|declarator| declarator.child("name").is_some_and(|named| named.text == name))
+        .and_then(|declarator| declarator.child("value"))
+    else {
+        return false;
+    };
+    let computed = value.walk().into_iter().any(|node| {
+        matches!(
+            node.kind.as_str(),
+            "method_invocation"
+                | "object_creation_expression"
+                | "array_creation_expression"
+                | "array_initializer"
+                | "lambda_expression"
+                | "method_reference"
+                | "assignment_expression"
+                | "update_expression"
+                | "instanceof_expression"
+                | "switch_expression"
+        )
+    });
+    is_final && constant_type && !computed
 }
 
 /// What a field declaration assigns `name`, as written.
