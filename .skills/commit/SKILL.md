@@ -19,6 +19,9 @@ Before each commit:
 1. `cargo build` and `cargo test` (or the narrower test for what changed) pass.
 2. `git diff --staged` contains only this change.
 3. If not on a feature branch, create one first; never commit to `main`.
+   The branch name must be readable: short lowercase words joined by
+   hyphens that say what the work is (`fix-kotlin-hover-nullability`), not
+   random IDs, hashes or generated names (`claude/abc123`, `tmp-x9f2`).
 
 ## Message
 
