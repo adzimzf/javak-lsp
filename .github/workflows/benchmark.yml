@@ -1,4 +1,4 @@
-name: jdtls compat
+name: benchmark
 
 # javak-lsp vs jdtls on real projects. The work is the Rust test
 # `integrationtest::benchmark` (src/integrationtest/benchmark); this only sets up the
@@ -22,7 +22,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: jdtls-compat-${{ github.ref }}
+  group: benchmark-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,7 +35,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          # jdtls 1.63's launcher accepts Java 21, but its org.eclipse.jdt.core
+          # bundle needs JavaSE-25: on 21 OSGi cannot resolve it and jdtls
+          # exits before reading `initialize` (a broken pipe in the test).
+          java-version: "25"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -49,8 +52,8 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             ~/.cache/javak-lsp/jdtls
-          key: jdtls-compat-${{ runner.os }}-${{ hashFiles('src/integrationtest/benchmark/catalog.rs', 'src/integrationtest/benchmark/prepare.rs') }}
-          restore-keys: jdtls-compat-${{ runner.os }}-
+          key: benchmark-${{ runner.os }}-${{ hashFiles('src/integrationtest/benchmark/catalog.rs', 'src/integrationtest/benchmark/prepare.rs') }}
+          restore-keys: benchmark-${{ runner.os }}-
 
       - name: Build javak-lsp
         run: cargo build --release
@@ -71,6 +74,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: jdtls-compat
+          name: benchmark
           path: target/jdtls-compat
           if-no-files-found: ignore
