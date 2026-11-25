@@ -4,3 +4,4 @@ public class Foo {
     is$0
 }
 //= expected
+(nothing)

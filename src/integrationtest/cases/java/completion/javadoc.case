@@ -1570,3 +1570,14 @@ public class Foo {
 	}
 }
 //= expected
+abstract
+class
+enum
+final
+import
+interface
+non
+package
+public
+record
+sealed

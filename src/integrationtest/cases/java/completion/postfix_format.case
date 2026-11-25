@@ -5,3 +5,4 @@ public class Test {
 		a.format$0	}
 }
 //= expected
+format

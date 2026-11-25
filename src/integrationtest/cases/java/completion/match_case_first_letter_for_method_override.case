@@ -8,3 +8,6 @@ class TestOverride extends Test{
 	t$0
 }
 //= expected
+testMethod
+Test
+TestOverride

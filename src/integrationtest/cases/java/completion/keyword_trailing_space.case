@@ -3,3 +3,4 @@ public class Foo {
 	pub$0
 }
 //= expected
+public

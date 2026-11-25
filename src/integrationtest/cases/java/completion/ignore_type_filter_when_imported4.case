@@ -8,3 +8,4 @@ import static java.util.List.DUMMY;public class Test {
 	}
 }
 //= expected
+List

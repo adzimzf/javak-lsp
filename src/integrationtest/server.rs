@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -20,6 +20,7 @@ use tower_lsp::lsp_types::Url;
 use tower_lsp::{LspService, Server};
 
 use super::fixture::{Fixture, FixtureFile};
+use crate::indexer::library::Libraries;
 use crate::indexer::Indexer;
 
 /// Where the server is told its workspace is. Nothing is there.
@@ -518,14 +519,59 @@ fn in_memory(workspace: PathBuf) -> (Reader, Writer, Url, Host) {
 
 /// An indexer whose workspace is pinned at the fixture's: it reads what is
 /// below it (nothing, at [`MEMORY_ROOT`]) and nothing else — no Gradle
-/// cache, no JDK sources. What the server derives from the root (a file's
+/// cache, not the machine's JDK, only the harness's own ([`stub_jdk`]). What the server derives from the root (a file's
 /// package from its directory) and what it reads below it are the
 /// fixture's alone, never the directory the tests run in.
 fn pinned_indexer(workspace: PathBuf) -> Indexer {
-    let indexer = Indexer::new();
+    let mut indexer = Indexer::new();
+    indexer.libraries = Arc::clone(stub_jdk());
     indexer.workspace_pinned.store(true, Ordering::Relaxed);
     let _ = indexer.workspace_root.set(workspace);
     indexer
+}
+
+/// Where the stub JDK's sources are: a few `java.lang` and `java.util`
+/// types, laid out as the JDK's `src.zip` lays them out.
+const STUB_JDK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/integrationtest/jdk");
+
+/// The JDK every in-memory server reads: the sources below [`STUB_JDK`],
+/// zipped once per test run. A case may name `String`, `List` or
+/// `Runnable` as jdtls's tests do, and its answer is the same on every
+/// machine, whichever JDK (if any) is installed. Only what those types
+/// declare is there — a member the stub leaves out is one no case asks for.
+fn stub_jdk() -> &'static Arc<Libraries> {
+    static JDK: OnceLock<(tempfile::TempDir, Arc<Libraries>)> = OnceLock::new();
+    let (_, libraries) = JDK.get_or_init(|| {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let zip = directory.path().join("src.zip");
+        write_zip(Path::new(STUB_JDK), &zip);
+        let libraries = Libraries::extracting_into(directory.path().join("sources"));
+        libraries.replace(&[zip]);
+        (directory, Arc::new(libraries))
+    });
+    libraries
+}
+
+/// `root`'s files zipped into `zip`, each under its path below `root`.
+fn write_zip(root: &Path, zip: &Path) {
+    use std::io::Write;
+    let mut files = Vec::new();
+    crate::indexer::walk_sources(root, |path| {
+        files.push(path.to_owned());
+        std::ops::ControlFlow::Continue(())
+    });
+    files.sort();
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(zip).expect("the zip is writable"));
+    for file in files {
+        let entry = file.strip_prefix(root).expect("below the root");
+        writer
+            .start_file(entry.to_string_lossy(), zip::write::SimpleFileOptions::default())
+            .expect("an entry starts");
+        writer
+            .write_all(&std::fs::read(&file).expect("a stub source is readable"))
+            .expect("an entry is written");
+    }
+    writer.finish().expect("the zip is finished");
 }
 
 /// The `Content-Length` framed messages `reader` carries, one per item.

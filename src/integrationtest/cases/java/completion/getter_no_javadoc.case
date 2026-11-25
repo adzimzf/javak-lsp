@@ -3,3 +3,4 @@ public class Foo {
     private String strField;
     get$0}
 //= expected
+(nothing)

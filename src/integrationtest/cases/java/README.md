@@ -9,7 +9,10 @@ the fixture — so this file says where each one comes from.
 - A case listed with a jdtls test asks what that test asks, on sources small
   enough to read in the case. Where the jdtls test leans on the JDK or a
   library (`println`, `new RuntimeException`, `StringUtils`), the fixture
-  declares a type of its own to play the part.
+  declares a type of its own to play the part, or names one of the few JDK
+  types the harness carries itself (`src/integrationtest/jdk/`: `Object`,
+  `String`, `Runnable`, `List`, `Stream`, …). The server under test reads
+  that stub as its JDK, whatever JDK the machine has; jdtls reads its own.
 - A case listed without one asks the same jdtls handler about a kind of name
   its tests leave out; its answer follows from how that handler is written.
 - The expectations are what jdtls answers, written without looking at what
@@ -432,6 +435,13 @@ text a snippet inserts. Those cases still ask the question at the jdtls
 position; what the rendering leaves out is not checked.
 
 ### completion
+
+Answer: the names offered, best first, as a client sorts them, of those the
+fixture spells or the case lists. The expectations were recorded with jdtls
+1.63.0 (`compat.rs`), so they follow jdtls's defaults: a type matches a prefix
+whatever its case, anything else only with its first letter as typed
+(`java.completion.matchCase`); with no prefix the only types offered are the
+file's own; a declared type puts itself first in the value being written.
 
 | case | jdtls test |
 | --- | --- |

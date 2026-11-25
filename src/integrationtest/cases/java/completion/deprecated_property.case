@@ -5,3 +5,4 @@ public class Main {
 	DeprecatedCl$0
 }
 //= expected
+DeprecatedClass

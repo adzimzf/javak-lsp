@@ -5,3 +5,4 @@ public class Test {
 		identifier.opt$0	}
 }
 //= expected
+(nothing)

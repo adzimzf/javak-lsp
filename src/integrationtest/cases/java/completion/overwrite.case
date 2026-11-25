@@ -14,3 +14,6 @@ public class BaseTest {
     }
 }
 //= expected
+testInt
+method
+update

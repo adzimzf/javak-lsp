@@ -2,3 +2,5 @@
 package org.sample;
 public record Test() {$0}
 //= expected
+Test
+public

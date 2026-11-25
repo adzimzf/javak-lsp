@@ -4,3 +4,4 @@ public class Test {}
 public class InnerTest{}
 $0
 //= expected
+class

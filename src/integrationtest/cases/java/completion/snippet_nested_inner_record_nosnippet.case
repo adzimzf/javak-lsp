@@ -4,3 +4,6 @@ public record Test() {}
 public record InnerTest(){
 $0
 //= expected
+InnerTest
+Test
+public

@@ -4,3 +4,4 @@ package org.sample;
 import static java.util.ArrayList.$0;
 public class Test {}
 //= expected
+(nothing)

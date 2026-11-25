@@ -3,3 +3,7 @@ $0package org.sample;
 import public class Test {
 }
 //= expected
+class
+import
+package
+public

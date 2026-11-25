@@ -12,3 +12,7 @@ public class Foo {
 	}
 }
 //= expected
+String
+chain
+Foo
+StringChain

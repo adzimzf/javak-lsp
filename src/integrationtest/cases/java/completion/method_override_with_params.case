@@ -4,3 +4,4 @@ package org.sample;
 public class Test extends Baz {
     getP$0}
 //= expected
+(nothing)
