@@ -1,0 +1,19 @@
+//- /com/demo/Sum.java
+package com.demo;
+
+class Sum {
+    int of(int[] values) {
+        int sum = 0;
+        for (int value : values) {
+            su$0m += value;
+        }
+        int copy;
+        copy = sum;
+        return copy + sum;
+    }
+}
+//= expected
+/com/demo/Sum.java:5:13-16 write  int sum = 0;
+/com/demo/Sum.java:7:13-16 write  sum += value;
+/com/demo/Sum.java:10:16-19 read  copy = sum;
+/com/demo/Sum.java:11:23-26 read  return copy + sum;

@@ -1,0 +1,21 @@
+//- /com/demo/Color.java
+package com.demo;
+
+enum Color {
+    RED {
+        @Override
+        void paint() {
+        }
+    },
+    GREEN;
+
+    void paint() {
+    }
+
+    void run() {
+        pai$0nt();
+    }
+}
+//= expected
+/com/demo/Color.java:11:10-15 read  void paint() {
+/com/demo/Color.java:15:9-14 read  paint();

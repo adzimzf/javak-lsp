@@ -9,7 +9,7 @@ class Circle {
     }
 }
 //= expected
-/com/demo/Circle.java:3:7  class Circle {
-/com/demo/Circle.java:4:12  static Circle unit;
-/com/demo/Circle.java:6:5  Circle copy(Circle other) {
-/com/demo/Circle.java:6:17  Circle copy(Circle other) {
+/com/demo/Circle.java:3:7-13 read  class Circle {
+/com/demo/Circle.java:4:12-18 read  static Circle unit;
+/com/demo/Circle.java:6:5-11 read  Circle copy(Circle other) {
+/com/demo/Circle.java:6:17-23 read  Circle copy(Circle other) {

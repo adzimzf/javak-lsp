@@ -1,0 +1,16 @@
+//- /com/demo/Loops.java
+package com.demo;
+
+class Loops {
+    void run(int n) {
+        outer:
+        for (int i = 0; i < n; i++) {
+            do {
+                bre$0ak outer;
+            } while (false);
+        }
+    }
+}
+//= expected
+/com/demo/Loops.java:5:9-14 read  outer:
+/com/demo/Loops.java:10:9-10 read  }

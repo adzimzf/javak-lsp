@@ -1,0 +1,30 @@
+//- /com/demo/Color.java
+package com.demo;
+
+enum Color$0 {
+    RED("r") {
+        @Override
+        void paint() {
+        }
+    },
+    GREEN("g");
+
+    private final String code;
+
+    Color(String code) {
+        this.code = code;
+    }
+
+    void paint() {
+    }
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+enum Color  3:1-19:2 at 3:6-11
+  enum-member RED  4:5-8:6 at 4:5-8
+    enum {...}  4:5-8:6 at 4:5-8
+      method paint() : void  5:9-7:10 at 6:14-19
+  enum-member GREEN  9:5-15 at 9:5-10
+  field code  11:5-31 at 11:26-30
+  constructor Color(String)  13:5-15:6 at 13:5-10
+  method paint() : void  17:5-18:6 at 17:10-15

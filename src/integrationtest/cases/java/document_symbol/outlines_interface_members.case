@@ -1,0 +1,28 @@
+//- /com/demo/Shape.java
+package com.demo;
+
+interface Shape$0<R> {
+    int SIDES = 4;
+
+    R area();
+
+    default R twice() {
+        return area();
+    }
+
+    static void noop() {
+    }
+
+    interface Visitor {
+        void visit(Shape<?> shape);
+    }
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+interface Shape<R>  3:1-18:2 at 3:11-16
+  field SIDES  4:5-19 at 4:9-14
+  method area() : R  6:5-14 at 6:7-11
+  method twice() : R  8:5-10:6 at 8:15-20
+  method noop() : void  12:5-13:6 at 12:17-21
+  interface Visitor  15:5-17:6 at 15:15-22
+    method visit(Shape<?>) : void  16:9-36 at 16:14-19

@@ -19,11 +19,12 @@ class Circle$0 {
     }
 }
 //= expected
-class Circle
-constant PI
-field radius
-constructor Circle
-method area
-enum Unit
-enum-member METRE
-enum-member FOOT
+package com.demo  1:1-18 at 1:1-18
+class Circle  3:1-19:2 at 3:7-13
+  constant PI  4:5-35 at 4:25-27
+  field radius  5:5-33 at 5:26-32
+  constructor Circle(double)  7:5-9:6 at 7:5-11
+  method area() : double  11:5-13:6 at 11:12-16
+  enum Unit  15:5-18:6 at 15:10-14
+    enum-member METRE  16:9-14 at 16:9-14
+    enum-member FOOT  17:9-13 at 17:9-13

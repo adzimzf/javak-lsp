@@ -14,7 +14,7 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:5:13  int count = start;
-/com/demo/Main.java:6:9  count = count + 1;
-/com/demo/Main.java:6:17  count = count + 1;
-/com/demo/Main.java:7:16  return count;
+/com/demo/Main.java:5:13-18 write  int count = start;
+/com/demo/Main.java:6:9-14 write  count = count + 1;
+/com/demo/Main.java:6:17-22 read  count = count + 1;
+/com/demo/Main.java:7:16-21 read  return count;

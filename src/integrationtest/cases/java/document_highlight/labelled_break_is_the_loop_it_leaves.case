@@ -47,5 +47,5 @@ interface Greeter {
     void bye();
 }
 //= expected
-/com/demo/Highlight.java:14:9  loop: while (times > 0) {
-/com/demo/Highlight.java:21:9  }
+/com/demo/Highlight.java:14:9-13 read  loop: while (times > 0) {
+/com/demo/Highlight.java:21:9-10 read  }

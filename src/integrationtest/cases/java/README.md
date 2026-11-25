@@ -33,8 +33,22 @@ Notes on how an answer is written down:
   setting, not a rule of the language.
 - **document_highlight** follows jdtls's `Highlight.java`: besides the
   occurrences of a name, jdtls highlights where a thrown exception is
-  thrown, where a method exits, the loop a `break` leaves and the methods
-  implementing an interface.
+  thrown, where a method exits, the loop a `break` or `continue` goes to
+  and the methods implementing an interface or overriding a superclass. A
+  Java answer is written `path:line:column-end kind`: where each range
+  ends (a column, or `line:column` over lines) and whether it is `read` or
+  `write` — jdtls marks a variable written where it is declared, assigned
+  or incremented. A type written qualified (`Outer.Inner`) is highlighted
+  whole; `new Point(…)` is the class to a cursor on it and the constructor
+  to one on the constructor; `var` is the type it stands for.
+- **document_symbol** is, for Java, the tree jdtls answers, one symbol a
+  line nested under its parent: `kind name detail  range at selection`,
+  and `deprecated` where it is tagged so. jdtls names a method with its
+  parameter types and type parameters (`first(List<E>, String...) <E>`)
+  and gives its return type as the detail (` : E`), names a type with its
+  type parameters, starts a member's range at the comments that lead it,
+  and lists an anonymous or local class under the member it is written
+  in, a record's components as its fields and the package first.
 - **implementation** asks every case of the hierarchy of jdtls's `hello`
   test project: `IFoo` is implemented by `Foo2`, which `Foo3` extends;
   `Foo` is extended by `FooChild`; nothing extends `AbstractFoo`.
@@ -83,6 +97,7 @@ jdtls: `NavigateToDefinitionHandlerTest`.
 | `annotation` | — |
 | `annotation_element` | — |
 | `catch_parameter` | — |
+| `class_named_where_it_has_a_constructor` | — |
 | `constructor_call_is_the_constructor_with_those_arguments` | — |
 | `declaration_is_itself` | — |
 | `default_method_called_on_an_implementation` | — |
@@ -185,15 +200,49 @@ jdtls: `DocumentHighlightHandlerTest`.
 
 | case | jdtls test |
 | --- | --- |
+| `annotation_is_every_use_of_it` | — |
+| `break_in_a_switch_is_the_switch` | `testDocumentHighlight_BreakContinueTarget` |
+| `break_is_the_loop_it_leaves` | `testDocumentHighlight_BreakContinueTarget` |
+| `catch_parameter` | — |
 | `class_is_every_use_of_its_name_in_the_file` | — |
+| `class_with_constructors_is_its_type_uses` | — |
+| `constructor_is_its_declaration_and_what_calls_it` | — |
+| `continue_is_the_loop_it_goes_on_with` | `testDocumentHighlight_BreakContinueTarget` |
+| `enum_method_is_not_a_constant_body_override` | — |
+| `extended_class_is_the_methods_overriding_it` | `testDocumentHighlight_ImplementOccurrences` |
 | `field_skips_the_local_of_the_same_name` | `testDocumentHighlight_Occurrences` |
 | `implemented_interface_is_the_methods_implementing_it` | `testDocumentHighlight_ImplementOccurrences` |
+| `implemented_jdk_interface` | `testDocumentHighlight_ImplementOccurrences` |
+| `imported_jdk_type` | — |
+| `jdk_method_is_its_calls_in_the_file` | — |
+| `jdk_type_is_every_use_in_the_file` | — |
 | `labelled_break_is_the_loop_it_leaves` | `testDocumentHighlight_BreakContinueTarget` |
+| `labelled_break_on_its_own_line` | `testDocumentHighlight_BreakContinueTarget` |
+| `labelled_continue_is_the_label` | `testDocumentHighlight_BreakContinueTarget` |
+| `lambda_parameter` | — (pending: jdtls adds the parameter of the interface's method) |
 | `local_stays_inside_its_method` | — |
+| `local_written_where_declared_and_assigned` | `testDocumentHighlight_Occurrences` |
+| `method_ending_in_a_throw_does_not_exit_at_its_brace` | `testDocumentHighlight_MethodExits` |
 | `method_is_its_declaration_and_calls_in_the_file` | — |
+| `method_of_an_enum_constant_body_is_its_own` | — |
+| `outer_part_of_a_qualified_type` | — |
+| `package_name` | — |
+| `parameter` | — |
+| `pattern_variable` | — |
+| `qualified_type_is_its_whole_name` | — |
+| `record_component_is_only_its_declaration` | — |
+| `record_field_is_where_the_record_reads_it` | — |
+| `record_pattern_component` | — |
 | `return_is_where_the_method_exits` | `testDocumentHighlight_MethodExits` |
+| `return_of_a_void_method` | `testDocumentHighlight_MethodExits` |
 | `return_type_is_where_the_method_exits` | `testDocumentHighlight_MethodExits` |
+| `return_type_of_an_abstract_method_is_nothing` | `testDocumentHighlight_MethodExits` |
+| `statically_imported_enum_constant` | — |
+| `this_and_super_are_nothing` | — |
 | `thrown_exception_is_where_it_is_thrown` | `testDocumentHighlight_ExceptionOccurences` |
+| `var_is_the_type_it_stands_for` | — |
+| `void_method_exits_at_its_last_brace` | `testDocumentHighlight_MethodExits` |
+| `written_where_assigned_read_elsewhere` | `testDocumentHighlight_Occurrences` |
 
 ## completion
 
@@ -337,11 +386,21 @@ jdtls: `DocumentSymbolHandlerTest`.
 
 | case | jdtls test |
 | --- | --- |
-| `names_generic_declarations_without_their_type_parameters` | — |
+| `deprecated_by_javadoc_or_annotation` | — |
+| `names_generic_declarations_with_their_type_parameters` | — |
+| `outlines_a_class` | — |
+| `outlines_a_file_without_a_package` | — |
+| `outlines_a_record` | — |
+| `outlines_an_annotation_type` | — |
+| `outlines_an_enum_constant_with_a_body` | — |
 | `outlines_an_enum_with_members` | `testDecompiledSource` |
 | `outlines_an_interface` | — |
+| `outlines_anonymous_and_local_classes` | — |
 | `outlines_every_top_level_type_and_nesting_level` | — |
+| `outlines_interface_members` | — |
+| `outlines_methods_with_their_signatures` | `testSyntheticMember` |
 | `outlines_nested_types` | `testTypes`, `testTypes_hierarchical` |
+| `ranges_start_at_the_javadoc_or_annotation` | — |
 | `tells_a_constant_from_a_field` | — |
 
 ## folding_range

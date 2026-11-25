@@ -1,0 +1,22 @@
+//- /com/demo/Square.java
+package com.demo;
+
+class Square extends Sha$0pe {
+    @Override
+    double area() {
+        return 4;
+    }
+
+    double side() {
+        return 2;
+    }
+}
+
+class Shape {
+    double area() {
+        return 0;
+    }
+}
+//= expected
+/com/demo/Square.java:3:22-27 read  class Square extends Shape {
+/com/demo/Square.java:5:12-16 read  double area() {

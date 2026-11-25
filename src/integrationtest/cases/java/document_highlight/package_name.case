@@ -1,0 +1,7 @@
+//- /com/demo/Usage.java
+package com.de$0mo;
+
+class Usage {
+}
+//= expected
+/com/demo/Usage.java:1:9-17 read  package com.demo;

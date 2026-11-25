@@ -8,7 +8,7 @@ module behind an interface of its own:
 
 | Layer | Interface | Per language |
 | --- | --- | --- |
-| `src/parser` | `Syntax` | parsing, outline, folds; Kotlin is lowered to the Java-shaped tree the features read |
+| `src/parser` | `Syntax` | parsing, outline, folds; Kotlin is lowered to the Java-shaped tree the features read (Java's outline is jdtls's, built in `src/feature/outline.rs`) |
 | `src/feature` | `LanguageFeatures` | how signatures are written, keywords, what a reference includes |
 | `src/indexer` | `SourceLayout` | source roots, what a library source file declares |
 | `src/backend` | `LanguageProtocol` | the protocol's language ids |

@@ -1,0 +1,16 @@
+//- /com/demo/Usage.java
+package com.demo;
+
+class Usage {
+    Outer.Inn$0er inner = new Outer.Inner();
+    Outer outer;
+}
+
+class Outer {
+    static class Inner {
+    }
+}
+//= expected
+/com/demo/Usage.java:4:5-16 read  Outer.Inner inner = new Outer.Inner();
+/com/demo/Usage.java:4:29-40 read  Outer.Inner inner = new Outer.Inner();
+/com/demo/Usage.java:9:18-23 read  static class Inner {

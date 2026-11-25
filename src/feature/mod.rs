@@ -10,6 +10,7 @@ pub mod call_hierarchy;
 pub mod highlight;
 pub mod java;
 pub mod kotlin;
+pub mod outline;
 pub mod query;
 pub mod semantic;
 pub mod signature;

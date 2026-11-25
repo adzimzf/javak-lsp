@@ -1,0 +1,19 @@
+//- /com/demo/Choice.java
+package com.demo;
+
+class Choice {
+    int pick(int n) {
+        int result = 0;
+        switch (n) {
+            case 1:
+                result = 1;
+                brea$0k;
+            default:
+                result = 2;
+        }
+        return result;
+    }
+}
+//= expected
+/com/demo/Choice.java:6:9-15 read  switch (n) {
+/com/demo/Choice.java:12:9-10 read  }

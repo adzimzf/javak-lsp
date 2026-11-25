@@ -1,0 +1,19 @@
+//- /com/demo/Square.java
+package com.demo;
+
+class Square extends Shape {
+    Square() {
+        sup$0er(4);
+    }
+
+    Square(int side) {
+        this();
+    }
+}
+
+class Shape {
+    Shape(int sides) {
+    }
+}
+//= expected
+(nothing)

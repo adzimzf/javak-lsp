@@ -47,7 +47,7 @@ interface Greeter {
     void bye();
 }
 //= expected
-/com/demo/Highlight.java:6:12  public String greet(int times) throws Failure {
-/com/demo/Highlight.java:8:13  throw new Failure();
-/com/demo/Highlight.java:12:13  throw new RuntimeException();
-/com/demo/Highlight.java:23:9  return text + "foo";
+/com/demo/Highlight.java:6:12-18 read  public String greet(int times) throws Failure {
+/com/demo/Highlight.java:8:13-18 read  throw new Failure();
+/com/demo/Highlight.java:12:13-18 read  throw new RuntimeException();
+/com/demo/Highlight.java:23:9-29 read  return text + "foo";

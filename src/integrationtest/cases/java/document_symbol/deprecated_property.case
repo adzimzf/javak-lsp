@@ -250,3 +250,14 @@ public class TestJavadoc {
 	}
 }
 //= expected
+package org.sample  1:1-20 at 1:1-20
+class Bar  3:1-29:2 at 6:14-17
+  method main(String[]) : void  8:2-10:3 at 8:21-25
+  interface MyInterface  12:2-16:3 at 13:26-37  deprecated
+    method foo() : void  15:3-14 at 15:8-11
+  class MyClass  18:2-21:3 at 18:22-29
+    method bar() : void  20:3-16 at 20:8-11
+  constant EMPTY  23:2-40 at 23:29-34
+  enum Foo  26:2-28:3 at 26:14-17
+    enum-member Bar  27:3-6 at 27:3-6
+    enum-member Zoo  27:8-11 at 27:8-11

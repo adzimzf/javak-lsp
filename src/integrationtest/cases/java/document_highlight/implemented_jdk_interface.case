@@ -1,0 +1,14 @@
+//- /com/demo/Task.java
+package com.demo;
+
+class Task implements Runn$0able {
+    @Override
+    public void run() {
+    }
+
+    void other() {
+    }
+}
+//= expected
+/com/demo/Task.java:3:23-31 read  class Task implements Runnable {
+/com/demo/Task.java:5:17-20 read  public void run() {

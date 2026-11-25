@@ -1,0 +1,16 @@
+//- /com/demo/Marker.java
+package com.demo;
+
+@interface Marker$0 {
+    String value() default "";
+
+    int[] ids();
+
+    int LIMIT = 4;
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+interface Marker  3:1-9:2 at 3:12-18
+  method value() : String  4:5-31 at 4:12-17
+  method ids() : int[]  6:5-17 at 6:11-14
+  field LIMIT  8:5-19 at 8:9-14

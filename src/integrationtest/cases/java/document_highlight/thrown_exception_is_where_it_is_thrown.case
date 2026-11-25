@@ -47,5 +47,5 @@ interface Greeter {
     void bye();
 }
 //= expected
-/com/demo/Highlight.java:6:43  public String greet(int times) throws Failure {
-/com/demo/Highlight.java:8:13  throw new Failure();
+/com/demo/Highlight.java:6:43-50 read  public String greet(int times) throws Failure {
+/com/demo/Highlight.java:8:13-18 read  throw new Failure();

@@ -1,0 +1,17 @@
+//- /com/demo/Shapes.java
+package com.demo;
+
+class Shapes {
+    int sum(Object shape) {
+        if (shape instanceof Point(int $0a, int b)) {
+            return a + b;
+        }
+        return 0;
+    }
+}
+
+record Point(int x, int y) {
+}
+//= expected
+/com/demo/Shapes.java:5:40-41 write  if (shape instanceof Point(int a, int b)) {
+/com/demo/Shapes.java:6:20-21 read  return a + b;

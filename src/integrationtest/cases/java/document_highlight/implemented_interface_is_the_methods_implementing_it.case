@@ -47,6 +47,6 @@ interface Greeter {
     void bye();
 }
 //= expected
-/com/demo/Highlight.java:3:28  class Highlight implements Greeter {
-/com/demo/Highlight.java:32:17  public void hello() {
-/com/demo/Highlight.java:36:17  public void bye() {
+/com/demo/Highlight.java:3:28-35 read  class Highlight implements Greeter {
+/com/demo/Highlight.java:32:17-22 read  public void hello() {
+/com/demo/Highlight.java:36:17-20 read  public void bye() {

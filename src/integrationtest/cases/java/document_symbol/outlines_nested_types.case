@@ -28,13 +28,14 @@ public class Bar$0 {
     }
 }
 //= expected
-class Bar
-method main
-interface MyInterface
-method foo
-class MyClass
-method bar
-constant EMPTY
-enum Foo
-enum-member Bar
-enum-member Zoo
+package org.sample  1:1-20 at 1:1-20
+class Bar  3:1-28:2 at 6:14-17
+  method main(String[]) : void  8:5-9:6 at 8:24-28
+  interface MyInterface  11:5-15:6 at 12:29-40  deprecated
+    method foo() : void  14:9-20 at 14:14-17
+  class MyClass  17:5-21:6 at 17:25-32
+    method bar() : void  19:9-20:10 at 19:14-17
+  constant EMPTY  23:5-43 at 23:32-37
+  enum Foo  25:5-27:6 at 25:17-20
+    enum-member Bar  26:9-12 at 26:9-12
+    enum-member Zoo  26:14-17 at 26:14-17

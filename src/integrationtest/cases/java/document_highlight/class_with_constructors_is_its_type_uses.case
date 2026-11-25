@@ -1,0 +1,19 @@
+//- /com/demo/Point.java
+package com.demo;
+
+class Po$0int {
+    static Point origin = new Point(0, 0);
+
+    Point(int x, int y) {
+    }
+
+    Point copy() {
+        return new Point(1, 2);
+    }
+}
+//= expected
+/com/demo/Point.java:3:7-12 read  class Point {
+/com/demo/Point.java:4:12-17 read  static Point origin = new Point(0, 0);
+/com/demo/Point.java:4:31-36 read  static Point origin = new Point(0, 0);
+/com/demo/Point.java:9:5-10 read  Point copy() {
+/com/demo/Point.java:10:20-25 read  return new Point(1, 2);

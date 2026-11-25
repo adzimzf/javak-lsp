@@ -1,0 +1,29 @@
+//- /com/demo/Counter.java
+package com.demo;
+
+class Counter {
+    private int cou$0nt;
+    private int total = 1;
+
+    Counter(int count) {
+        this.count = count;
+    }
+
+    void add(int step) {
+        count++;
+        --count;
+        count += step;
+        total = count;
+        int[] seen = {count};
+        this.count = seen[0];
+    }
+}
+//= expected
+/com/demo/Counter.java:4:17-22 write  private int count;
+/com/demo/Counter.java:8:14-19 write  this.count = count;
+/com/demo/Counter.java:12:9-14 write  count++;
+/com/demo/Counter.java:13:11-16 write  --count;
+/com/demo/Counter.java:14:9-14 write  count += step;
+/com/demo/Counter.java:15:17-22 read  total = count;
+/com/demo/Counter.java:16:23-28 read  int[] seen = {count};
+/com/demo/Counter.java:17:14-19 write  this.count = seen[0];

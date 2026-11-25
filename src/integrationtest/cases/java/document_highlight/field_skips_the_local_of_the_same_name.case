@@ -47,9 +47,9 @@ interface Greeter {
     void bye();
 }
 //= expected
-/com/demo/Highlight.java:4:20  private String text = "string";
-/com/demo/Highlight.java:10:9  text = "bar";
-/com/demo/Highlight.java:16:21  if (text.isEmpty()) {
-/com/demo/Highlight.java:22:9  text = text + times;
-/com/demo/Highlight.java:22:16  text = text + times;
-/com/demo/Highlight.java:23:16  return text + "foo";
+/com/demo/Highlight.java:4:20-24 write  private String text = "string";
+/com/demo/Highlight.java:10:9-13 write  text = "bar";
+/com/demo/Highlight.java:16:21-25 read  if (text.isEmpty()) {
+/com/demo/Highlight.java:22:9-13 write  text = text + times;
+/com/demo/Highlight.java:22:16-20 read  text = text + times;
+/com/demo/Highlight.java:23:16-20 read  return text + "foo";

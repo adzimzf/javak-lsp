@@ -1,0 +1,17 @@
+//- /com/demo/Names.java
+package com.demo;
+
+class Names {
+    Names next;
+
+    void walk() {
+        v$0ar current = new Names();
+        Names other = current.next;
+    }
+}
+//= expected
+/com/demo/Names.java:3:7-12 read  class Names {
+/com/demo/Names.java:4:5-10 read  Names next;
+/com/demo/Names.java:7:9-12 read  var current = new Names();
+/com/demo/Names.java:7:27-32 read  var current = new Names();
+/com/demo/Names.java:8:9-14 read  Names other = current.next;
