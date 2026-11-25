@@ -115,16 +115,24 @@ impl Backend {
     }
 }
 
+fn is_constructor(found: &crate::feature::semantic::Found<'_>) -> bool {
+    matches!(
+        found.node.kind.as_str(),
+        "constructor_declaration" | "compact_constructor_declaration"
+    )
+}
+
 /// References as jdtls lists them: a type named in an import is found at
 /// the start of the import's qualified name (`org.jsoup.parser.Parser`),
-/// and the variable of an enhanced `for` is not listed at its own
-/// declaration.
+/// a constructor called by `new Reader(in)` at its `new`, and the variable
+/// of an enhanced `for` is not listed at its own declaration.
 fn as_jdtls_reports<'a>(
     snapshot: &'a crate::feature::semantic::Snapshot,
     found: &crate::feature::semantic::Found<'_>,
     uses: Vec<(&'a Url, Position)>,
 ) -> Vec<(&'a Url, Position)> {
     let declared_by_for = found.node.kind == "enhanced_for_statement";
+    let constructor = is_constructor(found);
     uses.into_iter()
         .filter(|(uri, at)| {
             !(declared_by_for && **uri == found.file.uri && *at == found.selection())
@@ -134,6 +142,13 @@ fn as_jdtls_reports<'a>(
                 return (uri, at);
             };
             let path = crate::feature::semantic::path_to(&file.tree, at);
+            let creation = path.iter().rev().find(|node| {
+                node.kind == "object_creation_expression"
+                    && node.child("type").is_some_and(|created| created.covers(at))
+            });
+            if let Some(creation) = creation.filter(|_| constructor) {
+                return (uri, creation.start);
+            }
             let import = path.iter().find(|node| node.kind == "import_declaration");
             let name = import.and_then(|import| {
                 import.children.iter().find(|child| {
@@ -581,6 +596,11 @@ impl LanguageServer for Backend {
             uses.extend(snapshot.uses_of(&also));
         }
         if found.file.language == Language::Java {
+            // `this(in)` and `super(in)` call a constructor without naming it.
+            if is_constructor(&found) {
+                let calls = call_hierarchy::call_sites(&snapshot, &found);
+                uses.extend(calls.into_iter().map(|(file, start, _)| (&file.uri, start)));
+            }
             uses = as_jdtls_reports(&snapshot, &found, uses);
         }
         uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));

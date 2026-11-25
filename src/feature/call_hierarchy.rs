@@ -158,6 +158,35 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
 
 /// Who calls `of`: each member with a call of it, at its first call.
 pub fn incoming<'a>(snapshot: &'a Snapshot, of: &Found<'_>) -> Vec<Calls<'a>> {
+    let mut callers: Vec<Calls<'a>> = Vec::new();
+    for (file, start, end) in call_sites(snapshot, of) {
+        let Some(caller) = enclosing_member(file, start, true) else {
+            continue;
+        };
+        let key = identity(&caller);
+        match callers
+            .iter_mut()
+            .find(|calls| identity(&calls.member) == key)
+        {
+            Some(calls) => calls.at.push((start, end)),
+            None => callers.push(Calls {
+                member: caller,
+                at: vec![(start, end)],
+                file: &file.uri,
+            }),
+        }
+    }
+    callers
+}
+
+/// Every call of `of` in the workspace, in source order, with the start
+/// and end [`incoming`] reports it at: a method's name, the `new` of a
+/// creation, the `this` or `super` of a chained constructor. A field is
+/// called where it is read or written.
+pub fn call_sites<'a>(
+    snapshot: &'a Snapshot,
+    of: &Found<'_>,
+) -> Vec<(&'a FileView, Position, Position)> {
     let wanted = identity(of);
     let mut sites: Vec<(&'a FileView, Position, Position)> = Vec::new();
     match kind_of(of) {
@@ -205,25 +234,7 @@ pub fn incoming<'a>(snapshot: &'a Snapshot, of: &Found<'_>) -> Vec<Calls<'a>> {
     }
     sites
         .sort_by(|left, right| (left.0.uri.as_str(), left.1).cmp(&(right.0.uri.as_str(), right.1)));
-    let mut callers: Vec<Calls<'a>> = Vec::new();
-    for (file, start, end) in sites {
-        let Some(caller) = enclosing_member(file, start, true) else {
-            continue;
-        };
-        let key = identity(&caller);
-        match callers
-            .iter_mut()
-            .find(|calls| identity(&calls.member) == key)
-        {
-            Some(calls) => calls.at.push((start, end)),
-            None => callers.push(Calls {
-                member: caller,
-                at: vec![(start, end)],
-                file: &file.uri,
-            }),
-        }
-    }
-    callers
+    sites
 }
 
 /// What `of` calls, each callee once, in the order first called.
