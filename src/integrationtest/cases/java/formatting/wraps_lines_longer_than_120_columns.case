@@ -1,0 +1,34 @@
+//- /com/demo/Long.java
+$0package com.demo;
+
+public class Long {
+    int aaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, ccccccccccccccccccccccccccc, dddddddddddddd;
+    void longCall() {
+        callSomething(aaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, ccccccccccccccccccccccccccc, dddddddddddddd);
+        int v = aaaaaaaaaaaaaaaaaaaaaaaaaaaa + bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb + ccccccccccccccccccccccccccc + dddddddddddddd + 1;
+        String w = toString().trim().strip().toLowerCase().toUpperCase().intern().repeat(2).trim().strip().toLowerCase().intern();
+        throw new IllegalArgumentException("The argument that was given is not valid: " + aaaaaaaaaaaaaaaaaaaaaaaaaaaa + " and " + w);
+    }
+    void callSomething(int a, int b, int c, int d) {}
+}
+//= expected
+package com.demo;
+
+public class Long {
+	int aaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, ccccccccccccccccccccccccccc,
+			dddddddddddddd;
+
+	void longCall() {
+		callSomething(aaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb,
+				ccccccccccccccccccccccccccc, dddddddddddddd);
+		int v = aaaaaaaaaaaaaaaaaaaaaaaaaaaa + bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb + ccccccccccccccccccccccccccc
+				+ dddddddddddddd + 1;
+		String w = toString().trim().strip().toLowerCase().toUpperCase().intern().repeat(2).trim().strip().toLowerCase()
+				.intern();
+		throw new IllegalArgumentException(
+				"The argument that was given is not valid: " + aaaaaaaaaaaaaaaaaaaaaaaaaaaa + " and " + w);
+	}
+
+	void callSomething(int a, int b, int c, int d) {
+	}
+}

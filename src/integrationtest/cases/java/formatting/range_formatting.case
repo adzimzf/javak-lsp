@@ -5,3 +5,8 @@ $0	void foo(){
     }$1
 	}
 //= expected
+package org.sample;
+      public class Baz {
+			void foo() {
+			}
+	}

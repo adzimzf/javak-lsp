@@ -1,0 +1,75 @@
+//- /com/demo/Calc.java
+$0package com.demo;
+import java.util.*;
+public class Calc<T extends Comparable<T>,U> extends Object implements Runnable{
+private int a=1,b = 2;
+  int[] arr = {1,2,3};
+  public void run(){
+    int x=a+b*2-(a/b)%3;
+    x+=1;x++;--x;
+    boolean f=!true&&false||x>1&&x!=6;
+    String s=f?"a":"b";
+    Object o=(Object)s;
+    if(o instanceof String str&&str.isEmpty()){return;}
+    for(int i=0;i<10;i++)System.out.println(i);
+    for(;;){break;}
+    do{x++;}while(x<10);
+    if(x>0)x--;else x++;
+    try{throw new Exception("x");}catch(IllegalStateException|IllegalArgumentException e){}catch(Exception e){}finally{x=0;}
+    label:for(int i=0;i<1;i++){continue label;}
+    }
+  <R> R map(java.util.function.Function<? super T,? extends R> fn,T t){return fn.apply(t);}
+  public static void main(String... args)throws Exception{new Calc<String,Integer>().run();}
+}
+//= expected
+package com.demo;
+
+import java.util.*;
+
+public class Calc<T extends Comparable<T>, U> extends Object implements Runnable {
+	private int a = 1, b = 2;
+	int[] arr = { 1, 2, 3 };
+
+	public void run() {
+		int x = a + b * 2 - (a / b) % 3;
+		x += 1;
+		x++;
+		--x;
+		boolean f = !true && false || x > 1 && x != 6;
+		String s = f ? "a" : "b";
+		Object o = (Object) s;
+		if (o instanceof String str && str.isEmpty()) {
+			return;
+		}
+		for (int i = 0; i < 10; i++)
+			System.out.println(i);
+		for (;;) {
+			break;
+		}
+		do {
+			x++;
+		} while (x < 10);
+		if (x > 0)
+			x--;
+		else
+			x++;
+		try {
+			throw new Exception("x");
+		} catch (IllegalStateException | IllegalArgumentException e) {
+		} catch (Exception e) {
+		} finally {
+			x = 0;
+		}
+		label: for (int i = 0; i < 1; i++) {
+			continue label;
+		}
+	}
+
+	<R> R map(java.util.function.Function<? super T, ? extends R> fn, T t) {
+		return fn.apply(t);
+	}
+
+	public static void main(String... args) throws Exception {
+		new Calc<String, Integer>().run();
+	}
+}

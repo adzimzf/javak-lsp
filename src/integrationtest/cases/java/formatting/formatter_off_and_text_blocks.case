@@ -1,0 +1,34 @@
+//- /com/demo/Kept.java
+$0package com.demo;
+
+public class Kept {
+    // @formatter:off
+    int[][] grid = {
+        {1, 0},
+        {0, 1},
+    };
+    // @formatter:on
+    String text() {
+        return """
+              hello
+                world
+              """;
+    }
+}
+//= expected
+package com.demo;
+
+public class Kept {
+	// @formatter:off
+    int[][] grid = {
+        {1, 0},
+        {0, 1},
+    };
+    // @formatter:on
+	String text() {
+		return """
+				hello
+				  world
+				""";
+	}
+}

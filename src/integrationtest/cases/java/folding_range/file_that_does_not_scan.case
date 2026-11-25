@@ -11,6 +11,6 @@ public class InvalidInputRange$0 {
     }
 }
 //= expected
-3..5
+3..5 comment
 6..11
 8..10

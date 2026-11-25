@@ -1,0 +1,59 @@
+//- /com/demo/Wraps.java
+$0package com.demo;
+
+public class Wraps {
+    void wraps() {
+        String s = "a" +
+            "b";
+        int r = compute(1,
+        2,
+        3);
+        boolean b = r > 1
+            && r < 3;
+        StringBuilder sb = new StringBuilder()
+                .append("x")
+            .append("y");
+        int
+            y = 1;
+        int z = y >
+            1 ? 2
+            : 3;
+        int[] arr = {
+            1, 2,
+            3
+        };
+    }
+    int compute(int a,
+            int b, int c) {
+        return a + b + c;
+    }
+}
+//= expected
+package com.demo;
+
+public class Wraps {
+	void wraps() {
+		String s = "a" +
+				"b";
+		int r = compute(1,
+				2,
+				3);
+		boolean b = r > 1
+				&& r < 3;
+		StringBuilder sb = new StringBuilder()
+				.append("x")
+				.append("y");
+		int y = 1;
+		int z = y > 1 ? 2
+				: 3;
+		int[] arr = {
+				1, 2,
+				3
+		};
+	}
+
+	int compute(int a,
+			int b, int c) {
+		return a + b + c;
+	}
+}

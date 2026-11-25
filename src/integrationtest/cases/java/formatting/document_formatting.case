@@ -3,3 +3,8 @@ $0package org.sample   ;
 
       public class Baz {  String name;}
 //= expected
+package org.sample;
+
+public class Baz {
+	String name;
+}

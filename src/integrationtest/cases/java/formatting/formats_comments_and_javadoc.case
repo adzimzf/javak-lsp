@@ -1,0 +1,58 @@
+//- /com/demo/Docs.java
+$0package com.demo;
+
+/**
+ * A class doc that is fairly long and goes past the eighty column limit of the comment formatter.
+ * <p>Another paragraph.
+ * @author me
+ */
+public class Docs {
+    /**One line doc*/
+    int a;
+    /* a very long block comment on one line that goes well past eighty columns, does it wrap */
+    int b;
+    //no space
+    int c;  // trailing  spaced
+    /**
+     * Does things.
+     * @param value the value
+     * @param index   the index
+     * @return  the result
+     * @throws IllegalStateException when bad
+     */
+    int m(int value, int index) { return value; }
+}
+//= expected
+package com.demo;
+
+/**
+ * A class doc that is fairly long and goes past the eighty column limit of the
+ * comment formatter.
+ * <p>
+ * Another paragraph.
+ * 
+ * @author me
+ */
+public class Docs {
+	/** One line doc */
+	int a;
+	/*
+	 * a very long block comment on one line that goes well past eighty columns,
+	 * does it wrap
+	 */
+	int b;
+	// no space
+	int c; // trailing spaced
+
+	/**
+	 * Does things.
+	 * 
+	 * @param value the value
+	 * @param index the index
+	 * @return the result
+	 * @throws IllegalStateException when bad
+	 */
+	int m(int value, int index) {
+		return value;
+	}
+}

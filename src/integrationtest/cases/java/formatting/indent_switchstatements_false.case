@@ -16,3 +16,22 @@ public class Baz {
     }
 }
 //= expected
+package org.sample;
+
+public class Baz {
+	private enum Numbers {
+		One, Two
+	};
+
+	public void foo() {
+		Numbers n = Numbers.One;
+		switch (n) {
+			case One:
+				return;
+			case Two:
+				return;
+			default:
+				break;
+		}
+	}
+}

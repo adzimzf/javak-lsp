@@ -7,3 +7,13 @@ public class Baz {
 }
 }
 //= expected
+@Deprecated
+package org.sample;
+
+public class Baz {
+	/** Java doc @param a some parameter */
+	void foo(int a) {
+		;
+		;
+	}
+}

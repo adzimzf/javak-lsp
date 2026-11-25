@@ -5,3 +5,8 @@ package org.sample;
 String          name       ;
 }  $0
 //= expected
+package org.sample;
+
+public class Baz {
+	String name;
+}

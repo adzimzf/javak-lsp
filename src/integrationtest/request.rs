@@ -233,7 +233,7 @@ impl Kind {
             Self::Rename => view.edited_places(&answer),
             Self::DocumentSymbol if is_java(&fixture.cursor.path) => java_outline(&answer),
             Self::DocumentSymbol => document_symbols(&answer),
-            Self::FoldingRange => folded_lines(&answer),
+            Self::FoldingRange => folded_lines(&answer, is_java(&fixture.cursor.path)),
             Self::WorkspaceSymbol => view.workspace_types(&answer),
             Self::Diagnostics => view.reported(&fixture.cursor.path, &answer),
             Self::Declaration => view.locations(&answer),
@@ -825,16 +825,31 @@ fn symbol_kind(kind: Option<u64>) -> &'static str {
     }
 }
 
-/// `first..last` line of each folded region, one-based, sorted.
-fn folded_lines(answer: &Value) -> Vec<String> {
-    let mut regions: Vec<(u64, u64)> = as_list(answer)
+/// `first..last` line of each folded region, one-based, sorted. For Java
+/// a region's kind follows, when it has one: `3..5 comment`.
+fn folded_lines(answer: &Value, with_kind: bool) -> Vec<String> {
+    let mut regions: Vec<(u64, u64, &str)> = as_list(answer)
         .into_iter()
-        .filter_map(|range| Some((range["startLine"].as_u64()?, range["endLine"].as_u64()?)))
+        .filter_map(|range| {
+            let kind = range["kind"]
+                .as_str()
+                .filter(|_| with_kind)
+                .unwrap_or_default();
+            Some((
+                range["startLine"].as_u64()?,
+                range["endLine"].as_u64()?,
+                kind,
+            ))
+        })
         .collect();
     regions.sort_unstable();
     regions
         .into_iter()
-        .map(|(start, end)| format!("{}..{}", start + 1, end + 1))
+        .map(|(start, end, kind)| {
+            format!("{}..{} {kind}", start + 1, end + 1)
+                .trim_end()
+                .to_owned()
+        })
         .collect()
 }
 

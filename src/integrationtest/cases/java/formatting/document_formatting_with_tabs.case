@@ -6,3 +6,9 @@ public class Baz {
 }
 }
 //= expected
+package org.sample;
+
+public class Baz {
+	void foo() {
+	}
+}

@@ -5,7 +5,7 @@
 
 use tree_sitter::{Node, Parser, Tree};
 
-use super::{position_of, Finding, Fold, Name, Position, Syn};
+use super::{Finding, Fold, FoldKind, Name, Position, Syn, position_of};
 
 /// The node kinds of one grammar that the shared readers ask about.
 pub struct Grammar {
@@ -137,6 +137,7 @@ impl Grammar {
                     folds.push(Fold {
                         first_line: first,
                         last_line: last,
+                        kind: Some(FoldKind::Comment),
                     });
                 }
             }
@@ -181,6 +182,7 @@ impl Grammar {
                 (last_line > first_line).then_some(Fold {
                     first_line,
                     last_line,
+                    kind: None,
                 })
             })
             .collect()
@@ -265,6 +267,7 @@ fn span(first_line: u32, node: Node, text: &str) -> Option<Fold> {
     (last_line >= first_line).then_some(Fold {
         first_line,
         last_line,
+        kind: None,
     })
 }
 
@@ -287,8 +290,20 @@ fn line_runs(text: &str) -> Vec<Fold> {
         let marker = region_marker(line);
         let is_comment = line.starts_with("//") && marker.is_none();
         let is_import = line.starts_with("import ");
-        extend(&mut imports, is_import, index, &mut folds);
-        extend(&mut comments, is_comment, index, &mut folds);
+        extend(
+            &mut imports,
+            is_import,
+            index,
+            FoldKind::Imports,
+            &mut folds,
+        );
+        extend(
+            &mut comments,
+            is_comment,
+            index,
+            FoldKind::Comment,
+            &mut folds,
+        );
         match marker {
             Some(Marker::Opens) => regions.push(index),
             Some(Marker::Closes) => {
@@ -296,14 +311,15 @@ fn line_runs(text: &str) -> Vec<Fold> {
                     folds.push(Fold {
                         first_line,
                         last_line: index,
+                        kind: Some(FoldKind::Region),
                     });
                 }
             }
             None => {}
         }
     }
-    close(imports, &mut folds);
-    close(comments, &mut folds);
+    close(imports, FoldKind::Imports, &mut folds);
+    close(comments, FoldKind::Comment, &mut folds);
     folds
 }
 
@@ -325,20 +341,27 @@ fn region_marker(line: &str) -> Option<Marker> {
 }
 
 /// Carries a run of like lines along, closing it where it ends.
-fn extend(run: &mut Option<(u32, u32)>, continues: bool, index: u32, folds: &mut Vec<Fold>) {
+fn extend(
+    run: &mut Option<(u32, u32)>,
+    continues: bool,
+    index: u32,
+    kind: FoldKind,
+    folds: &mut Vec<Fold>,
+) {
     if continues {
         *run = Some(run.map_or((index, index), |(first, _)| (first, index)));
         return;
     }
-    close(run.take(), folds);
+    close(run.take(), kind, folds);
 }
 
-fn close(run: Option<(u32, u32)>, folds: &mut Vec<Fold>) {
+fn close(run: Option<(u32, u32)>, kind: FoldKind, folds: &mut Vec<Fold>) {
     if let Some((first_line, last_line)) = run {
         if last_line > first_line {
             folds.push(Fold {
                 first_line,
                 last_line,
+                kind: Some(kind),
             });
         }
     }

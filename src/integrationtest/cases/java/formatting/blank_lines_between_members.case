@@ -1,0 +1,61 @@
+//- /com/demo/Members.java
+$0/*
+ * Header
+ */
+package com.demo;
+import java.util.List;
+
+
+import java.util.Map;
+public class Members {
+
+
+    int a;
+    int b;
+    void m() {}
+    int c;
+    static {}
+    {}
+    class Nested {}
+    void n() {
+
+
+        int x = 1;
+    }
+}
+class Other {}
+//= expected
+/*
+ * Header
+ */
+package com.demo;
+
+import java.util.List;
+
+import java.util.Map;
+
+public class Members {
+
+	int a;
+	int b;
+
+	void m() {
+	}
+
+	int c;
+	static {
+	}
+	{
+	}
+
+	class Nested {
+	}
+
+	void n() {
+
+		int x = 1;
+	}
+}
+
+class Other {
+}

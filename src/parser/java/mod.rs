@@ -4,6 +4,7 @@
 use tree_sitter::Node;
 
 mod errors;
+mod folds;
 
 use super::treesitter::{at, empty_tree, first_of_kind, FoldKinds, Grammar};
 use super::{Finding, Fold, Kind, Name, Outline, Position, Syn, Syntax};
@@ -85,7 +86,7 @@ impl Syntax for Java {
     }
 
     fn folds(&self, text: &str) -> Vec<Fold> {
-        GRAMMAR.folds(text)
+        folds::folds(text)
     }
 }
 

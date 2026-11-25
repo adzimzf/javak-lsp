@@ -61,6 +61,15 @@ Notes on how an answer is written down:
   unchanged (tabs, blank lines and trailing spaces included: where a region
   ends depends on them). jdtls's tests count the regions of a file and name
   most of them; the few a test only counts are filled in by the same rules.
+  A Java region is written `first..last kind`, with its kind (`comment`,
+  `imports` or `region`) when it has one. jdtls folds a type or a method
+  from its name's line, even on one line, but nothing in a field's
+  initializer, and gives a region twice when a type and its member start
+  on one line.
+- **formatting** answers were recorded from jdtls with its default
+  settings, Eclipse's built-in profile: the cases that come from tests of a
+  setting (the Google profile, on-type formatting, switch indentation) are
+  asked without it, so they show the default layout.
 - **hover** is the signature line as jdtls words it, with the hovered name
   unqualified.
 - **diagnostics** is the whole file's report (`textDocument/diagnostic`),
@@ -416,6 +425,10 @@ jdtls: `FoldingRangeHandlerTest`.
 | `folds_statements` | `testStatementFoldingRanges` |
 | `folds_static_initializers` | `testStaticBlockFoldingRange` |
 | `unbalanced_braces` | `testErrorTypes` |
+| `does_not_fold_what_a_field_holds` | — |
+| `folds_blocks_inside_a_method` | — |
+| `folds_members_on_one_line` | — |
+| `folds_one_line_block_comments` | — |
 
 ## workspace_symbol
 
@@ -1078,6 +1091,16 @@ Answer: the cursor's file after the edits, line by line (tab indentation, tab si
 | `on_type_semi_column` | `FormatterHandlerTest#testFormattingOnTypeSemiColumn` |
 | `range_formatting` | `FormatterHandlerTest#testRangeFormatting` |
 | `update_formatter_version` | `FormatterHandlerTest#testUpdateFormatterVersion` |
+| `annotations_on_their_own_line` | — |
+| `blank_lines_between_members` | — |
+| `formats_comments_and_javadoc` | — |
+| `formatter_off_and_text_blocks` | — |
+| `keeps_line_breaks_where_a_line_may_wrap` | — |
+| `lays_out_statements_and_operators` | — |
+| `leaves_a_member_that_does_not_parse` | — |
+| `range_formatting_of_whole_lines` | — |
+| `switches_lambdas_and_anonymous_classes` | — |
+| `wraps_lines_longer_than_120_columns` | — |
 
 ### inlay_hint
 

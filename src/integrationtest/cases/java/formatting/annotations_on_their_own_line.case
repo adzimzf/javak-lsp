@@ -1,0 +1,25 @@
+//- /com/demo/Annotated.java
+$0package com.demo;
+@SuppressWarnings("all") public final class Annotated {
+  @Deprecated int a;
+  public @Deprecated void m(@SuppressWarnings("x") final int p) {}
+  @SuppressWarnings(value = {"a","b"}) void n() { @SuppressWarnings("x") int b = 1; final @Deprecated int c = 2; }
+}
+//= expected
+package com.demo;
+
+@SuppressWarnings("all")
+public final class Annotated {
+	@Deprecated
+	int a;
+
+	public @Deprecated void m(@SuppressWarnings("x") final int p) {
+	}
+
+	@SuppressWarnings(value = { "a", "b" })
+	void n() {
+		@SuppressWarnings("x")
+		int b = 1;
+		final @Deprecated int c = 2;
+	}
+}

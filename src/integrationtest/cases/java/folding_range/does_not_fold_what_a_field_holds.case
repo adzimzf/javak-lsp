@@ -1,0 +1,28 @@
+//- /com/demo/Holder.java
+package com.demo;
+
+class Holder$0 {
+    Runnable task = new Runnable() {
+        public void run() {
+            System.out.println();
+        }
+    };
+    java.util.function.Supplier<String> name = () -> {
+        return "holder";
+    };
+    enum Mode {
+        FAST {
+            int speed() {
+                return 2;
+            }
+        },
+        SLOW;
+        int speed() {
+            return 1;
+        }
+    }
+}
+//= expected
+3..23
+12..22
+19..21

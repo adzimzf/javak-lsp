@@ -1,0 +1,73 @@
+//- /com/demo/Shapes.java
+$0package com.demo;
+
+public class Shapes {
+  int area(int k) {
+    switch(k){case 1:return 1;case 2:case 3:{return 2;}default:return 0;}
+  }
+  int arrow(int k) {
+    return switch(k){case 1->1;case 2,3->{yield 2;}default->0;};
+  }
+  void lambdas(){
+    Runnable r=()->{System.out.println();};
+    java.util.function.BiFunction<Integer,Integer,Integer>f=(a,b)->a+b;
+    java.util.List.of(1,2).forEach(System.out::println);
+    Object o=new Object(){public String toString(){return "";}};
+  }
+  enum Color{RED,GREEN;Color(){}}
+  record Point(int x,int y){Point{if(x<0)throw new IllegalArgumentException();}}
+}
+//= expected
+package com.demo;
+
+public class Shapes {
+	int area(int k) {
+		switch (k) {
+			case 1:
+				return 1;
+			case 2:
+			case 3: {
+				return 2;
+			}
+			default:
+				return 0;
+		}
+	}
+
+	int arrow(int k) {
+		return switch (k) {
+			case 1 -> 1;
+			case 2, 3 -> {
+				yield 2;
+			}
+			default -> 0;
+		};
+	}
+
+	void lambdas() {
+		Runnable r = () -> {
+			System.out.println();
+		};
+		java.util.function.BiFunction<Integer, Integer, Integer> f = (a, b) -> a + b;
+		java.util.List.of(1, 2).forEach(System.out::println);
+		Object o = new Object() {
+			public String toString() {
+				return "";
+			}
+		};
+	}
+
+	enum Color {
+		RED, GREEN;
+
+		Color() {
+		}
+	}
+
+	record Point(int x, int y) {
+		Point {
+			if (x < 0)
+				throw new IllegalArgumentException();
+		}
+	}
+}

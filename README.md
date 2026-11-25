@@ -8,7 +8,7 @@ module behind an interface of its own:
 
 | Layer | Interface | Per language |
 | --- | --- | --- |
-| `src/parser` | `Syntax` | parsing, outline, folds; Kotlin is lowered to the Java-shaped tree the features read (Java's outline is jdtls's, built in `src/feature/outline.rs`) |
+| `src/parser` | `Syntax` | parsing, outline, folds; Kotlin is lowered to the Java-shaped tree the features read (Java's outline is jdtls's, built in `src/feature/outline.rs`; its folds are jdtls's, in `src/parser/java/folds.rs`) |
 | `src/feature` | `LanguageFeatures` | how signatures are written, keywords, what a reference includes |
 | `src/indexer` | `SourceLayout` | source roots, what a library source file declares |
 | `src/backend` | `LanguageProtocol` | the protocol's language ids |
@@ -85,6 +85,17 @@ Client settings (`initializationOptions`):
 
 `"dependencySync": "off"` never runs the build tool; the libraries of the last
 sync, and the platform's sources, are still read.
+
+## Formatting
+
+A Java file is formatted (`textDocument/formatting`, `rangeFormatting`) as
+jdtls formats it with its default settings, Eclipse's built-in profile
+(`src/feature/format.rs`): one statement a line, braces at the end of the
+line, the line breaks the source has where a line may wrap, lines wrapped at
+120 columns and comments at 80. The indentation is the client's (`tabSize`,
+`insertSpaces`). A member that does not parse is left as it is, and so is
+anything between `@formatter:off` and `@formatter:on`. Kotlin files are not
+formatted.
 
 ## Debugging
 
