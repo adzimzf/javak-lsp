@@ -570,7 +570,9 @@ impl Snapshot {
         let exact = same_count.iter().find(|candidate| {
             wanted(candidate).iter().enumerate().all(|(index, wanted)| {
                 match (wanted, given_at(index)) {
-                    (Some(wanted), Some(given)) => wanted.name == given.name,
+                    (Some(wanted), Some(given)) => {
+                        wanted.name == given.name && wanted.dimensions == given.dimensions
+                    }
                     _ => false,
                 }
             })
@@ -588,12 +590,33 @@ impl Snapshot {
                             .of_type(wanted, candidate.file)
                             .is_some_and(|declaration| declaration.node.kind == "interface_declaration");
                     }
-                    let exactly = given_at(index).is_some_and(|given| given.name == wanted.name);
-                    exactly || accepted_at(index).contains(&wanted.name)
+                    let exactly = given_at(index)
+                        .is_some_and(|given| given.name == wanted.name && given.dimensions == wanted.dimensions);
+                    exactly || wanted.dimensions == 0 && accepted_at(index).contains(&wanted.name)
                 })
             })
         };
-        let fits = exact.or_else(wider);
+        // `format(String, Object...)` takes any number of arguments after
+        // its fixed ones.
+        let every: Vec<&Found<'a>> = candidates.iter().collect();
+        let spread = || {
+            every.iter().find(|candidate| {
+                let parameters = parameters_of(candidate.node);
+                if parameters.last().is_none_or(|last| last.kind != "spread_parameter") {
+                    return false;
+                }
+                let fixed = parameters.len() - 1;
+                passed.len() >= fixed
+                    && wanted(candidate).iter().take(fixed).enumerate().all(|(index, wanted)| {
+                        let Some(wanted) = wanted else {
+                            return false;
+                        };
+                        given_at(index).is_none_or(|given| given.name == wanted.name)
+                            || accepted_at(index).contains(&wanted.name)
+                    })
+            })
+        };
+        let fits = exact.or_else(wider).or_else(spread);
         // Short of a fit, an overload taking as many arguments as are
         // passed, before one that cannot take them.
         let chosen = fits.or_else(|| same_count.first())?;

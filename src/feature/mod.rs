@@ -9,6 +9,7 @@ pub mod completion;
 pub mod format;
 pub mod call_hierarchy;
 pub mod highlight;
+pub mod inlay;
 pub mod java;
 pub mod kotlin;
 pub mod outline;

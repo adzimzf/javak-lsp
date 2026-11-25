@@ -190,6 +190,35 @@ fn is_constructor(found: &crate::feature::semantic::Found<'_>) -> bool {
 /// the start of the import's qualified name (`org.jsoup.parser.Parser`),
 /// a constructor called by `new Reader(in)` at its `new`, and the variable
 /// of an enhanced `for` is not listed at its own declaration.
+/// The names jdtls puts a code lens on: each type, nested ones too, and
+/// each method, constructor or annotation element a type declares — not
+/// what is declared inside a method.
+fn lens_names<'a>(node: &'a crate::parser::Syn, names: &mut Vec<&'a crate::parser::Syn>) {
+    for child in &node.children {
+        let is_type = crate::feature::semantic::is_type_declaration(child);
+        let is_member = matches!(
+            child.kind.as_str(),
+            "method_declaration"
+                | "constructor_declaration"
+                | "compact_constructor_declaration"
+                | "annotation_type_element_declaration"
+        );
+        if is_type || is_member {
+            if let Some(name) = child.child("name") {
+                names.push(name);
+            }
+        }
+        // Into a type's body, never into a member's.
+        let container = matches!(
+            child.kind.as_str(),
+            "class_body" | "interface_body" | "enum_body" | "enum_body_declarations" | "annotation_type_body"
+        ) || is_type;
+        if container {
+            lens_names(child, names);
+        }
+    }
+}
+
 /// Whether the name at `at` is called as `super.name(…)`.
 fn is_super_call(snapshot: &crate::feature::semantic::Snapshot, uri: &Url, at: Position) -> bool {
     let Some(file) = snapshot.file(uri) else {
@@ -468,6 +497,10 @@ impl LanguageServer for Backend {
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(true),
+                }),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
@@ -1119,6 +1152,104 @@ impl LanguageServer for Backend {
         let language = self.indexer.language(&uri).unwrap_or(Language::Java);
         let folds = self.indexer.syntax(language).folds(&text);
         Ok(Some(folds.into_iter().map(folding_range).collect()))
+    }
+
+    /// As jdtls's references code lens: one at the name of each type and
+    /// of each method or constructor a type declares, counted on resolve.
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let mut names = Vec::new();
+        lens_names(&file.tree, &mut names);
+        let lenses = names
+            .into_iter()
+            .map(|name| CodeLens {
+                range: span_range((name.start, name.end)),
+                command: None,
+                data: Some(serde_json::json!([uri, lsp_position(name.start), "references"])),
+            })
+            .collect();
+        Ok(Some(lenses))
+    }
+
+    async fn code_lens_resolve(&self, lens: CodeLens) -> Result<CodeLens> {
+        let Some(uri) = lens
+            .data
+            .as_ref()
+            .and_then(|data| data.get(0))
+            .and_then(Value::as_str)
+            .and_then(|uri| Url::parse(uri).ok())
+        else {
+            return Ok(lens);
+        };
+        let position = lens.range.start;
+        let places = self
+            .references(ReferenceParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: ReferenceContext {
+                    include_declaration: false,
+                },
+            })
+            .await?
+            .unwrap_or_default();
+        let title = if places.len() == 1 {
+            "1 reference".to_owned()
+        } else {
+            format!("{} references", places.len())
+        };
+        Ok(CodeLens {
+            command: Some(Command {
+                title,
+                command: "java.show.references".to_owned(),
+                arguments: Some(vec![
+                    serde_json::json!(uri),
+                    serde_json::json!(position),
+                    serde_json::json!(places),
+                ]),
+            }),
+            ..lens
+        })
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let hints = crate::feature::inlay::hints(
+            &snapshot,
+            file,
+            cursor(params.range.start),
+            cursor(params.range.end),
+        )
+        .into_iter()
+        .map(|hint| InlayHint {
+            position: lsp_position(hint.at),
+            label: InlayHintLabel::String(hint.label),
+            kind: None,
+            text_edits: None,
+            tooltip: None,
+            padding_left: None,
+            padding_right: Some(true),
+            data: None,
+        })
+        .collect();
+        Ok(Some(hints))
     }
 
     async fn selection_range(
