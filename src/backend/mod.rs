@@ -1187,6 +1187,35 @@ impl LanguageServer for Backend {
             cursor(at.position),
             implied.as_deref(),
         );
+        if file.language == Language::Java {
+            // As jdtls offers them: an item per overload, ranked, at most
+            // fifty, the list then incomplete.
+            let prefix = crate::feature::completion::typed_prefix(&file.text, cursor(at.position));
+            let (proposals, incomplete) = crate::feature::completion::proposals(offers, &prefix);
+            use crate::feature::completion::OfferKind;
+            let items = proposals
+                .into_iter()
+                .map(|proposal| CompletionItem {
+                    label: proposal.label,
+                    filter_text: Some(proposal.name.clone()),
+                    insert_text: Some(proposal.name),
+                    kind: Some(match proposal.kind {
+                        OfferKind::Field => CompletionItemKind::FIELD,
+                        OfferKind::Keyword => CompletionItemKind::KEYWORD,
+                        OfferKind::Local => CompletionItemKind::VARIABLE,
+                        OfferKind::Method => CompletionItemKind::METHOD,
+                        OfferKind::Package => CompletionItemKind::MODULE,
+                        OfferKind::Type => CompletionItemKind::CLASS,
+                    }),
+                    sort_text: Some(proposal.sort),
+                    ..CompletionItem::default()
+                })
+                .collect();
+            return Ok(Some(CompletionResponse::List(CompletionList {
+                is_incomplete: incomplete,
+                items,
+            })));
+        }
         Ok(Some(CompletionResponse::Array(
             offers
                 .into_iter()

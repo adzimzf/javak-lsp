@@ -966,7 +966,7 @@ impl Snapshot {
 
     /// The type an expression is wanted as: what the method it is returned
     /// from returns, or what the variable it is assigned to is declared as.
-    fn expected_type_of(&self, expression: &Syn, file: &FileView) -> Option<Type> {
+    pub(crate) fn expected_type_of(&self, expression: &Syn, file: &FileView) -> Option<Type> {
         let path = path_to(&file.tree, expression.start);
         for (index, ancestor) in path.iter().enumerate().rev() {
             match ancestor.kind.as_str() {

@@ -142,6 +142,31 @@ pub(super) struct Context<'a> {
     pub dotted: Option<&'a str>,
 }
 
+/// What a statement the parser could not finish wants of the expression
+/// at `receiver`, read from the text before it: the declared type of
+/// `int value = |`, the return type of `return |`.
+fn expected_from_text(file: &FileView, path: &[&Syn], receiver: &Syn) -> Option<String> {
+    let line = file.text.lines().nth(receiver.start.line as usize)?;
+    let before: String = line.chars().take(receiver.start.column as usize).collect();
+    let before = before.trim();
+    if before == "return" {
+        let method = path.iter().rev().find(|node| node.kind == "method_declaration")?;
+        return method
+            .child("type")
+            .map(|written| crate::feature::semantic::type_of_node(written).written());
+    }
+    let declared = before.strip_suffix('=')?.trim_end();
+    let (written, name) = declared.rsplit_once(char::is_whitespace)?;
+    let is_name = name.chars().all(|character| character.is_alphanumeric() || character == '_');
+    let written = written.trim();
+    let written = written.rsplit(char::is_whitespace).next().unwrap_or(written);
+    let is_type = !written.is_empty()
+        && written
+            .chars()
+            .all(|character| character.is_alphanumeric() || "_$.<>[], ?".contains(character));
+    (is_name && is_type && written != "return").then(|| written.to_owned())
+}
+
 pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
     let Context {
         snapshot,
@@ -155,12 +180,21 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
         return import_offers(context);
     }
     if let Some(receiver) = receiver_of(path, name) {
-        // `shape.ar|(…)`: a call, and jdtls offers only methods for it.
-        let calling = path.iter().rev().any(|node| {
+        // `shape.ar|(…)`: a call, and jdtls offers only methods for it —
+        // once a name is begun; at its start, anything.
+        let calling = !prefix.is_empty() && path.iter().rev().any(|node| {
             node.kind == "method_invocation"
                 && node.child("name").is_some_and(|called| called.start == name.start)
         });
-        return members(snapshot, file, receiver, prefix, calling);
+        // What the place wants (`int value = Units.|`) ranks first.
+        let expected = path
+            .iter()
+            .rev()
+            .find(|node| node.children.iter().any(|child| child.start == name.start && child.kind == name.kind))
+            .and_then(|access| snapshot.expected_type_of(access, file))
+            .map(|expected| expected.written())
+            .or_else(|| expected_from_text(file, path, receiver));
+        return members(snapshot, file, receiver, prefix, calling, expected.as_deref());
     }
     if enclosing_kind(path, "switch_label").is_some() {
         return switch_constants(snapshot, file, name.start);
@@ -351,6 +385,7 @@ fn keywords(words: &[&str]) -> Vec<Offer> {
         .map(|word| Offer {
             name: (*word).to_owned(),
             rank: format!("{KEYWORD}{word}"),
+            ..Offer::default()
         })
         .collect()
 }
@@ -359,6 +394,7 @@ fn expected_offer(expected: &Type) -> Offer {
     Offer {
         name: expected.name.clone(),
         rank: format!("{EXPECTED}{}", expected.name),
+        ..Offer::default()
     }
 }
 
@@ -512,6 +548,7 @@ fn types(context: &Context<'_>) -> Vec<Offer> {
         .map(|name| Offer {
             rank: format!("{TYPE}{name}"),
             name,
+            ..Offer::default()
         })
         .collect()
 }
@@ -641,6 +678,7 @@ fn in_scope<'a>(context: &Context<'a>) -> Vec<Value<'a>> {
             offer: Offer {
                 rank: format!("{LOCAL}{local}"),
                 name: local,
+                ..Offer::default()
             },
             is_void: false,
         });
@@ -662,6 +700,7 @@ fn in_scope<'a>(context: &Context<'a>) -> Vec<Value<'a>> {
                 offer: Offer {
                     name: named.text.clone(),
                     rank: format!("{}{}", if is_method { METHOD } else { FIELD }, named.text),
+                    ..Offer::default()
                 },
                 is_void: is_method
                     && member
@@ -890,6 +929,7 @@ fn argument_offers(context: &Context<'_>) -> Option<Vec<Offer>> {
     let mut offers = vec![Offer {
         rank: format!("{EXPECTED}{}", call.name),
         name: call.name.clone(),
+        ..Offer::default()
     }];
     let before = text_before(context);
     let before = before.trim_end();
@@ -1141,6 +1181,7 @@ fn overridable(context: &Context<'_>) -> Vec<Offer> {
             offers.push(Offer {
                 name: named.text.clone(),
                 rank: format!("{METHOD}{}", named.text),
+                ..Offer::default()
             });
         }
     }
@@ -1178,6 +1219,7 @@ fn statically_imported(context: &Context<'_>) -> Vec<Offer> {
             offers.push(Offer {
                 name: named.text.clone(),
                 rank: format!("{group}{}", named.text),
+                ..Offer::default()
             });
         }
     }
@@ -1212,6 +1254,7 @@ fn import_offers(context: &Context<'_>) -> Vec<Offer> {
                 offers.push(Offer {
                     name: named.text.clone(),
                     rank: format!("{FIELD}{}", named.text),
+                    ..Offer::default()
                 });
             }
         }
@@ -1228,6 +1271,7 @@ fn import_offers(context: &Context<'_>) -> Vec<Offer> {
             offers.push(Offer {
                 rank: format!("{TYPE}{name}"),
                 name,
+                ..Offer::default()
             });
         }
     }
