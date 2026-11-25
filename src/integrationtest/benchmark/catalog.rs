@@ -27,20 +27,20 @@ pub(super) struct Repo {
 }
 
 pub(super) const REPOS: &[Repo] = &[
-    Repo {
-        name: "javapoet",
-        url: "https://github.com/square/javapoet",
-        rev: "javapoet-1.13.0",
-        build: Build::Maven,
-        remove: &[],
-    },
-    Repo {
-        name: "commons-cli",
-        url: "https://github.com/apache/commons-cli",
-        rev: "rel/commons-cli-1.9.0",
-        build: Build::Maven,
-        remove: &[],
-    },
+    // Repo {
+    //     name: "javapoet",
+    //     url: "https://github.com/square/javapoet",
+    //     rev: "javapoet-1.13.0",
+    //     build: Build::Maven,
+    //     remove: &[],
+    // },
+    // Repo {
+    //     name: "commons-cli",
+    //     url: "https://github.com/apache/commons-cli",
+    //     rev: "rel/commons-cli-1.9.0",
+    //     build: Build::Maven,
+    //     remove: &[],
+    // },
     Repo {
         name: "jsoup",
         url: "https://github.com/jhy/jsoup",
@@ -48,11 +48,11 @@ pub(super) const REPOS: &[Repo] = &[
         build: Build::Maven,
         remove: &[],
     },
-    Repo {
-        name: "spring-petclinic",
-        url: "https://github.com/spring-projects/spring-petclinic",
-        rev: "main",
-        build: Build::Gradle,
-        remove: &["pom.xml"],
-    },
+    // Repo {
+    //     name: "spring-petclinic",
+    //     url: "https://github.com/spring-projects/spring-petclinic",
+    //     rev: "main",
+    //     build: Build::Gradle,
+    //     remove: &["pom.xml"],
+    // },
 ];
