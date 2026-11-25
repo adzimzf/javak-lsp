@@ -900,9 +900,15 @@ impl LanguageServer for Backend {
         if found.file.library {
             return Ok(None);
         }
+        let tied = snapshot.tied_to(&found);
+        // A method overriding a library's cannot be renamed alone, and the
+        // library's is not the workspace's to rename: jdtls refuses.
+        if found.file.language == Language::Java && tied.iter().any(|tied| tied.file.library) {
+            return Ok(None);
+        }
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut places: Vec<(&Url, Position)> = Vec::new();
-        for tied in snapshot.tied_to(&found) {
+        for tied in tied {
             places.extend(snapshot.uses_of(&tied));
             places.extend(snapshot.javadoc_uses_of(&tied));
         }
@@ -1028,6 +1034,16 @@ impl LanguageServer for Backend {
         let is_the_workspaces = !name.in_package_or_import && self.indexer.is_declared(&name.text);
         if !is_the_workspaces {
             return Ok(None);
+        }
+        // A name the workspace declares can still mean a library's
+        // declaration here (`super.read(…)`), which jdtls does not rename.
+        if language == Language::Java {
+            let snapshot = self.indexer.snapshot();
+            if let Some(found) = snapshot.declaration_at(&uri, at) {
+                if found.file.library || snapshot.overrides_a_library_method(&found) {
+                    return Ok(None);
+                }
+            }
         }
         Ok(Some(PrepareRenameResponse::Range(Range {
             start: lsp_position(name.start),

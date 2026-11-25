@@ -43,6 +43,13 @@ pub struct Snapshot {
     /// every use of it. The answer is the address of the declaring file
     /// and the child indices leading to the declaration.
     types_named: elsa::sync::FrozenMap<(usize, String), Box<Option<TypeAt>>>,
+    /// Every type above a type declaration, by the address of its node:
+    /// finding the subtypes of one type asks it of every type there is.
+    ancestors: elsa::sync::FrozenMap<usize, Vec<(Url, Position)>>,
+    /// The workspace's types that name a supertype, anonymous classes
+    /// among them, as the index of their file and the child indices to
+    /// their node: what [`Self::subtypes_of`] looks through, listed once.
+    extending: std::sync::OnceLock<Vec<(usize, Vec<u32>)>>,
 }
 
 /// Where a type is declared: the address of its file, and the child
@@ -152,6 +159,8 @@ impl Snapshot {
             declared_types: elsa::sync::FrozenMap::new(),
             members: elsa::sync::FrozenMap::new(),
             types_named: elsa::sync::FrozenMap::new(),
+            ancestors: elsa::sync::FrozenMap::new(),
+            extending: std::sync::OnceLock::new(),
         }
     }
 
@@ -560,13 +569,22 @@ impl Snapshot {
                     let Some(wanted) = wanted else {
                         return false;
                     };
+                    // A lambda or a method reference is a functional
+                    // interface: any interface fits it, a class does not.
+                    if matches!(passed[index].kind.as_str(), "lambda_expression" | "method_reference") {
+                        return self
+                            .of_type(wanted, candidate.file)
+                            .is_some_and(|declaration| declaration.node.kind == "interface_declaration");
+                    }
                     let exactly = given_at(index).is_some_and(|given| given.name == wanted.name);
                     exactly || accepted_at(index).contains(&wanted.name)
                 })
             })
         };
         let fits = exact.or_else(wider);
-        let chosen = fits.or_else(|| same_count.first().filter(|_| same_count.len() == 1))?;
+        // Short of a fit, an overload taking as many arguments as are
+        // passed, before one that cannot take them.
+        let chosen = fits.or_else(|| same_count.first())?;
         Some(Found {
             file: chosen.file,
             node: chosen.node,
@@ -780,12 +798,62 @@ impl Snapshot {
         Some(substituted(written, &interface.bindings))
     }
 
+    /// The method a lambda implements: the abstract method of the
+    /// functional interface it is wanted as (`run` of a `Runnable`).
+    pub fn lambda_method<'a>(&'a self, lambda: &Syn, file: &'a FileView) -> Option<Found<'a>> {
+        let expected = self.expected_type_of(lambda, file)?;
+        let interface = self.of_type(&expected, file)?;
+        for owner in self.with_supertypes(&interface) {
+            let abstract_method = members_of(owner.node).into_iter().find(|(member, _)| {
+                let modifiers = member.first("modifiers").map(|modifiers| modifiers.text.as_str()).unwrap_or_default();
+                member.kind == "method_declaration"
+                    && member.child("body").is_none()
+                    && !modifiers.split_whitespace().any(|word| matches!(word, "static" | "default" | "private"))
+            });
+            if let Some((member, name)) = abstract_method {
+                return Some(Found {
+                    file: owner.file,
+                    node: member,
+                    name,
+                    bindings: owner.bindings.clone(),
+                });
+            }
+        }
+        None
+    }
+
     /// The type an expression is wanted as: what the method it is returned
     /// from returns, or what the variable it is assigned to is declared as.
     fn expected_type_of(&self, expression: &Syn, file: &FileView) -> Option<Type> {
         let path = path_to(&file.tree, expression.start);
-        for ancestor in path.iter().rev() {
+        for (index, ancestor) in path.iter().enumerate().rev() {
             match ancestor.kind.as_str() {
+                // An argument is wanted as the parameter it is passed to.
+                "argument_list" => {
+                    let arguments: Vec<&Syn> = ancestor
+                        .children
+                        .iter()
+                        .filter(|child| !matches!(child.kind.as_str(), "(" | ")" | ","))
+                        .collect();
+                    let at = arguments
+                        .iter()
+                        .position(|argument| argument.start == expression.start && argument.end == expression.end)?;
+                    let call = *path.get(index.checked_sub(1)?)?;
+                    let callee = match call.kind.as_str() {
+                        "method_invocation" => self.invoked(call, file),
+                        "object_creation_expression" => self.created(call, file),
+                        "explicit_constructor_invocation" => self.chained(call, file),
+                        _ => None,
+                    }?;
+                    let parameter = *parameters_of(callee.node).get(at)?;
+                    let written = parameter.child("type").map(type_of_node)?;
+                    let mut variables = type_parameter_names(callee.node);
+                    for enclosing in path_to(&callee.file.tree, callee.node.start) {
+                        variables.extend(type_parameter_names(enclosing));
+                    }
+                    let written = self.anchored(written, callee.file, &variables);
+                    return Some(substituted(written, &callee.bindings));
+                }
                 "return_statement" => {
                     let method = path
                         .iter()
@@ -1435,6 +1503,26 @@ pub fn types_of(file: &FileView) -> Vec<(&str, &Syn)> {
 /// An anonymous class: `new Section() { … }` declares a type of its own.
 pub fn is_anonymous_class(node: &Syn) -> bool {
     node.kind == "object_creation_expression" && node.first("class_body").is_some()
+}
+
+/// The paths to the type declarations below `node` that name a supertype,
+/// and to its anonymous classes.
+fn extending_paths(node: &Syn, path: &mut Vec<u32>, found: &mut dyn FnMut(Vec<u32>)) {
+    let names_a_supertype = is_type_declaration(node)
+        && node.children.iter().any(|child| {
+            matches!(
+                child.kind.as_str(),
+                "superclass" | "super_interfaces" | "extends_interfaces" | "interface_type_list"
+            )
+        });
+    if names_a_supertype || is_anonymous_class(node) {
+        found(path.clone());
+    }
+    for (index, child) in node.children.iter().enumerate() {
+        path.push(index as u32);
+        extending_paths(child, path, found);
+        path.pop();
+    }
 }
 
 /// The type nodes below `node` that no other type node holds.
@@ -3012,6 +3100,25 @@ impl Snapshot {
                 let class = self.owning_type(found);
                 tied.extend(class);
             }
+            "method_declaration" if found.file.language == Language::Java => {
+                // Every method an override ties it to, however far: renaming
+                // one renames them all, as jdtls renames the ripple.
+                let mut queue = vec![found.clone()];
+                while let Some(method) = queue.pop() {
+                    for related in self.dispatching_to(&method) {
+                        let place = (&related.file.uri, related.selection());
+                        if tied.iter().any(|seen| (&seen.file.uri, seen.selection()) == place) {
+                            continue;
+                        }
+                        tied.push(related.clone());
+                        queue.push(related);
+                    }
+                    if tied.len() > 256 {
+                        break;
+                    }
+                }
+                tied.extend(self.accessed_component(found));
+            }
             "method_declaration" => {
                 tied.extend(self.overrides_of(found));
                 tied.extend(self.accessed_component(found));
@@ -3186,6 +3293,43 @@ impl Snapshot {
             }
         }
         found
+    }
+
+    /// Whether `method` overrides a method of a library type, however far
+    /// up: then it cannot be renamed.
+    pub fn overrides_a_library_method(&self, method: &Found<'_>) -> bool {
+        if method.node.kind != "method_declaration" {
+            return false;
+        }
+        let Some(owner) = self.owning_type(method) else {
+            return false;
+        };
+        let wanted = self.erased_parameter_types(method);
+        let mut seen = 0;
+        let mut queue: std::collections::VecDeque<Found<'_>> = self.supertypes(&owner).into();
+        while let Some(supertype) = queue.pop_front() {
+            seen += 1;
+            if seen > 64 {
+                break;
+            }
+            if supertype.file.library {
+                let overridden = members_of(supertype.node).into_iter().any(|(member, named)| {
+                    member.kind == "method_declaration"
+                        && named.text == method.name.text
+                        && self.erased_parameter_types(&Found {
+                            file: supertype.file,
+                            node: member,
+                            name: named,
+                            bindings: Bindings::new(),
+                        }) == wanted
+                });
+                if overridden {
+                    return true;
+                }
+            }
+            queue.extend(self.supertypes(&supertype));
+        }
+        false
     }
 
     /// A method's parameter types with their arguments dropped, and a type
@@ -3400,51 +3544,69 @@ impl Snapshot {
     /// Every type declared below `of`, however deep.
     pub fn subtypes_of<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
         let wanted = (&of.file.uri, of.name.start);
+        let extending = self.extending.get_or_init(|| {
+            let mut listed = Vec::new();
+            for (index, file) in self.files.iter().enumerate() {
+                if !file.library {
+                    extending_paths(&file.tree, &mut Vec::new(), &mut |path| listed.push((index, path)));
+                }
+            }
+            listed
+        });
         let mut below = Vec::new();
-        for file in self.files.iter().filter(|file| !file.library) {
-            // Named types and anonymous classes (`new Iterator<T>() { … }`).
-            let declarations = file.tree.walk().into_iter().filter_map(|node| {
-                if is_type_declaration(node) {
-                    Some((node, node.child("name")?))
-                } else if is_anonymous_class(node) {
-                    Some((node, node.child("type")?))
-                } else {
-                    None
-                }
-            });
-            for (declaration, named) in declarations {
-                if (&file.uri, named.start) == wanted {
-                    continue;
-                }
-                let candidate = Found {
-                    file,
-                    node: declaration,
-                    name: named,
-                    bindings: Bindings::new(),
-                };
-                // Through a library type too: `extends ArrayList` is a
-                // `Collection`.
-                if self.ancestors(&candidate).contains(&wanted) {
-                    below.push(candidate);
-                }
+        for (index, path) in extending {
+            let file = &self.files[*index];
+            let Some(declaration) = at_path(&file.tree, path) else {
+                continue;
+            };
+            let named = if is_anonymous_class(declaration) {
+                declaration.child("type")
+            } else {
+                declaration.child("name")
+            };
+            let Some(named) = named else {
+                continue;
+            };
+            if (&file.uri, named.start) == wanted {
+                continue;
+            }
+            let candidate = Found {
+                file,
+                node: declaration,
+                name: named,
+                bindings: Bindings::new(),
+            };
+            // Through a library type too: `extends ArrayList` is a
+            // `Collection`.
+            if self
+                .ancestors(&candidate)
+                .iter()
+                .any(|(uri, at)| (uri, *at) == (wanted.0, wanted.1))
+            {
+                below.push(candidate);
             }
         }
         below
     }
 
-    /// Every type above `of`, however far, as places.
-    fn ancestors<'a>(&'a self, of: &Found<'a>) -> Vec<(&'a Url, Position)> {
-        let mut seen: Vec<(&'a Url, Position)> = Vec::new();
-        let mut queue: std::collections::VecDeque<Found<'a>> = self.supertypes(of).into();
+    /// Every type above `of`, however far, as places; worked out once per
+    /// snapshot.
+    fn ancestors(&self, of: &Found<'_>) -> &[(Url, Position)] {
+        let key = std::ptr::from_ref(of.node) as usize;
+        if let Some(known) = self.ancestors.get(&key) {
+            return known;
+        }
+        let mut seen: Vec<(Url, Position)> = Vec::new();
+        let mut queue: std::collections::VecDeque<Found<'_>> = self.supertypes(of).into();
         while let Some(supertype) = queue.pop_front() {
-            let place = (&supertype.file.uri, supertype.name.start);
+            let place = (supertype.file.uri.clone(), supertype.name.start);
             if seen.contains(&place) || seen.len() > 64 {
                 continue;
             }
             seen.push(place);
             queue.extend(self.supertypes(&supertype));
         }
-        seen
+        self.ancestors.insert(key, seen)
     }
 
     /// The declarations `textDocument/implementation` answers with: the

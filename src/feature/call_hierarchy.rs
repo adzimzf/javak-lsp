@@ -75,6 +75,63 @@ fn enclosing_member(file: &FileView, at: Position, fields_too: bool) -> Option<F
     None
 }
 
+/// The lambda a call written at `at` is in, before the member it is in.
+fn lambda_around(file: &FileView, at: Position) -> Option<Found<'_>> {
+    let path = path_to(&file.tree, at);
+    let lambda = path.iter().rev().find(|node| {
+        matches!(
+            node.kind.as_str(),
+            "lambda_expression"
+                | "method_declaration"
+                | "constructor_declaration"
+                | "compact_constructor_declaration"
+                | "static_initializer"
+                | "class_body"
+                | "field_declaration"
+        )
+    })?;
+    (lambda.kind == "lambda_expression").then_some(Found {
+        file,
+        node: lambda,
+        name: lambda,
+        bindings: Bindings::new(),
+    })
+}
+
+/// Whether the name at `at` is called as `super.name(…)`.
+fn is_super_call(file: &FileView, at: Position) -> bool {
+    path_to(&file.tree, at)
+        .iter()
+        .rev()
+        .find(|node| node.kind == "method_invocation")
+        .is_some_and(|call| {
+            call.child("name").is_some_and(|name| name.start == at)
+                && call.child("object").is_some_and(|object| object.kind == "super")
+        })
+}
+
+/// `T extends org.demo.Node` as jdtls labels it: `T extends Node`.
+fn simple_names(written: &str) -> String {
+    let mut out = String::new();
+    let mut word = String::new();
+    let flush = |word: &mut String, out: &mut String| {
+        if !word.is_empty() {
+            out.push_str(word.rsplit('.').next().unwrap_or(word));
+            word.clear();
+        }
+    };
+    for character in written.chars() {
+        if character.is_alphanumeric() || matches!(character, '_' | '$' | '.') {
+            word.push(character);
+        } else {
+            flush(&mut word, &mut out);
+            out.push(character);
+        }
+    }
+    flush(&mut word, &mut out);
+    out
+}
+
 /// A block right inside a class body: an instance initializer.
 fn is_initializer(block: &Syn, path: &[&Syn]) -> bool {
     let at = path.iter().position(|node| std::ptr::eq(*node, block));
@@ -89,7 +146,10 @@ pub fn kind_of(found: &Found<'_>) -> Option<Kind> {
     Some(match node.kind.as_str() {
         "method_declaration" | "annotation_type_element_declaration" => Kind::Method,
         "constructor_declaration" | "compact_constructor_declaration" => Kind::Constructor,
-        "static_initializer" | "block" => Kind::Method,
+        // jdtls makes an initializer a constructor, and a lambda the
+        // method it implements.
+        "static_initializer" | "block" => Kind::Constructor,
+        "lambda_expression" => Kind::Method,
         "field_declaration" | "constant_declaration" => Kind::Field,
         "variable_declarator" if is_field(found) => Kind::Field,
         "enum_constant" => Kind::EnumMember,
@@ -137,7 +197,7 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
             let introduced = if introduced.is_empty() {
                 String::new()
             } else {
-                format!(" <{}>", introduced.join(", "))
+                format!(" <{}>", simple_names(&introduced.join(", ")))
             };
             let returns = node
                 .child("type")
@@ -149,6 +209,9 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
             format!("{name}({})", parameter_types())
         }
         "static_initializer" | "block" => "{...}".to_owned(),
+        "lambda_expression" => snapshot
+            .lambda_method(node, found.file)
+            .map_or_else(|| "lambda$".to_owned(), |method| label(snapshot, &method)),
         _ if is_type_declaration(node) => {
             snapshot.signature_of(found).unwrap_or_else(|| name.clone())
         }
@@ -156,11 +219,40 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
     }
 }
 
-/// Who calls `of`: each member with a call of it, at its first call.
+/// Who calls `of`: each member with a call of it, at its first call. A
+/// call of a method `of` overrides or is overridden by may run `of` and
+/// counts too (not through `super`), and a call in a lambda is the
+/// lambda's, as jdtls lists them.
 pub fn incoming<'a>(snapshot: &'a Snapshot, of: &Found<'_>) -> Vec<Calls<'a>> {
+    let mut sites = call_sites(snapshot, of);
+    if of.file.language == crate::language::Language::Java && of.node.kind == "method_declaration" {
+        for related in snapshot.dispatching_to(of) {
+            sites.extend(
+                call_sites(snapshot, &related)
+                    .into_iter()
+                    .filter(|(file, start, _)| !is_super_call(file, *start)),
+            );
+        }
+    }
+    // A caller is shown at the call JDT meets first walking the tree: the
+    // outer of two chained calls (`a.first().second()` at `second`).
+    let call_span = |file: &FileView, start: Position| {
+        path_to(&file.tree, start)
+            .into_iter()
+            .rev()
+            .find(|node| matches!(node.kind.as_str(), "method_invocation" | "object_creation_expression"))
+            .map_or((start, start), |call| (call.start, call.end))
+    };
+    sites.sort_by(|left, right| {
+        let (left_start, left_end) = call_span(left.0, left.1);
+        let (right_start, right_end) = call_span(right.0, right.1);
+        (left.0.uri.as_str(), left_start, std::cmp::Reverse(left_end))
+            .cmp(&(right.0.uri.as_str(), right_start, std::cmp::Reverse(right_end)))
+    });
+    sites.dedup_by(|left, right| left.0.uri == right.0.uri && left.1 == right.1);
     let mut callers: Vec<Calls<'a>> = Vec::new();
-    for (file, start, end) in call_sites(snapshot, of) {
-        let Some(caller) = enclosing_member(file, start, true) else {
+    for (file, start, end) in sites {
+        let Some(caller) = lambda_around(file, start).or_else(|| enclosing_member(file, start, true)) else {
             continue;
         };
         let key = identity(&caller);
