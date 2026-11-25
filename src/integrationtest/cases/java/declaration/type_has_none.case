@@ -1,0 +1,13 @@
+//- /com/demo/Greeter.java
+package com.demo;
+
+public class Greeter {
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    Gree$0ter greeter;
+}
+//= expected
+(nothing)

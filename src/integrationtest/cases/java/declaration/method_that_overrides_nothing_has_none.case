@@ -1,0 +1,14 @@
+//- /com/demo/Greeter.java
+package com.demo;
+
+public class Greeter {
+    String greet() {
+        return "hi";
+    }
+
+    String twice() {
+        return gre$0et() + greet();
+    }
+}
+//= expected
+(nothing)

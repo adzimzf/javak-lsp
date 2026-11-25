@@ -358,6 +358,9 @@ impl View<'_> {
     }
 
     fn show(&self, place: &Place) -> String {
+        if place.path.starts_with(super::server::LIBRARY) {
+            return place.path.clone();
+        }
         let source = self
             .fixture
             .line(&place.path, place.line)

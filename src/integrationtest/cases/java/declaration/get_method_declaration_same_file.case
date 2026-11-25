@@ -11,3 +11,4 @@ public interface Test {
     public void someMethod();
 }
 //= expected
+/src/TestSame.java:10:17  public void someMethod();

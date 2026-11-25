@@ -305,6 +305,7 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                declaration_provider: Some(DeclarationCapability::Simple(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 signature_help_provider: Some(SignatureHelpOptions {
                     trigger_characters: Some(vec!["(".to_owned(), ",".to_owned()]),
@@ -479,6 +480,27 @@ impl LanguageServer for Backend {
         Ok(Some(GotoDefinitionResponse::Scalar(Location {
             uri: found.file.uri.clone(),
             range: at_name(found.selection()),
+        })))
+    }
+
+    /// The method the one at the cursor overrides, as jdtls answers: a
+    /// declaration request names nothing else.
+    async fn goto_declaration(
+        &self,
+        params: request::GotoDeclarationParams,
+    ) -> Result<Option<request::GotoDeclarationResponse>> {
+        let at = params.text_document_position_params;
+        let snapshot = self.indexer.snapshot();
+        let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position))
+        else {
+            return Ok(None);
+        };
+        let Some(overridden) = snapshot.overridden(&found) else {
+            return Ok(None);
+        };
+        Ok(Some(request::GotoDeclarationResponse::Scalar(Location {
+            uri: overridden.file.uri.clone(),
+            range: at_name(overridden.selection()),
         })))
     }
 

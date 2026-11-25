@@ -1,0 +1,11 @@
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    int count() {
+        int total = 3;
+        return tot$0al + 1;
+    }
+}
+//= expected
+(nothing)

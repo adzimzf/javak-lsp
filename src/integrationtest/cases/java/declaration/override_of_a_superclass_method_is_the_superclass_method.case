@@ -1,0 +1,19 @@
+//- /com/demo/Animal.java
+package com.demo;
+
+public class Animal {
+    public String sound() {
+        return "";
+    }
+}
+//- /com/demo/Dog.java
+package com.demo;
+
+public class Dog extends Animal {
+    @Override
+    public String sou$0nd() {
+        return "woof";
+    }
+}
+//= expected
+/com/demo/Animal.java:4:19  public String sound() {

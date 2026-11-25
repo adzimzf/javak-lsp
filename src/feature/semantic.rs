@@ -2354,6 +2354,43 @@ impl Snapshot {
         found
     }
 
+    /// The method `method` overrides or implements: the nearest one of the
+    /// same name and arity up its supertypes, the superclass's side first —
+    /// what jdtls answers a declaration request with.
+    pub fn overridden<'a>(&'a self, method: &Found<'a>) -> Option<Found<'a>> {
+        if method.node.kind != "method_declaration" {
+            return None;
+        }
+        let owner = self.owning_type(method)?;
+        let arity = parameters_of(method.node).len();
+        let mut seen = vec![(owner.file.uri.clone(), owner.name.start)];
+        let mut queue: std::collections::VecDeque<Found<'a>> = self.supertypes(&owner).into();
+        while let Some(supertype) = queue.pop_front() {
+            let place = (supertype.file.uri.clone(), supertype.name.start);
+            if seen.contains(&place) {
+                continue;
+            }
+            seen.push(place);
+            let same = members_of(supertype.node)
+                .into_iter()
+                .find(|(member, named)| {
+                    member.kind == "method_declaration"
+                        && named.text == method.name.text
+                        && parameters_of(member).len() == arity
+                });
+            if let Some((member, named)) = same {
+                return Some(Found {
+                    file: supertype.file,
+                    node: member,
+                    name: named,
+                    bindings: Bindings::new(),
+                });
+            }
+            queue.extend(self.supertypes(&supertype));
+        }
+        None
+    }
+
     /// Every type reachable from this one by `extends`/`implements`, up or
     /// down, however far.
     fn hierarchy_of<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
