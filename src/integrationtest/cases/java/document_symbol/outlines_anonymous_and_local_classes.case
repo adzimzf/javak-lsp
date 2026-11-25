@@ -1,0 +1,45 @@
+//- /com/demo/Classes.java
+package com.demo;
+
+class Classes$0 {
+    Runnable field = new Runnable() {
+        public void run() {
+        }
+    };
+
+    void run() {
+        Runnable r = new Runnable() {
+            public void run() {
+            }
+        };
+        Runnable lambda = () -> {
+            int inside = 1;
+        };
+        class Local {
+            int count;
+
+            void help() {
+            }
+        }
+    }
+
+    static {
+        System.out.println();
+    }
+
+    {
+        System.out.println();
+    }
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+class Classes  3:1-32:2 at 3:7-14
+  field field  4:5-7:7 at 4:14-19
+    class new Runnable() {...}  4:22-7:6 at 4:26-34
+      method run() : void  5:9-6:10 at 5:21-24
+  method run() : void  9:5-23:6 at 9:10-13
+    class new Runnable() {...}  10:22-13:10 at 10:26-34
+      method run() : void  11:13-12:14 at 11:25-28
+    class Local  17:9-22:10 at 17:15-20
+      field count  18:13-23 at 18:17-22
+      method help() : void  20:13-21:14 at 20:18-22

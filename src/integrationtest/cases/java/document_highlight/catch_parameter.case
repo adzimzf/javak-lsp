@@ -1,0 +1,15 @@
+//- /com/demo/Usage.java
+package com.demo;
+
+class Usage {
+    void run() {
+        try {
+            run();
+        } catch (IllegalStateException $0failure) {
+            throw failure;
+        }
+    }
+}
+//= expected
+/com/demo/Usage.java:7:40-47 write  } catch (IllegalStateException failure) {
+/com/demo/Usage.java:8:19-26 read  throw failure;

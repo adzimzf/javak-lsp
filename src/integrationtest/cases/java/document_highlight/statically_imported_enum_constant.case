@@ -1,0 +1,19 @@
+//- /com/demo/Usage.java
+package com.demo;
+
+import static com.demo.Color.RED;
+
+class Usage {
+    Color pick() {
+        return R$0ED;
+    }
+}
+
+enum Color {
+    RED,
+    GREEN
+}
+//= expected
+/com/demo/Usage.java:3:30-33 read  import static com.demo.Color.RED;
+/com/demo/Usage.java:7:16-19 read  return RED;
+/com/demo/Usage.java:12:5-8 read  RED,

@@ -13,7 +13,8 @@ class Box$0<T> {
     }
 }
 //= expected
-class Box
-field content
-constructor Box
-method with
+package com.demo  1:1-18 at 1:1-18
+class Box<T>  3:1-13:2 at 3:7-10
+  field content  4:5-15 at 4:7-14
+  constructor Box(T)  6:5-8:6 at 6:5-8
+  method with(U) <U> : Box<U>  10:5-12:6 at 10:16-20

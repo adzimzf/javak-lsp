@@ -1,0 +1,18 @@
+//- /com/demo/Names.java
+package com.demo;
+
+import java.util.List;
+
+class Names {
+    List<Str$0ing> names;
+
+    String first(List<String> all) {
+        String found = all.get(0);
+        return found;
+    }
+}
+//= expected
+/com/demo/Names.java:6:10-16 read  List<String> names;
+/com/demo/Names.java:8:5-11 read  String first(List<String> all) {
+/com/demo/Names.java:8:23-29 read  String first(List<String> all) {
+/com/demo/Names.java:9:9-15 read  String found = all.get(0);

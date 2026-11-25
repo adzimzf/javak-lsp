@@ -16,9 +16,10 @@ public enum Foo$0 {
     }
 }
 //= expected
-enum Foo
-enum-member FOO1
-enum-member FOO2
-field value
-constructor Foo
-method getValue
+package org.sample  1:1-20 at 1:1-20
+enum Foo  3:1-16:2 at 3:13-16
+  enum-member FOO1  4:5-12 at 4:5-9
+  enum-member FOO2  5:5-12 at 5:5-9
+  field value  7:5-29 at 7:23-28
+  constructor Foo(int)  9:5-11:6 at 9:5-8
+  method getValue() : int  13:5-15:6 at 13:16-24

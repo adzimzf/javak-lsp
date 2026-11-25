@@ -1,0 +1,17 @@
+//- /com/demo/Names.java
+package com.demo;
+
+import java.util.Li$0st;
+
+class Names {
+    List<String> names;
+
+    List<String> copy(List<String> all) {
+        return all;
+    }
+}
+//= expected
+/com/demo/Names.java:3:8-22 read  import java.util.List;
+/com/demo/Names.java:6:5-9 read  List<String> names;
+/com/demo/Names.java:8:5-9 read  List<String> copy(List<String> all) {
+/com/demo/Names.java:8:23-27 read  List<String> copy(List<String> all) {

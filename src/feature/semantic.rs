@@ -854,7 +854,12 @@ impl Snapshot {
                 continue;
             }
             let of = self.declared(file, ancestor)?;
-            if let Some(member) = self.member(&of, name, None) {
+            // A constructor is called by `new` or `this(…)`, never named:
+            // the class's own name there is the class.
+            let member = self
+                .member(&of, name, None)
+                .filter(|member| !is_constructor(member.node));
+            if let Some(member) = member {
                 return Some(member);
             }
         }
@@ -1421,7 +1426,7 @@ pub fn members_of(declaration: &Syn) -> Vec<(&Syn, &Syn)> {
         return components_of(declaration);
     };
     let mut members = components_of(declaration);
-    for child in body.walk() {
+    for child in own_members(body) {
         match child.kind.as_str() {
             "method_declaration" | "constructor_declaration" | "compact_constructor_declaration"
             | "enum_constant" | "annotation_type_element_declaration" => {
@@ -1441,6 +1446,31 @@ pub fn members_of(declaration: &Syn) -> Vec<(&Syn, &Syn)> {
     }
     members.extend(recovered_members(body));
     members
+}
+
+/// The nodes of a type's body, not looking into the bodies it holds: a
+/// nested class's, an enum constant's or an anonymous class's members, and
+/// what a method declares, are not the type's.
+fn own_members(body: &Syn) -> Vec<&Syn> {
+    let mut found = Vec::new();
+    let mut pending: Vec<&Syn> = body.children.iter().rev().collect();
+    while let Some(node) = pending.pop() {
+        found.push(node);
+        let another_body = matches!(
+            node.kind.as_str(),
+            "class_body"
+                | "interface_body"
+                | "enum_body"
+                | "annotation_type_body"
+                | "block"
+                | "constructor_body"
+                | "lambda_expression"
+        );
+        if !another_body {
+            pending.extend(node.children.iter().rev());
+        }
+    }
+    found
 }
 
 /// [`members_of`] as paths from `declaration`, so a snapshot can keep them.
@@ -1621,6 +1651,13 @@ fn locals_of(node: &Syn) -> Vec<(&Syn, &Syn)> {
                         }
                         "instanceof_expression" => {
                             let name = pattern.child("name");
+                            declarations.extend(name.map(|name| (pattern, name)));
+                        }
+                        "record_pattern_component" => {
+                            let name = pattern
+                                .children
+                                .last()
+                                .filter(|name| name.kind == "identifier");
                             declarations.extend(name.map(|name| (pattern, name)));
                         }
                         _ => {}
@@ -1921,6 +1958,7 @@ fn declared_name(node: &Syn) -> Option<&Syn> {
             | "enum_constant"
             | "method_declaration"
             | "constructor_declaration"
+            | "compact_constructor_declaration"
             | "variable_declarator"
             | "formal_parameter"
             | "catch_formal_parameter"
@@ -1933,6 +1971,12 @@ fn declared_name(node: &Syn) -> Option<&Syn> {
     }
     if node.kind == "type_parameter" {
         return node.first("type_identifier");
+    }
+    if node.kind == "record_pattern_component" {
+        return node
+            .children
+            .last()
+            .filter(|name| name.kind == "identifier");
     }
     if node.kind == "spread_parameter" {
         return node

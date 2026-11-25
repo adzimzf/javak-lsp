@@ -222,12 +222,16 @@ impl Kind {
             Self::Definition | Self::TypeDefinition | Self::Implementation | Self::References => {
                 view.locations(&answer)
             }
+            Self::DocumentHighlight if is_java(&fixture.cursor.path) => {
+                view.highlights(&fixture.cursor.path, &answer)
+            }
             Self::DocumentHighlight => view.ranges(&fixture.cursor.path, &answer),
             Self::Completion => view.completion_names(&answer),
             Self::Hover => hover_signature(&answer, &fixture.word_at_cursor()),
             Self::SignatureHelp => signature(&answer),
             Self::PrepareRename => view.rename_target(&answer),
             Self::Rename => view.edited_places(&answer),
+            Self::DocumentSymbol if is_java(&fixture.cursor.path) => java_outline(&answer),
             Self::DocumentSymbol => document_symbols(&answer),
             Self::FoldingRange => folded_lines(&answer),
             Self::WorkspaceSymbol => view.workspace_types(&answer),
@@ -349,6 +353,50 @@ impl View<'_> {
             .into_iter()
             .filter_map(|item| Some(Place::new(format!("/{path}"), item.get("range")?)));
         self.in_source_order(places.collect())
+    }
+
+    /// A Java file's highlights, each with where it ends and whether it is
+    /// read or written: `path:line:column-end kind  source line`, where
+    /// `end` is a column, or `line:column` for a range over lines.
+    fn highlights(&self, path: &str, answer: &Value) -> Vec<String> {
+        let mut highlights: Vec<(Place, String)> = as_list(answer)
+            .into_iter()
+            .filter_map(|item| {
+                let range = item.get("range")?;
+                let place = Place::new(format!("/{path}"), range);
+                let end = &range["end"];
+                let (line, column) = (end["line"].as_u64()?, end["character"].as_u64()?);
+                let end = if line as usize == place.line {
+                    format!("{}", column + 1)
+                } else {
+                    format!("{}:{}", line + 1, column + 1)
+                };
+                let kind = match item["kind"].as_u64() {
+                    Some(2) => " read",
+                    Some(3) => " write",
+                    _ => "",
+                };
+                Some((place, format!("-{end}{kind}")))
+            })
+            .collect();
+        highlights.sort();
+        highlights.dedup();
+        highlights
+            .iter()
+            .map(|(place, end)| {
+                let source = self
+                    .fixture
+                    .line(&place.path, place.line)
+                    .unwrap_or_default();
+                format!(
+                    "{}:{}:{}{end}  {}",
+                    place.path,
+                    place.line + 1,
+                    place.column + 1,
+                    source.trim()
+                )
+            })
+            .collect()
     }
 
     fn in_source_order(&self, mut places: Vec<Place>) -> Vec<String> {
@@ -666,6 +714,71 @@ fn signature(answer: &Value) -> Vec<String> {
 
 const PACKAGE: u64 = 4;
 
+fn is_java(path: &str) -> bool {
+    path.ends_with(".java")
+}
+
+/// A Java file's outline as jdtls gives it: a tree, each symbol as
+/// `kind name detail  range at selection`, nested two spaces under its
+/// parent, and `deprecated` where it is tagged so.
+fn java_outline(answer: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    outline_lines(answer, 0, &mut lines);
+    lines
+}
+
+fn outline_lines(symbols: &Value, depth: usize, lines: &mut Vec<String>) {
+    let mut symbols = as_list(symbols);
+    symbols.sort_by_key(|symbol| start_of(&symbol["range"]));
+    for symbol in symbols {
+        let deprecated = symbol["tags"]
+            .as_array()
+            .is_some_and(|tags| tags.iter().any(|tag| tag.as_u64() == Some(1)))
+            || symbol["deprecated"].as_bool() == Some(true);
+        lines.push(format!(
+            "{}{} {}{}  {} at {}{}",
+            "  ".repeat(depth),
+            symbol_kind(symbol["kind"].as_u64()),
+            symbol["name"].as_str().unwrap_or("?"),
+            symbol["detail"].as_str().unwrap_or_default(),
+            span(&symbol["range"]),
+            span(&symbol["selectionRange"]),
+            if deprecated { "  deprecated" } else { "" },
+        ));
+        outline_lines(&symbol["children"], depth + 1, lines);
+    }
+}
+
+fn start_of(range: &Value) -> (u64, u64) {
+    let start = &range["start"];
+    (
+        start["line"].as_u64().unwrap_or(0),
+        start["character"].as_u64().unwrap_or(0),
+    )
+}
+
+/// `line:column-end`, one-based, `end` written as `line:column` when the
+/// range goes over lines.
+fn span(range: &Value) -> String {
+    let (line, column) = start_of(range);
+    let end = &range["end"];
+    let (end_line, end_column) = (
+        end["line"].as_u64().unwrap_or(0),
+        end["character"].as_u64().unwrap_or(0),
+    );
+    if end_line == line {
+        format!("{}:{}-{}", line + 1, column + 1, end_column + 1)
+    } else {
+        format!(
+            "{}:{}-{}:{}",
+            line + 1,
+            column + 1,
+            end_line + 1,
+            end_column + 1
+        )
+    }
+}
+
 /// The outline in source order: `kind name`. Nesting is not shown, nor the
 /// package — one server answers a tree under the package and another a flat
 /// list of the same declarations.
@@ -699,6 +812,7 @@ fn flatten_symbols<'a>(symbols: &'a Value, flat: &mut Vec<&'a Value>) {
 
 fn symbol_kind(kind: Option<u64>) -> &'static str {
     match kind {
+        Some(4) => "package",
         Some(5) => "class",
         Some(6) => "method",
         Some(8) => "field",

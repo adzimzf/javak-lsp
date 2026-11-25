@@ -1,0 +1,28 @@
+//- /com/demo/Methods.java
+package com.demo;
+
+import java.util.List;
+
+class Methods$0<T extends Comparable<T>> {
+    <E> E first(List<E> items, String... more) {
+        return items.get(0);
+    }
+
+    int[] numbers(int[][] grid, T value) throws Exception {
+        return grid[0];
+    }
+
+    void nothing() {
+    }
+
+    static <K, V> java.util.Map<K, V> map() {
+        return null;
+    }
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+class Methods<T extends Comparable<T>>  5:1-20:2 at 5:7-14
+  method first(List<E>, String...) <E> : E  6:5-8:6 at 6:11-16
+  method numbers(int[][], T) : int[]  10:5-12:6 at 10:11-18
+  method nothing() : void  14:5-15:6 at 14:10-17
+  method map() <K, V> : Map<K, V>  17:5-19:6 at 17:39-42

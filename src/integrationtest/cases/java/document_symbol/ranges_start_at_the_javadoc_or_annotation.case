@@ -1,0 +1,25 @@
+//- /com/demo/Doc.java
+package com.demo;
+
+/** A doc. */
+@SuppressWarnings("all")
+public class Doc$0 {
+    /** The count. */
+    private int count;
+
+    // a line comment
+    void run() {
+    }
+
+    /* a block comment */
+    @Override
+    public String toString() {
+        return "";
+    }
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+class Doc  3:1-18:2 at 5:14-17
+  field count  6:5-7:23 at 7:17-22
+  method run() : void  9:5-11:6 at 10:10-13
+  method toString() : String  13:5-17:6 at 15:19-27

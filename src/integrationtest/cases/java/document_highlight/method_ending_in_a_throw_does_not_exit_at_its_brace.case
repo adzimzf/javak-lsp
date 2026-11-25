@@ -1,0 +1,20 @@
+//- /com/demo/Exits.java
+package com.demo;
+
+class Exits {
+    vo$0id check(int value) {
+        if (value > 0) {
+            return;
+        }
+        throw new IllegalStateException();
+    }
+
+    void fail() {
+        throw new IllegalStateException();
+    }
+}
+//= expected
+/com/demo/Exits.java:4:5-9 read  void check(int value) {
+/com/demo/Exits.java:6:13-20 read  return;
+/com/demo/Exits.java:8:9-14 read  throw new IllegalStateException();
+/com/demo/Exits.java:9:5-6 read  }

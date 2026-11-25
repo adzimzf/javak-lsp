@@ -1,0 +1,21 @@
+//- /com/demo/Point.java
+package com.demo;
+
+record Point(int x, int y) {
+    Point {
+        if (x < 0) {
+            throw new IllegalArgumentException();
+        }
+    }
+
+    int sum() {
+        return $0x + y + x();
+    }
+
+    int twice() {
+        return x * 2;
+    }
+}
+//= expected
+/com/demo/Point.java:11:16-17 read  return x + y + x();
+/com/demo/Point.java:15:16-17 read  return x * 2;

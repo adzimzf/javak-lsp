@@ -1,0 +1,15 @@
+//- /com/demo/Lambdas.java
+package com.demo;
+
+class Lambdas {
+    Op twice = $0value -> value + value;
+}
+
+interface Op {
+    int apply(int value);
+}
+//= expected (pending)
+/com/demo/Lambdas.java:4:16-21 read  Op twice = value -> value + value;
+/com/demo/Lambdas.java:4:25-30 read  Op twice = value -> value + value;
+/com/demo/Lambdas.java:4:33-38 read  Op twice = value -> value + value;
+/com/demo/Lambdas.java:8:19-24 write  int apply(int value);

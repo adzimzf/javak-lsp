@@ -1,0 +1,11 @@
+//- /com/demo/Point.java
+package com.demo;
+
+class Point {
+    static Po$0int origin = new Point(0, 0);
+
+    Point(int x, int y) {
+    }
+}
+//= expected
+/com/demo/Point.java:3:7  class Point {

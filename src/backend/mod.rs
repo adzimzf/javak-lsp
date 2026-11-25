@@ -8,7 +8,7 @@ pub mod java;
 pub mod kotlin;
 
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tower_lsp::jsonrpc::Result;
@@ -18,6 +18,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::feature::call_hierarchy;
 use crate::debugger::commands::{self as debug_commands, CommandOutcome, DebugCommands};
+use crate::feature::highlight;
 use crate::feature::features;
 use crate::feature::semantic::{compiler, Found, Snapshot};
 use crate::indexer::Indexer;
@@ -47,6 +48,7 @@ pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
         client,
         dependencies: Arc::new(DependencySync::default()),
         debug: Arc::new(DebugCommands::new(indexer_for_debug)),
+        symbol_tags: AtomicBool::new(false),
     }
 }
 
@@ -56,6 +58,9 @@ pub struct Backend {
     dependencies: Arc<DependencySync>,
     /// The `vscode.java.*` commands of jdtls' debug plugin.
     debug: Arc<DebugCommands>,
+    /// Whether the client reads a symbol's `tags`; one that does not is
+    /// told a symbol is deprecated by its `deprecated` field, as jdtls does.
+    symbol_tags: AtomicBool,
 }
 
 impl Backend {
@@ -266,10 +271,17 @@ fn cursor(at: tower_lsp::lsp_types::Position) -> Position {
     }
 }
 
-fn highlighted(at: Position) -> DocumentHighlight {
+fn highlighted(place: highlight::Highlight) -> DocumentHighlight {
     DocumentHighlight {
-        range: at_name(at),
-        kind: Some(DocumentHighlightKind::TEXT),
+        range: Range {
+            start: lsp_position(place.start),
+            end: lsp_position(place.end),
+        },
+        kind: Some(if place.write {
+            DocumentHighlightKind::WRITE
+        } else {
+            DocumentHighlightKind::READ
+        }),
     }
 }
 
@@ -311,6 +323,14 @@ impl LanguageServer for Backend {
         self.dependencies
             .configure(params.initialization_options.as_ref());
         self.debug.configure(params.initialization_options.as_ref());
+        let tags = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|document| document.document_symbol.as_ref())
+            .and_then(|symbols| symbols.tag_support.as_ref())
+            .is_some_and(|support| support.value_set.contains(&SymbolTag::DEPRECATED));
+        self.symbol_tags.store(tags, Ordering::Relaxed);
         if !self.indexer.workspace_pinned.load(Ordering::Relaxed) {
             if let Some(root) = params
                 .root_uri
@@ -495,6 +515,15 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let language = self.indexer.language(&uri).unwrap_or(Language::Java);
+        if language == Language::Java {
+            let tree = self.indexer.syntax(language).tree(&text);
+            let tags = self.symbol_tags.load(Ordering::Relaxed);
+            let symbols = crate::feature::outline::java(&tree)
+                .into_iter()
+                .map(|symbol| java_symbol(symbol, tags))
+                .collect();
+            return Ok(Some(DocumentSymbolResponse::Nested(symbols)));
+        }
         let symbols: Vec<DocumentSymbol> = self
             .indexer
             .syntax(language)
@@ -648,18 +677,61 @@ impl LanguageServer for Backend {
         let Some(file) = snapshot.file(&uri) else {
             return Ok(None);
         };
-        if let Some(places) = crate::feature::highlight::special(&snapshot, file, cursor(at.position)) {
+        if let Some(places) = highlight::special(&snapshot, file, cursor(at.position)) {
             return Ok(Some(places.into_iter().map(highlighted).collect()));
         }
-        let Some(found) = snapshot.declaration_at(&uri, cursor(at.position)) else {
+        let found = highlight::var_at(&snapshot, file, cursor(at.position))
+            .or_else(|| snapshot.declaration_at(&uri, cursor(at.position)));
+        let Some(mut found) = found else {
             return Ok(None);
         };
-        let highlights = snapshot
-            .uses_in(&found, Some(&uri))
+        // The class `new Point(…)` names is the class, though the
+        // constructor it calls is what a definition goes to.
+        let is_constructor = matches!(
+            found.node.kind.as_str(),
+            "constructor_declaration" | "compact_constructor_declaration"
+        );
+        let at_the_declaration =
+            found.name.covers(cursor(at.position)) || found.name.end == cursor(at.position);
+        if is_constructor
+            && !(found.file.uri == uri && at_the_declaration)
+            && let Some(class) = snapshot.tied_to(&found).into_iter().nth(1)
+        {
+            found = class;
+        }
+        let names_a_type = matches!(
+            found.node.kind.as_str(),
+            "class_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+                | "record_declaration"
+                | "annotation_type_declaration"
+        );
+        let mut uses = snapshot.uses_in(&found, Some(&uri));
+        // `new Point(…)` names the class as much as the constructor it
+        // calls.
+        if names_a_type {
+            for constructor in snapshot.tied_to(&found).into_iter().skip(1) {
+                uses.extend(
+                    snapshot
+                        .uses_in(&constructor, Some(&uri))
+                        .into_iter()
+                        .filter(|(_, at)| *at != constructor.selection()),
+                );
+            }
+        }
+        let mut positions: Vec<Position> = uses.into_iter().map(|(_, at)| at).collect();
+        if names_a_type {
+            positions.extend(highlight::vars_of(&snapshot, file, &found));
+        }
+        let positions = highlight::of_a_component(file, found.name, cursor(at.position), positions);
+        let mut places: Vec<highlight::Highlight> = positions
             .into_iter()
-            .map(|(_, at)| highlighted(at))
+            .filter_map(|at| highlight::shown(file, at, names_a_type))
             .collect();
-        Ok(Some(highlights))
+        places.sort();
+        places.dedup();
+        Ok(Some(places.into_iter().map(highlighted).collect()))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
@@ -932,6 +1004,43 @@ fn symbol_of(entry: Outline) -> DocumentSymbol {
         },
         selection_range: selection,
         children: None,
+    }
+}
+
+#[allow(deprecated)]
+fn java_symbol(symbol: crate::feature::outline::Symbol, tags: bool) -> DocumentSymbol {
+    use crate::feature::outline::Kind as Outlined;
+    let kind = match symbol.kind {
+        Outlined::Package => SymbolKind::PACKAGE,
+        Outlined::Class => SymbolKind::CLASS,
+        Outlined::Interface => SymbolKind::INTERFACE,
+        Outlined::Enum => SymbolKind::ENUM,
+        Outlined::EnumMember => SymbolKind::ENUM_MEMBER,
+        Outlined::Field => SymbolKind::FIELD,
+        Outlined::Constant => SymbolKind::CONSTANT,
+        Outlined::Method => SymbolKind::METHOD,
+        Outlined::Constructor => SymbolKind::CONSTRUCTOR,
+    };
+    let children: Vec<DocumentSymbol> = symbol
+        .children
+        .into_iter()
+        .map(|child| java_symbol(child, tags))
+        .collect();
+    DocumentSymbol {
+        name: symbol.name,
+        detail: symbol.detail,
+        kind,
+        tags: (symbol.deprecated && tags).then(|| vec![SymbolTag::DEPRECATED]),
+        deprecated: (symbol.deprecated && !tags).then_some(true),
+        range: Range {
+            start: lsp_position(symbol.start),
+            end: lsp_position(symbol.end),
+        },
+        selection_range: Range {
+            start: lsp_position(symbol.selection.0),
+            end: lsp_position(symbol.selection.1),
+        },
+        children: (!children.is_empty()).then_some(children),
     }
 }
 

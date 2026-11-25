@@ -18,10 +18,11 @@ class Sibling {
     }
 }
 //= expected
-class Outer
-field depth
-class Middle
-class Inner
-method depth
-class Sibling
-constructor Sibling
+package com.demo  1:1-18 at 1:1-18
+class Outer  3:1-13:2 at 3:7-12
+  field depth  4:5-15 at 4:9-14
+  class Middle  6:5-12:6 at 6:11-17
+    class Inner  7:9-11:10 at 7:15-20
+      method depth() : int  8:13-10:14 at 8:17-22
+class Sibling  15:1-18:2 at 15:7-14
+  constructor Sibling()  16:5-17:6 at 16:5-12

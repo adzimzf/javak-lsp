@@ -13,7 +13,8 @@ interface Shape$0 {
     }
 }
 //= expected
-interface Shape
-method area
-method describe
-method empty
+package com.demo  1:1-18 at 1:1-18
+interface Shape  3:1-13:2 at 3:11-16
+  method area() : double  4:5-19 at 4:12-16
+  method describe() : String  6:5-8:6 at 6:20-28
+  method empty() : Shape  10:5-12:6 at 10:18-23

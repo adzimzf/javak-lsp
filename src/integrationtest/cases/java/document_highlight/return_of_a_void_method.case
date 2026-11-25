@@ -1,0 +1,17 @@
+//- /com/demo/Exits.java
+package com.demo;
+
+class Exits {
+    int value;
+
+    void check() {
+        if (value > 0) {
+            ret$0urn;
+        }
+        value++;
+    }
+}
+//= expected
+/com/demo/Exits.java:6:5-9 read  void check() {
+/com/demo/Exits.java:8:13-20 read  return;
+/com/demo/Exits.java:11:5-6 read  }

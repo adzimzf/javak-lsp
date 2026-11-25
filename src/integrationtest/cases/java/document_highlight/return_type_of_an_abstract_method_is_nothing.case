@@ -1,0 +1,12 @@
+//- /com/demo/Shape.java
+package com.demo;
+
+interface Shape {
+    dou$0ble area();
+
+    default double twice() {
+        return area() * 2;
+    }
+}
+//= expected
+(nothing)

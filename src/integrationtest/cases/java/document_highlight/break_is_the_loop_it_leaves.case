@@ -1,0 +1,17 @@
+//- /com/demo/Loops.java
+package com.demo;
+
+class Loops {
+    void run(int n) {
+        for (int i = 0; i < n; i++) {
+            while (true) {
+                if (i == 2) {
+                    br$0eak;
+                }
+            }
+        }
+    }
+}
+//= expected
+/com/demo/Loops.java:6:13-18 read  while (true) {
+/com/demo/Loops.java:10:13-14 read  }
