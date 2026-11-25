@@ -123,7 +123,7 @@ fn contextual(
         return offers;
     }
     if let Some(receiver) = receiver_of(path, name) {
-        return members(snapshot, file, receiver, prefix);
+        return members(snapshot, file, receiver, prefix, false);
     }
     if enclosing_kind(path, "switch_label").is_some() {
         return switch_constants(snapshot, file, name.start);
@@ -267,7 +267,7 @@ fn is_dotted_name(node: &Syn) -> bool {
 }
 
 /// The members of a receiver's type that are visible here.
-fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -> Vec<Offer> {
+fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str, calling: bool) -> Vec<Offer> {
     // `names.length` of an array, and nothing else an array has.
     if let Some(written) = type_of_receiver(snapshot, file, receiver) {
         if written.dimensions > 0 {
@@ -284,7 +284,7 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
         .type_named(receiver.text.trim(), file)
         .filter(|_| !is_value);
     if let Some(declaration) = as_a_type {
-        let mut offers = visible(snapshot, file, &declaration, Wanted::Static);
+        let mut offers = visible(snapshot, file, &declaration, Wanted::Static, None, calling);
         // `Suit.class`: a class literal, after the members.
         if file.language == Language::Java {
             offers.push(Offer {
@@ -305,7 +305,7 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
         .of_type(&written, file)
         .or_else(|| bound_of(snapshot, file, receiver, &written));
     let mut offers = declaration
-        .map(|declaration| visible(snapshot, file, &declaration, Wanted::Instance))
+        .map(|declaration| visible(snapshot, file, &declaration, Wanted::Instance, Some(receiver.start), calling))
         .unwrap_or_default();
     let depth = offers.len();
     for (index, name) in snapshot
@@ -398,15 +398,37 @@ enum Wanted {
 
 /// The members of a type and its supertypes that this file may name,
 /// nearest first and in source order.
+///
+/// `at` is where an instance is written for [`Wanted::Instance`]: in Java,
+/// an interface's value has `Object`'s methods, its protected ones only
+/// inside the interface, as jdtls offers them. `calling` keeps methods
+/// only.
 fn visible(
     snapshot: &Snapshot,
     from: &FileView,
     of: &Found<'_>,
     wanted: Wanted,
+    at: Option<Position>,
+    calling: bool,
 ) -> Vec<Offer> {
     let mut offers = Vec::new();
     let mut seen = Vec::new();
-    for (depth, type_of) in snapshot.with_supertypes(of).into_iter().enumerate() {
+    let java = from.language == Language::Java && at.is_some();
+    let inside = |declaration: &Found<'_>| {
+        at.is_some_and(|at| {
+            declaration.file.uri == from.uri && declaration.node.start <= at && at <= declaration.node.end
+        })
+    };
+    let mut owners = snapshot.with_supertypes(of);
+    let is_interface = of.node.kind == "interface_declaration";
+    if java
+        && is_interface
+        && !owners.iter().any(|owner| owner.name.text == "Object")
+        && let Some(object) = snapshot.type_named("Object", from)
+    {
+        owners.push(object);
+    }
+    for (depth, type_of) in owners.into_iter().enumerate() {
         let members = members_of(type_of.node);
         for (index, (member, named)) in members.iter().enumerate() {
             let is_static = member.text.contains("static") || member.kind == "enum_constant";
@@ -414,12 +436,22 @@ fn visible(
             if matches!(member.kind.as_str(), "constructor_declaration" | "compact_constructor_declaration") {
                 continue;
             }
+            let says = |word: &str| {
+                member
+                    .first("modifiers")
+                    .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|written| written == word))
+            };
+            let object_of_interface = java && is_interface && type_of.name.text == "Object";
+            if object_of_interface && says("protected") && !inside(of) {
+                continue;
+            }
             let offered = match wanted {
                 Wanted::Static => is_static,
                 Wanted::Instance => member.kind != "enum_constant",
                 Wanted::Everything => true,
-            };
-            if !offered || !reachable(snapshot, from, &type_of, member) {
+            } && (!calling || member.kind == "method_declaration");
+            let object_method = object_of_interface && !says("private");
+            if !offered || !(object_method || reachable(snapshot, from, &type_of, member)) {
                 continue;
             }
             if seen.contains(&named.text) {
@@ -580,7 +612,7 @@ fn scope(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Offer> {
         });
     }
     if let Some(enclosing) = snapshot.enclosing(file, at) {
-        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything));
+        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything, None, false));
     }
     // An inner class reads the members of the classes around it too.
     let outer = path_to(&file.tree, at)
@@ -591,7 +623,7 @@ fn scope(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Offer> {
         .filter_map(|node| snapshot.type_named(&node.child("name")?.text, file))
         .collect::<Vec<_>>();
     for enclosing in outer {
-        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything));
+        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything, None, false));
     }
     offers
 }

@@ -397,6 +397,18 @@ impl Snapshot {
         let in_package = |file: &&FileView| {
             package.is_none_or(|wanted| self.package(file).as_deref().unwrap_or("") == wanted)
         };
+        // A package's members are its top-level types: `Tag` of the package
+        // is `Tag`, not `Token.Tag`, whichever file is read first.
+        let top_level = |file: &'a FileView| {
+            file.tree
+                .children
+                .iter()
+                .find(|node| is_type_declaration(node) && node.child("name").is_some_and(|named| named.text == name))
+                .and_then(|declaration| self.declared(file, declaration))
+        };
+        if let Some(found) = self.every_file().filter(in_package).find_map(top_level) {
+            return Some(found);
+        }
         if let Some(found) = self.every_file().filter(in_package).find_map(declaring) {
             return Some(found);
         }
@@ -3293,43 +3305,6 @@ impl Snapshot {
             }
         }
         found
-    }
-
-    /// Whether `method` overrides a method of a library type, however far
-    /// up: then it cannot be renamed.
-    pub fn overrides_a_library_method(&self, method: &Found<'_>) -> bool {
-        if method.node.kind != "method_declaration" {
-            return false;
-        }
-        let Some(owner) = self.owning_type(method) else {
-            return false;
-        };
-        let wanted = self.erased_parameter_types(method);
-        let mut seen = 0;
-        let mut queue: std::collections::VecDeque<Found<'_>> = self.supertypes(&owner).into();
-        while let Some(supertype) = queue.pop_front() {
-            seen += 1;
-            if seen > 64 {
-                break;
-            }
-            if supertype.file.library {
-                let overridden = members_of(supertype.node).into_iter().any(|(member, named)| {
-                    member.kind == "method_declaration"
-                        && named.text == method.name.text
-                        && self.erased_parameter_types(&Found {
-                            file: supertype.file,
-                            node: member,
-                            name: named,
-                            bindings: Bindings::new(),
-                        }) == wanted
-                });
-                if overridden {
-                    return true;
-                }
-            }
-            queue.extend(self.supertypes(&supertype));
-        }
-        false
     }
 
     /// A method's parameter types with their arguments dropped, and a type

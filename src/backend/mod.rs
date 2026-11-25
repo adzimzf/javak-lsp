@@ -1037,13 +1037,15 @@ impl LanguageServer for Backend {
         }
         // A name the workspace declares can still mean a library's
         // declaration here (`super.read(…)`), which jdtls does not rename.
-        if language == Language::Java {
-            let snapshot = self.indexer.snapshot();
-            if let Some(found) = snapshot.declaration_at(&uri, at) {
-                if found.file.library || snapshot.overrides_a_library_method(&found) {
-                    return Ok(None);
-                }
-            }
+        // (One overriding a library's method is refused by the rename.)
+        if language == Language::Java
+            && self
+                .indexer
+                .snapshot()
+                .declaration_at(&uri, at)
+                .is_some_and(|found| found.file.library)
+        {
+            return Ok(None);
         }
         Ok(Some(PrepareRenameResponse::Range(Range {
             start: lsp_position(name.start),

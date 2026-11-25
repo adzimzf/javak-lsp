@@ -155,7 +155,12 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
         return import_offers(context);
     }
     if let Some(receiver) = receiver_of(path, name) {
-        return members(snapshot, file, receiver, prefix);
+        // `shape.ar|(…)`: a call, and jdtls offers only methods for it.
+        let calling = path.iter().rev().any(|node| {
+            node.kind == "method_invocation"
+                && node.child("name").is_some_and(|called| called.start == name.start)
+        });
+        return members(snapshot, file, receiver, prefix, calling);
     }
     if enclosing_kind(path, "switch_label").is_some() {
         return switch_constants(snapshot, file, name.start);
