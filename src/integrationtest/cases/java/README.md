@@ -21,6 +21,12 @@ the fixture — so this file says where each one comes from.
 
 Notes on how an answer is written down:
 
+- A place in the JDK or a library is written `<library>/` and the file's
+  path in its module or jar (`<library>/java.base/java/lang/reflect/Array.java`),
+  without a line: jdtls points at its own JDK's class file (`jdt://…`, which
+  the harness says it can open), javak-lsp at the stub's source.
+- **declaration** is what jdtls answers it with: the method the one at the
+  cursor overrides or implements, and nothing for any other name.
 - **references** always ask for the declaration too. No field has a
   `getX`/`setX` beside it: jdtls counts calls of those accessors as
   references to the field (`java.references.includeAccessors`), which is a

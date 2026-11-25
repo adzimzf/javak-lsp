@@ -1,0 +1,21 @@
+//- /com/demo/Shape.java
+package com.demo;
+
+public abstract class Shape {
+    public abstract double area();
+}
+//- /com/demo/Square.java
+package com.demo;
+
+public class Square extends Shape {
+    @Override
+    public double area() {
+        return 4;
+    }
+
+    double twice() {
+        return ar$0ea() * 2;
+    }
+}
+//= expected
+/com/demo/Shape.java:4:28  public abstract double area();

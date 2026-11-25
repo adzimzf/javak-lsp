@@ -289,13 +289,13 @@ impl Session {
         self.root.join(path).expect("a fixture path is relative")
     }
 
-    /// `uri` as the fixture spelled it, or whole when it is outside the
-    /// workspace (a JDK or library source).
+    /// `uri` as the fixture spelled it, or, outside the workspace, as
+    /// [`library_place`] names it.
     pub(super) fn display(&self, uri: &str) -> String {
-        let below_root = uri.strip_prefix(self.root.as_str());
-        format!("/{}", below_root.unwrap_or(uri))
-            .trim_start_matches("//")
-            .to_owned()
+        if let Some(below_root) = uri.strip_prefix(self.root.as_str()) {
+            return format!("/{below_root}");
+        }
+        library_place(uri).unwrap_or_else(|| uri.to_owned())
     }
 
     /// The `result` of `method`, asked again until `settled` accepts it or
@@ -426,6 +426,9 @@ impl Session {
             // jdtls answers signature help only when it is switched on.
             "initializationOptions": {
                 "settings": {"java": {"signatureHelp": {"enabled": true}}},
+                // Without it jdtls answers nothing for a declaration in the
+                // JDK or a library, which an editor opens through `jdt://`.
+                "extendedClientCapabilities": {"classFileContentsSupport": true},
             },
             "capabilities": {
                 "textDocument": {
@@ -607,3 +610,31 @@ async fn read_frame(reader: &mut BufReader<Reader>) -> Option<Value> {
     reader.read_exact(&mut body).await.ok()?;
     serde_json::from_slice(&body).ok()
 }
+
+/// What a place in the JDK or a library is shown as: `<library>/`, then the
+/// module or jar and the file's path inside it
+/// (`<library>/java.base/java/lang/reflect/Array.java`). Each server has its
+/// own copy of those files, and jdtls points at a class file
+/// (`jdt://contents/java.base/java.lang.reflect/Array.class?…`) where
+/// javak-lsp points at the source it extracted
+/// (`file:///…/sources/src-…/java.base/java/lang/reflect/Array.java`), so
+/// the file is what the two can agree on, not the line.
+pub(super) fn library_place(uri: &str) -> Option<String> {
+    if let Some(contents) = uri.strip_prefix("jdt://contents/") {
+        let class = contents.split('?').next()?;
+        let (container, rest) = class.split_once('/')?;
+        let (package, file) = rest.rsplit_once('/')?;
+        let name = file.strip_suffix(".class")?;
+        return Some(format!(
+            "{LIBRARY}/{container}/{}/{name}.java",
+            package.replace('.', "/")
+        ));
+    }
+    let path = uri.strip_prefix("file://")?;
+    let (_, extracted) = path.split_once("/sources/")?;
+    let (_, inside) = extracted.split_once('/')?;
+    Some(format!("{LIBRARY}/{inside}"))
+}
+
+/// How [`library_place`] starts, so a place in a library is told apart.
+pub(super) const LIBRARY: &str = "<library>";
