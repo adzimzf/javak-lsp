@@ -203,10 +203,10 @@ fn lens_names<'a>(node: &'a crate::parser::Syn, names: &mut Vec<&'a crate::parse
                 | "compact_constructor_declaration"
                 | "annotation_type_element_declaration"
         );
-        if is_type || is_member {
-            if let Some(name) = child.child("name") {
-                names.push(name);
-            }
+        if (is_type || is_member)
+            && let Some(name) = child.child("name")
+        {
+            names.push(name);
         }
         // Into a type's body, never into a member's.
         let container = matches!(
