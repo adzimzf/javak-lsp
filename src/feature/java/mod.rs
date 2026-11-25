@@ -22,7 +22,7 @@ impl LanguageFeatures for Java {
         let parameters: Vec<String> = method
             .parameters
             .iter()
-            .map(|parameter| self.parameter(parameter))
+            .map(|parameter| format!("{}{}", parameter.annotations, self.parameter(parameter)))
             .collect();
         let thrown = method
             .thrown

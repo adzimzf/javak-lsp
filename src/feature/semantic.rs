@@ -1994,12 +1994,275 @@ pub fn is_identifier(node: &Syn) -> bool {
     )
 }
 
+/// `text` on one line, every run of whitespace a single space.
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// The node whose child `name` is, in a path that ends at it.
 fn parent_of<'a>(path: &[&'a Syn], name: &Syn) -> Option<&'a Syn> {
     let at = path
         .iter()
         .rposition(|node| node.start == name.start && node.kind == name.kind)?;
     path.get(at.checked_sub(1)?).copied()
+}
+
+/// What hover shows of the name at a place.
+pub struct HoverText<'a> {
+    pub found: Found<'a>,
+    pub signature: String,
+    /// The declaration's javadoc as markdown, if it has one.
+    pub documentation: Option<String>,
+}
+
+impl Snapshot {
+    /// The declaration of the name at `at`, its signature as jdtls shows
+    /// it there and its documentation.
+    pub fn hover_at(&self, uri: &Url, at: Position) -> Option<HoverText<'_>> {
+        let found = self.declaration_at(uri, at)?;
+        let mut signature = self.signature_of(&found)?;
+        // jdtls names a Java type with its package and the types it is in,
+        // and where it is used, with the type arguments written there.
+        if found.file.language == Language::Java && is_type_declaration(found.node) {
+            let name = self.qualified_type_name(found.file, found.node);
+            let arguments = self
+                .file(uri)
+                .and_then(|file| type_arguments_at_use(file, at, &found));
+            signature = match arguments {
+                Some(arguments) => format!("{name}{arguments}"),
+                None => format!("{name}{}", &signature[found.name.text.len()..]),
+            };
+        }
+        let documentation = match found.file.language {
+            Language::Java => self
+                .comment_above(found.file, found.node)
+                .filter(|comment| comment.text.starts_with("/**"))
+                .map(|comment| javadoc_markdown(&comment.text))
+                .filter(|markdown| !markdown.is_empty()),
+            _ => None,
+        };
+        Some(HoverText {
+            found,
+            signature,
+            documentation,
+        })
+    }
+}
+
+/// How a generic type is shown where it is used rather than declared: with
+/// the arguments written there (`java.util.Map<String, String>`), or none
+/// where it is used raw. `None` where the declaration's own form stands: at
+/// the declaration, and where the name is not a type (`Outer.make()`).
+fn type_arguments_at_use(file: &FileView, at: Position, found: &Found<'_>) -> Option<String> {
+    let name = identifier_at(&file.tree, at)?;
+    if file.uri == found.file.uri && name.start == found.name.start {
+        return None;
+    }
+    if name.kind != "type_identifier" {
+        return None;
+    }
+    let path = path_to(&file.tree, name.start);
+    let mut at_name = path.iter().rposition(|node| node.start == name.start && node.kind == name.kind)?;
+    // `Outer.Inner<T>`: the arguments belong to the whole dotted name.
+    while at_name > 0 && path[at_name - 1].kind == "scoped_type_identifier" {
+        if path[at_name - 1].children.last().is_none_or(|last| last.start != path[at_name].start) {
+            return None;
+        }
+        at_name -= 1;
+    }
+    let parent = at_name.checked_sub(1).map(|index| path[index]);
+    match parent {
+        Some(generic) if generic.kind == "generic_type" => {
+            let arguments = generic.child("type_arguments").or_else(|| generic.first("type_arguments"))?;
+            Some(type_arguments_text(&arguments.text))
+        }
+        _ => Some(String::new()),
+    }
+}
+
+/// `<String,List<String>>` as jdtls prints it: `<String, List<String>>`.
+fn type_arguments_text(written: &str) -> String {
+    let collapsed = collapse_whitespace(written);
+    let mut text = String::new();
+    for piece in collapsed.split(',') {
+        if !text.is_empty() {
+            text.push_str(", ");
+        }
+        text.push_str(piece.trim());
+    }
+    text.replace("< ", "<").replace(" >", ">")
+}
+
+/// A javadoc comment as markdown, the way jdtls renders one: the text with
+/// its `*` margins gone, inline tags as code or plain names, and the block
+/// tags (`@param`, `@return`, …) as lists under a heading each.
+pub fn javadoc_markdown(comment: &str) -> String {
+    let body = comment
+        .trim_start_matches("/**")
+        .trim_end_matches("*/");
+    let lines: Vec<&str> = body
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let trimmed = trimmed.strip_prefix('*').unwrap_or(trimmed);
+            trimmed.strip_prefix(' ').unwrap_or(trimmed).trim_end()
+        })
+        .collect();
+    let mut description = String::new();
+    let mut tags: Vec<(String, String)> = Vec::new();
+    for line in lines {
+        let starts_tag = line.trim_start().starts_with('@')
+            && line.trim_start()[1..].starts_with(|character: char| character.is_ascii_alphabetic());
+        if starts_tag {
+            let line = line.trim_start();
+            let (tag, rest) = line[1..].split_once(char::is_whitespace).unwrap_or((&line[1..], ""));
+            tags.push((tag.to_owned(), rest.trim().to_owned()));
+        } else if let Some((_, text)) = tags.last_mut() {
+            if !line.trim().is_empty() {
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(line.trim());
+            }
+        } else {
+            description.push_str(line);
+            description.push('\n');
+        }
+    }
+    let mut markdown = inline_tags(&html_to_markdown(description.trim()));
+    // jdtls's headings, in its order; `@exception` is `@throws`.
+    const HEADINGS: &[(&[&str], &str)] = &[
+        (&["param"], "Parameters:"),
+        (&["return"], "Returns:"),
+        (&["throws", "exception"], "Throws:"),
+        (&["since"], "Since:"),
+        (&["see"], "See Also:"),
+        (&["author"], "Author:"),
+        (&["deprecated"], "Deprecated."),
+    ];
+    for (names, heading) in HEADINGS {
+        let entries: Vec<String> = tags
+            .iter()
+            .filter(|(name, _)| names.contains(&name.as_str()))
+            .map(|(name, text)| {
+                let text = inline_tags(&html_to_markdown(text));
+                match name.as_str() {
+                    "param" | "throws" | "exception" => match text.split_once(' ') {
+                        Some((first, rest)) => format!("**{first}** {rest}"),
+                        None => format!("**{text}**"),
+                    },
+                    _ => text,
+                }
+            })
+            .collect();
+        if entries.is_empty() {
+            continue;
+        }
+        if !markdown.is_empty() {
+            markdown.push_str("\n\n");
+        }
+        markdown.push_str(&format!("* **{heading}**"));
+        for entry in entries {
+            markdown.push_str(&format!("\n  * {entry}"));
+        }
+    }
+    markdown.trim().to_owned()
+}
+
+/// The few HTML tags javadoc is written with, as markdown.
+fn html_to_markdown(text: &str) -> String {
+    let mut out = text.to_owned();
+    for (tag, replacement) in [
+        ("<p>", "\n\n"),
+        ("</p>", "\n\n"),
+        ("<P>", "\n\n"),
+        ("<br>", "\n"),
+        ("<br/>", "\n"),
+        ("<code>", "`"),
+        ("</code>", "`"),
+        ("<b>", "**"),
+        ("</b>", "**"),
+        ("<strong>", "**"),
+        ("</strong>", "**"),
+        ("<i>", "*"),
+        ("</i>", "*"),
+        ("<em>", "*"),
+        ("</em>", "*"),
+        ("<ul>", "\n"),
+        ("</ul>", "\n"),
+        ("<li>", "\n* "),
+        ("</li>", ""),
+        ("<pre>", "\n```\n"),
+        ("</pre>", "\n```\n"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&amp;", "&"),
+    ] {
+        out = out.replace(tag, replacement);
+    }
+    let mut paragraphs: Vec<String> = Vec::new();
+    for paragraph in out.split("\n\n") {
+        let joined = paragraph
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.is_empty() {
+            paragraphs.push(joined);
+        }
+    }
+    paragraphs.join("\n\n")
+}
+
+/// `{@code x}` and `{@literal x}` as code, `{@link Type#member label}` as
+/// its label or the name it links to.
+fn inline_tags(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{@") {
+        out.push_str(&rest[..start]);
+        let inside = &rest[start + 2..];
+        // Braces nest in `{@code Map<K, V> {}}`.
+        let mut depth = 1;
+        let mut end = None;
+        for (index, character) in inside.char_indices() {
+            match character {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(index);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let tag = &inside[..end];
+        let (name, argument) = tag.split_once(char::is_whitespace).unwrap_or((tag, ""));
+        let argument = argument.trim();
+        match name {
+            "code" | "literal" | "value" => out.push_str(&format!("`{argument}`")),
+            "link" | "linkplain" => {
+                let (target, label) = argument.split_once(char::is_whitespace).unwrap_or((argument, ""));
+                if label.trim().is_empty() {
+                    let target = target.trim_start_matches('#').replace('#', ".");
+                    out.push_str(&format!("`{target}`"));
+                } else {
+                    out.push_str(label.trim());
+                }
+            }
+            _ => out.push_str(argument),
+        }
+        rest = &inside[end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// How a declaration reads on hover, as jdtls words it.
@@ -2014,9 +2277,15 @@ impl Snapshot {
                 let language = features(found.file.language);
                 let parameters: Vec<String> = parameters(node, &Bindings::new())
                     .iter()
-                    .map(|parameter| language.parameter(parameter))
+                    .map(|parameter| format!("{}{}", parameter.annotations, language.parameter(parameter)))
                     .collect();
-                Some(format!("{}({})", found.name.text, parameters.join(", ")))
+                // jdtls names a constructor after its class, qualified:
+                // `com.demo.Point.Point(int x)`.
+                let owner = self
+                    .java_owner(found)
+                    .map(|owner| format!("{owner}."))
+                    .unwrap_or_default();
+                Some(format!("{owner}{}({})", found.name.text, parameters.join(", ")))
             }
             "class_declaration" | "record_declaration" | "interface_declaration"
             | "enum_declaration" | "annotation_type_declaration" => {
@@ -2028,7 +2297,12 @@ impl Snapshot {
                 };
                 Some(format!("{}{written}", found.name.text))
             }
-            "enum_constant" | "type_parameter" => Some(found.name.text.clone()),
+            "enum_constant" => Some(found.name.text.clone()),
+            // jdtls shows a type parameter with its bounds: `T extends Node`.
+            "type_parameter" => match found.file.language {
+                Language::Java => Some(collapse_whitespace(&node.text)),
+                _ => Some(found.name.text.clone()),
+            },
             "field_declaration" | "constant_declaration" => {
                 let written = self.type_of_declaration(found)?.written();
                 let value = assigned_value(node, &found.name.text);
@@ -2049,8 +2323,14 @@ impl Snapshot {
 
     fn method_signature(&self, found: &Found<'_>) -> String {
         let node = found.node;
+        // jdtls qualifies a Java method with the type that declares it:
+        // `int com.demo.Main.sum(int a, int b)`.
+        let name = match self.java_owner(found) {
+            Some(owner) => format!("{owner}.{}", found.name.text),
+            None => found.name.text.clone(),
+        };
         let shape = MethodShape {
-            name: found.name.text.clone(),
+            name,
             type_parameters: type_parameters_of(node),
             returns: node.child("type").map(|written| type_of_node(written).written()),
             parameters: parameters(node, &Bindings::new()),
@@ -2059,6 +2339,37 @@ impl Snapshot {
                 .map(|throws| throws.text.split_whitespace().collect::<Vec<_>>().join(" ")),
         };
         features(found.file.language).method_signature(&shape)
+    }
+
+    /// The type declaring a Java member, qualified (`com.demo.Outer.Inner`);
+    /// `None` for Kotlin, whose hover does not qualify.
+    fn java_owner(&self, found: &Found<'_>) -> Option<String> {
+        if found.file.language != Language::Java {
+            return None;
+        }
+        let owner = path_to(&found.file.tree, found.node.start)
+            .into_iter()
+            .rev()
+            .filter(|node| node.start != found.node.start || node.kind != found.node.kind)
+            .find(|node| is_type_declaration(node))?;
+        Some(self.qualified_type_name(found.file, owner))
+    }
+
+    /// A type declaration's name with its package and the types it is
+    /// nested in: `com.demo.Outer.Inner`.
+    pub fn qualified_type_name(&self, file: &FileView, declaration: &Syn) -> String {
+        let mut names: Vec<String> = path_to(&file.tree, declaration.start)
+            .into_iter()
+            .filter(|node| is_type_declaration(node) && node.start < declaration.start)
+            .filter_map(|node| node.child("name").map(|name| name.text.clone()))
+            .collect();
+        if let Some(name) = declaration.child("name") {
+            names.push(name.text.clone());
+        }
+        if let Some(package) = self.package(file) {
+            names.insert(0, package);
+        }
+        names.join(".")
     }
 
     /// `com.demo.Main.sum(int, int)`: the method a local belongs to.
@@ -2070,11 +2381,17 @@ impl Snapshot {
                 "method_declaration" | "constructor_declaration"
             )
         })?;
-        let (owner, _) = enclosing_type(&found.file.tree, method.start)?;
-        let package = self
-            .package(found.file)
-            .map(|package| format!("{package}."))
-            .unwrap_or_default();
+        let (owner, declaration) = enclosing_type(&found.file.tree, method.start)?;
+        // Java names every type it is nested in; Kotlin only the innermost.
+        let (package, owner) = match found.file.language {
+            Language::Java => (String::new(), self.qualified_type_name(found.file, declaration)),
+            _ => (
+                self.package(found.file)
+                    .map(|package| format!("{package}."))
+                    .unwrap_or_default(),
+                owner,
+            ),
+        };
         let types: Vec<String> = parameters_of(method)
             .iter()
             .map(|parameter| {
@@ -2116,10 +2433,22 @@ pub fn parameters(declaration: &Syn, bindings: &Bindings) -> Vec<Parameter> {
                 .or_else(|| parameter.child("name"))
                 .map(|name| name.text.clone())
                 .unwrap_or_default();
+            let annotations = parameter
+                .first("modifiers")
+                .map(|modifiers| {
+                    modifiers
+                        .children
+                        .iter()
+                        .filter(|modifier| modifier.kind.ends_with("annotation"))
+                        .map(|annotation| format!("{} ", collapse_whitespace(&annotation.text)))
+                        .collect()
+                })
+                .unwrap_or_default();
             Parameter {
                 written: substituted(written, bindings).written(),
                 name,
                 spread: parameter.kind == "spread_parameter",
+                annotations,
             }
         })
         .collect()
@@ -2561,12 +2890,32 @@ impl Snapshot {
     }
 
     /// The block comment directly above a declaration.
+    /// The block comment right above a declaration: the last one before
+    /// it with nothing but blank space between.
     fn comment_above<'a>(&self, file: &'a FileView, declaration: &Syn) -> Option<&'a Syn> {
-        file.tree
+        let comment = file
+            .tree
             .walk()
             .into_iter()
-            .filter(|node| node.kind == "block_comment")
-            .find(|comment| comment.end.line + 1 == declaration.start.line)
+            .filter(|node| node.kind == "block_comment" && node.end <= declaration.start)
+            .max_by_key(|comment| comment.end)?;
+        let lines: Vec<&str> = file.text.lines().collect();
+        let between = (comment.end.line..=declaration.start.line).all(|line| {
+            let Some(text) = lines.get(line as usize) else {
+                return true;
+            };
+            let from = if line == comment.end.line { comment.end.column as usize } else { 0 };
+            let to = if line == declaration.start.line {
+                declaration.start.column as usize
+            } else {
+                usize::MAX
+            };
+            text.chars()
+                .skip(from)
+                .take(to.saturating_sub(from))
+                .all(char::is_whitespace)
+        });
+        between.then_some(comment)
     }
 }
 
@@ -2746,6 +3095,25 @@ impl Snapshot {
 
     /// The parameters of a declaration as its language writes them, with
     /// the bindings of its receiver filled in.
+    /// The types of a declaration's parameters, with the bindings of its
+    /// receiver filled in: what tells one overload from another.
+    pub fn parameter_types(&self, found: &Found<'_>) -> Vec<String> {
+        parameters(found.node, &found.bindings)
+            .into_iter()
+            .map(|parameter| parameter.written)
+            .collect()
+    }
+
+    /// A method's return type as written, with the bindings of its
+    /// receiver filled in; `None` for a constructor.
+    pub fn return_written(&self, found: &Found<'_>) -> Option<String> {
+        if found.node.kind != "method_declaration" {
+            return None;
+        }
+        let written = found.node.child("type").map(type_of_node)?;
+        Some(substituted(written, &found.bindings).written())
+    }
+
     pub fn parameters_written(&self, found: &Found<'_>) -> Vec<String> {
         let language = features(found.file.language);
         parameters(found.node, &found.bindings)

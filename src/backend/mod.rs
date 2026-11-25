@@ -65,6 +65,28 @@ pub struct Backend {
 }
 
 impl Backend {
+    /// What jdtls names the place a declaration is in: the project, or for
+    /// a library source the module or jar it was extracted from.
+    fn source_label(&self, file: &crate::feature::semantic::FileView) -> String {
+        if file.library {
+            let path = file.uri.path();
+            if let Some((_, extracted)) = path.split_once("/sources/") {
+                let mut parts = extracted.split('/');
+                let archive = parts.next().unwrap_or_default();
+                if let Some(module) = parts.next().filter(|module| module.contains('.')) {
+                    return format!("module: {module}");
+                }
+                return archive.to_owned();
+            }
+        }
+        self.indexer
+            .workspace_root
+            .get()
+            .and_then(|root| root.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
     /// The edits that format a Java file, or the lines `range` touches.
     /// Other files are not formatted.
     fn formatted(
@@ -632,18 +654,33 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let at = params.text_document_position_params;
         let snapshot = self.indexer.snapshot();
-        let found = snapshot.declaration_at(&at.text_document.uri, cursor(at.position));
-        let Some(found) = found else {
+        let Some(hover) = snapshot.hover_at(&at.text_document.uri, cursor(at.position)) else {
             return Ok(None);
         };
-        let Some(signature) = snapshot.signature_of(&found) else {
-            return Ok(None);
-        };
+        let signature = MarkedString::LanguageString(LanguageString {
+            language: protocol(hover.found.file.language).language_id().to_owned(),
+            value: hover.signature,
+        });
+        if hover.found.file.language != Language::Java {
+            return Ok(Some(Hover {
+                contents: HoverContents::Scalar(signature),
+                range: None,
+            }));
+        }
+        // jdtls follows the signature with the javadoc and with where the
+        // declaration is: `Source: *[project](file#line)*`.
+        let mut parts = vec![signature];
+        if let Some(documentation) = hover.documentation {
+            parts.push(MarkedString::String(documentation));
+        }
+        parts.push(MarkedString::String(format!(
+            "Source: *[{}]({}#{})*",
+            self.source_label(hover.found.file),
+            hover.found.file.uri,
+            hover.found.name.start.line + 1
+        )));
         Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
-                language: protocol(found.file.language).language_id().to_owned(),
-                value: signature,
-            })),
+            contents: HoverContents::Array(parts),
             range: None,
         }))
     }
@@ -810,23 +847,49 @@ impl LanguageServer for Backend {
         let Some(help) = crate::feature::signature::help_at(&snapshot, file, cursor(at.position)) else {
             return Ok(None);
         };
-        let label = format!("{}({})", help.name, help.parameters.join(", "));
-        let parameters = help
-            .parameters
+        let information = |parameters: &[String]| -> Vec<ParameterInformation> {
+            parameters
+                .iter()
+                .map(|written| ParameterInformation {
+                    label: ParameterLabel::Simple(written.clone()),
+                    documentation: None,
+                })
+                .collect()
+        };
+        if file.language != Language::Java {
+            let label = format!("{}({})", help.name, help.parameters.join(", "));
+            return Ok(Some(SignatureHelp {
+                signatures: vec![SignatureInformation {
+                    label,
+                    documentation: None,
+                    parameters: Some(information(&help.parameters)),
+                    active_parameter: help.active.map(|at| at as u32),
+                }],
+                active_signature: Some(0),
+                active_parameter: help.active.map(|at| at as u32),
+            }));
+        }
+        // jdtls offers every overload, `name(String text) : void`.
+        let signatures = help
+            .overloads
             .iter()
-            .map(|written| ParameterInformation {
-                label: ParameterLabel::Simple(written.clone()),
-                documentation: None,
+            .map(|overload| {
+                let returns = overload
+                    .returns
+                    .as_ref()
+                    .map(|returns| format!(" : {returns}"))
+                    .unwrap_or_default();
+                SignatureInformation {
+                    label: format!("{}({}){returns}", overload.name, overload.parameters.join(", ")),
+                    documentation: None,
+                    parameters: Some(information(&overload.parameters)),
+                    active_parameter: None,
+                }
             })
             .collect();
         Ok(Some(SignatureHelp {
-            signatures: vec![SignatureInformation {
-                label,
-                documentation: None,
-                parameters: Some(parameters),
-                active_parameter: help.active.map(|at| at as u32),
-            }],
-            active_signature: Some(0),
+            signatures,
+            active_signature: Some(help.active_overload as u32),
             active_parameter: help.active.map(|at| at as u32),
         }))
     }

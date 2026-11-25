@@ -28,6 +28,9 @@ pub struct Parameter {
     pub name: String,
     /// Whether it takes the rest of the arguments (`String...`, `vararg`).
     pub spread: bool,
+    /// The annotations written on it, each followed by a space
+    /// (`@Nullable `), which jdtls shows on hover.
+    pub annotations: String,
 }
 
 /// What a method's signature is made of.
