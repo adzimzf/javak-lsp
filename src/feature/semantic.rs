@@ -429,17 +429,22 @@ impl Snapshot {
     }
 
     /// A member called `name` of a declaration or of anything above it,
-    /// with the arguments a call passes it where there is a choice.
+    /// with the arguments a call passes it, and the file the call is written
+    /// in, where there is a choice.
     pub fn member<'a>(
         &'a self,
         of: &Found<'a>,
         name: &str,
-        arguments: Option<&Syn>,
+        call: Option<(&Syn, &FileView)>,
     ) -> Option<Found<'a>> {
         let mut candidates = Vec::new();
         self.members_named(of, name, &mut candidates, &mut 0);
-        if candidates.len() > 1 {
-            if let Some(chosen) = self.overload(&candidates, arguments, of.file) {
+        if candidates.len() > 1
+            && let Some((arguments, from)) = call
+        {
+            // The arguments are typed where the call is written, not where
+            // the member is declared.
+            if let Some(chosen) = self.overload(&candidates, Some(arguments), from) {
                 return Some(chosen);
             }
         }
@@ -885,16 +890,17 @@ impl Snapshot {
     pub fn invoked<'a>(&'a self, call: &'a Syn, file: &'a FileView) -> Option<Found<'a>> {
         let name = call.child("name")?;
         let arguments = call.child("arguments");
+        let passed = arguments.map(|at| (at, file));
         if let Some(object) = call.child("object") {
             let receiver = self.type_of_expression(object, file)?;
             let member = self
                 .of_type(&receiver, file)
-                .and_then(|owner| self.member(&owner, &name.text, arguments));
+                .and_then(|owner| self.member(&owner, &name.text, passed));
             return member.or_else(|| self.extension(&receiver, &name.text, arguments, file));
         }
         let member = self
             .enclosing(file, name.start)
-            .and_then(|owner| self.member(&owner, &name.text, arguments));
+            .and_then(|owner| self.member(&owner, &name.text, passed));
         if member.is_some() || !features(file.language).has_top_level_functions() {
             return member;
         }
@@ -903,7 +909,7 @@ impl Snapshot {
             return Some(function);
         }
         let class = self.type_named(&name.text, file)?;
-        let constructor = self.member(&class, &class.name.text, arguments);
+        let constructor = self.member(&class, &class.name.text, passed);
         constructor.or(Some(class))
     }
 
@@ -912,8 +918,8 @@ impl Snapshot {
     pub fn created<'a>(&'a self, creation: &'a Syn, file: &'a FileView) -> Option<Found<'a>> {
         let created = creation.child("type")?;
         let declaration = self.type_named(&type_of_node(created).name, file)?;
-        let constructor =
-            self.member(&declaration, &declaration.name.text, creation.child("arguments"));
+        let arguments = creation.child("arguments").map(|at| (at, file));
+        let constructor = self.member(&declaration, &declaration.name.text, arguments);
         constructor.or(Some(declaration))
     }
 
@@ -926,8 +932,8 @@ impl Snapshot {
         } else {
             enclosing
         };
-        let constructor =
-            self.member(&declaration, &declaration.name.text, invocation.child("arguments"));
+        let arguments = invocation.child("arguments").map(|at| (at, file));
+        let constructor = self.member(&declaration, &declaration.name.text, arguments);
         constructor.or(Some(declaration))
     }
 

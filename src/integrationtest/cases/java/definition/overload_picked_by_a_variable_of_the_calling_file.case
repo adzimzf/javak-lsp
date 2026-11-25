@@ -1,0 +1,25 @@
+//- /com/demo/Page.java
+package com.demo;
+
+class Page {
+}
+//- /com/demo/Printer.java
+package com.demo;
+
+class Printer {
+    void print(int number) {
+    }
+
+    void print(Page page) {
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run(Printer printer, Page cover) {
+        printer.pri$0nt(cover);
+    }
+}
+//= expected
+/com/demo/Printer.java:7:10  void print(Page page) {
