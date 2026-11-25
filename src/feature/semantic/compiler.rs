@@ -117,11 +117,11 @@ fn offset_from(start: Position, text: &str, offset: usize) -> Position {
 /// type the file is not named after, a method declared twice, `this` in a
 /// static context) and the warnings: dead branches, private fields nothing
 /// reads, imports nothing uses. Eclipse leaves out the unused fields when
-/// a static field's initializer or a static block has an error, and every
-/// unused import when the file has an error, though it still says a
-/// repeated import is never used: `has_errors` says whether the file has
-/// an error these checks do not look for.
-pub fn reports(file: &FileView, on_source_root: bool, has_errors: bool) -> Vec<Report> {
+/// the file declares another package than its folder names or a static
+/// field's initializer or a static block has an error, and every unused
+/// import when the file has an error, though it still says a repeated
+/// import is never used.
+pub fn reports(file: &FileView, on_source_root: bool, elsewhere: Errors) -> Vec<Report> {
     if file.language != Language::Java {
         return Vec::new();
     }
@@ -135,19 +135,28 @@ pub fn reports(file: &FileView, on_source_root: bool, has_errors: bool) -> Vec<R
     let initializer_fails = !in_initializers.is_empty();
     errors.extend(in_methods);
     errors.extend(in_initializers);
-    let has_errors = has_errors || !errors.is_empty();
+    let has_errors = elsewhere.any || !errors.is_empty();
     reports.extend(errors.into_iter().map(|finding| Report {
         finding,
         level: Level::Error,
         unnecessary: false,
     }));
     reports.extend(dead_branches(file));
-    if !initializer_fails {
+    if !initializer_fails && !elsewhere.wrong_package {
         reports.extend(unread_fields(file));
     }
     reports.extend(unused_imports(file, has_errors));
     reports.sort_by_key(|report| report.finding.at);
     reports
+}
+
+/// The errors other checks found in the file.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Errors {
+    /// Any error at all.
+    pub any: bool,
+    /// The file declares another package than its folder names.
+    pub wrong_package: bool,
 }
 
 fn unnecessary(at: Position, message: String) -> Report {

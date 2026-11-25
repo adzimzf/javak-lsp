@@ -137,6 +137,7 @@ pub(crate) fn resolved_from(
         dependencies,
         incomplete_sources: incomplete,
         decompiler: None,
+        modules: Vec::new(),
     })
 }
 

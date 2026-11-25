@@ -60,7 +60,9 @@ Notes on how an answer is written down:
   and imports nothing uses. A `(nothing)` case is the regression guard that
   a shape the parser handles stays unflagged. The missing-package check
   reads the package out of the path, and jdtls compiles only the files of a
-  source root, so most cases live under `/src/main/java/`. jdtls only
+  source root, so most cases live under `/src/main/java/`; a case that
+  brings build files (`pom.xml`, `settings.gradle`) lays out the projects
+  itself, a monorepo's modules included. jdtls only
   pushes diagnostics (`textDocument/publishDiagnostics`): what it answers a
   case is what it last published for the file.
 - A file whose header ends in `(not open)` is on disk and never opened, as
@@ -391,19 +393,24 @@ from jdtls 1.64.0.
 | `a_directory_that_is_not_an_identifier_names_no_package` | nothing: `my-demo` is no package segment |
 | `a_field_without_its_semicolon` | the missing `;` of a field |
 | `a_file_directly_at_its_source_root_has_no_package` | nothing: no package to name |
+| `a_file_outside_every_build_of_a_monorepo_is_only_read_for_its_syntax` | pending: jdtls compiles a non-project file on its own and says so |
 | `a_file_that_declares_its_package` | nothing |
 | `a_file_under_no_source_root_is_left_alone` | nothing: the path says no package |
 | `a_file_whose_package_is_not_declared` | the missing `package com.demo` |
 | `a_generic_method_with_bounds_and_wildcards_parses` | nothing |
 | `a_labelled_break_and_continue_parse` | nothing |
 | `a_lambda_with_a_block_body_and_a_method_reference_parse` | nothing |
+| `a_maven_module_s_source_directory_is_where_its_packages_start` | the package below `<sourceDirectory>src/java</sourceDirectory>` |
 | `a_method_declared_twice_is_reported_at_both` | each of two methods, or constructors, of one type with the same parameter types; `String...` and `String[]` are the same |
 | `a_method_with_throws_synchronized_and_a_do_while_parses` | nothing |
 | `a_missing_package_and_a_syntax_error_are_both_reported` | both, in source order |
+| `a_module_a_maven_parent_lists_is_compiled_from_its_own_source_root` | the package of `core/src/main/java`, a module the root `pom.xml` lists; a wrong package hides the unused field |
+| `a_module_compiles_at_its_own_java_level_not_its_parents` | a text block in a module at level 11 below a parent at 21 |
 | `a_nested_class_an_inner_class_and_a_local_class_parse` | nothing |
 | `a_package_declared_after_a_licence_header_is_a_package` | nothing: a comment above it is not a declaration |
 | `a_package_declared_after_an_import_is_still_a_package` | nothing |
 | `a_private_field_nothing_reads_is_not_used` | private fields never read, or only assigned: `serialVersionUID` and annotated ones too, not one that suppresses warnings |
+| `a_project_a_gradle_settings_file_includes_is_compiled_from_its_own_source_root` | the package of `services/api`, which `settings.gradle` includes |
 | `a_public_type_of_every_kind_in_a_file_of_another_name_is_reported` | a public class, enum, interface, annotation or record not named after its file |
 | `a_record_with_a_compact_constructor_and_a_static_member_parses` | nothing |
 | `a_statement_without_its_semicolon` | the missing `;` |

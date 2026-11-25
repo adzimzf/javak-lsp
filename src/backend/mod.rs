@@ -84,13 +84,17 @@ impl Backend {
         let snapshot = self.indexer.snapshot();
         let mut reports = Vec::new();
         if let Some(file) = snapshot.file(uri) {
-            if let Some(level) = self.indexer.java_level() {
+            if let Some(level) = self.indexer.java_level_of(uri) {
                 findings.extend(syntax.above_java_level(&file.tree, level));
             }
             findings.extend(snapshot.inapplicable_calls(file));
             let on_source_root = self.indexer.on_source_root(uri);
-            let has_errors = !findings.is_empty() || !diagnostics.is_empty();
-            reports = compiler::reports(file, on_source_root, has_errors);
+            // So far `diagnostics` holds the package mismatch alone.
+            let elsewhere = compiler::Errors {
+                any: !findings.is_empty() || !diagnostics.is_empty(),
+                wrong_package: !diagnostics.is_empty(),
+            };
+            reports = compiler::reports(file, on_source_root, elsewhere);
         }
         findings.sort_by_key(|finding| finding.at);
         diagnostics.extend(
@@ -105,7 +109,7 @@ impl Backend {
     /// A build file changed: its source level may have, and the
     /// dependencies it names.
     async fn build_file_changed(&self) {
-        self.indexer.read_java_level();
+        self.indexer.read_projects();
         self.dependencies
             .start(Arc::clone(&self.indexer), self.client.clone());
         for uri in self.indexer.open_uris() {
@@ -320,7 +324,7 @@ impl LanguageServer for Backend {
         // resolves into a file no editor has opened yet.
         let indexer = Arc::clone(&self.indexer);
         let _ = tokio::task::spawn_blocking(move || {
-            indexer.read_java_level();
+            indexer.read_projects();
             indexer.read_workspace()
         })
         .await;

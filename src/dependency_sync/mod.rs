@@ -397,6 +397,24 @@ pub(crate) struct Resolved {
     pub(crate) incomplete_sources: bool,
     /// The decompiler jar, when the build tool resolved it in the same run.
     pub(crate) decompiler: Option<PathBuf>,
+    /// Where each project keeps its sources, as Gradle says; Maven's
+    /// modules are read from their `pom.xml` instead.
+    pub(crate) modules: Vec<ReportedModule>,
+}
+
+/// One project of a build and the directories its sources are compiled
+/// from, as the build tool reports them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ReportedModule {
+    pub(crate) dir: PathBuf,
+    /// The directories Java is compiled from (Kotlin too).
+    #[serde(default)]
+    pub(crate) java: Vec<PathBuf>,
+    /// The directories only Kotlin is compiled from, or both.
+    #[serde(default)]
+    pub(crate) kotlin: Vec<PathBuf>,
+    #[serde(default, rename = "javaLevel")]
+    pub(crate) java_level: Option<String>,
 }
 
 /// What the last successful sync resolved, and for which build files.
@@ -414,6 +432,9 @@ pub(crate) struct DependencyManifest {
     /// Seconds since the Unix epoch when the manifest was written.
     #[serde(default)]
     pub(crate) saved_at: u64,
+    /// The projects the build tool reported, with their source roots.
+    #[serde(default)]
+    pub(crate) modules: Vec<ReportedModule>,
 }
 
 // `covers_whole_classpath` serves a scan of the shared Gradle cache, which
@@ -762,6 +783,7 @@ pub(crate) fn sync(root: &Path, force: bool, options: SyncOptions) -> SyncOutcom
         dependencies: resolved.dependencies,
         incomplete_sources: resolved.incomplete_sources,
         saved_at: unix_now(),
+        modules: resolved.modules,
     };
     if let Err(error) = save_manifest(root, &manifest) {
         return SyncOutcome::Failed(format!("cannot save the dependency manifest: {error}"));

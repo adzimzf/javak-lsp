@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use super::{launch, run_build_tool, BuildToolFailure, Resolved, ResolvedDependency};
+use super::{launch, run_build_tool, BuildToolFailure, ReportedModule, Resolved, ResolvedDependency};
 
 const INIT_SCRIPT: &str = include_str!("javak-lsp-dependencies.gradle");
 const INIT_SCRIPT_FILE: &str = "javak-lsp-dependencies.gradle";
 const TASK: &str = "javakLspDependencies";
 
-/// One line of the init script's output: a dependency, or the trailing
-/// `{"incompleteSources":true}` marker.
+/// One line of the init script's output: a dependency, a project and its
+/// source directories, or the trailing `{"incompleteSources":true}` marker.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum GradleOutputLine {
@@ -27,6 +27,12 @@ enum GradleOutputLine {
     },
     Decompiler {
         decompiler: PathBuf,
+    },
+    Module {
+        #[allow(dead_code)]
+        module: String,
+        #[serde(flatten)]
+        reported: ReportedModule,
     },
 }
 
@@ -83,6 +89,9 @@ pub(crate) fn parse_output(text: &str) -> Resolved {
             }
             Ok(GradleOutputLine::Decompiler { decompiler }) => {
                 resolved.decompiler = Some(decompiler);
+            }
+            Ok(GradleOutputLine::Module { reported, .. }) => {
+                resolved.modules.push(reported);
             }
             Err(_) => {}
         }

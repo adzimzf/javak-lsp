@@ -1,0 +1,20 @@
+//- /services/billing/pom.xml
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>javak.lsp</groupId>
+  <artifactId>billing</artifactId>
+  <version>1</version>
+</project>
+//- /services/billing/src/main/java/com/demo/Bill.java (not open)
+package com.demo;
+public class Bill {}
+//- /scripts/src/main/java/com/demo/Tool.java
+$0package com.wrong;
+public class Tool {
+    private int unused;
+    // TODO keep
+}
+//= expected (pending)
+/scripts/src/main/java/com/demo/Tool.java:1:1  Tool.java is a non-project file, only syntax errors are reported
+/scripts/src/main/java/com/demo/Tool.java:3:17  The value of the field Tool.unused is not used
+/scripts/src/main/java/com/demo/Tool.java:4:8  TODO keep

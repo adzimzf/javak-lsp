@@ -23,10 +23,25 @@ references and renames reach it. An open file is the editor's text; the
 others are read again when the client reports them changed
 (`workspace/didChangeWatchedFiles`) or saved.
 
+A workspace holds as many projects as its build files say, as jdtls
+imports them (`src/indexer/project.rs`): every Maven and Gradle build up to
+five directories down, every module a `pom.xml` lists (`<modules>`, those
+of profiles too) and every project a `settings.gradle` includes
+(`include`, `includeFlat`, `projectDir`, `includeBuild`). Each module has
+its own source roots, `src/main/java` and `src/test/java` unless its build
+says otherwise (`<sourceDirectory>`), and its own Java level, a Maven module
+inheriting its parent's. Gradle's own answer replaces what its files
+suggest once the dependency sync has asked it: the source directories of
+each project's Java, Kotlin and Android source sets, and the level it
+compiles at. A workspace without a build file is one project at its root.
+
 Beside its syntax errors and a missing `package`, a Java file is told what
-jdtls would tell it where the server can be sure: a feature its build
-file's source level does not have (a text block below 15), and a call no
-method of its name takes (`parse(test)` of `parse(String, Parser)`).
+jdtls would tell it where the server can be sure: a feature its module's
+source level does not have (a text block below 15), a call no method of its
+name takes (`parse(test)` of `parse(String, Parser)`), and what the Eclipse
+compiler says of the file's own text (task tags, duplicate methods, dead
+code, unused private fields and imports, …). A file on no source root of
+any module is read for its syntax and task tags only.
 
 ## Libraries
 

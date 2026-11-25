@@ -294,6 +294,9 @@ async fn index_libraries(
         .await;
     let indexed = tokio::task::spawn_blocking(move || {
         let manifest = root.as_deref().and_then(load_manifest);
+        if let Some(manifest) = &manifest {
+            indexer.apply_reported(&manifest.modules);
+        }
         let (mut jars, stdlib) = manifest_sources(manifest.as_ref());
         let mut indexed = Indexed {
             wants_kotlin: stdlib.listed || root.as_deref().is_none_or(has_kotlin_sources),
@@ -429,6 +432,7 @@ mod tests {
             ],
             incomplete_sources: false,
             saved_at: 0,
+            modules: Vec::new(),
         };
         let (jars, stdlib) = manifest_sources(Some(&manifest));
         assert_eq!(jars, vec![directory.path().join("greeter-sources.jar")]);

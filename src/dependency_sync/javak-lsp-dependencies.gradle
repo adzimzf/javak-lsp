@@ -17,6 +17,12 @@
 // decompiler resolved through the project's own repositories (mirrors,
 // credentials and all). A decompiler that can't be resolved is only logged.
 //
+// Every project also gets one line saying where it keeps its sources, as an
+// IDE's Gradle import reads them: the source directories of its Java, Kotlin
+// and Android source sets, and the Java level it compiles at.
+//
+//   {"module":":app","dir":"/abs/app","java":["/abs/app/src/main/java"],"kotlin":[],"javaLevel":"17"}
+//
 // Groovy DSL and only long-stable public APIs, so it runs on Gradle 6.x–8.x.
 
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
@@ -25,6 +31,45 @@ import org.gradle.api.artifacts.result.UnresolvedArtifactResult
 import org.gradle.api.attributes.Attribute
 import org.gradle.jvm.JvmLibrary
 import org.gradle.language.base.artifact.SourcesArtifact
+
+// Where a project keeps its sources. Each plugin is asked on its own, and
+// one this Gradle doesn't know (an old AGP, no Kotlin) only leaves its list
+// out.
+def javakLspModule = { project ->
+    def java = []
+    def kotlin = []
+    try {
+        project.extensions.findByName("sourceSets")?.each { set ->
+            set.java.srcDirs.each { java << it.absolutePath }
+        }
+    } catch (Exception ignored) {}
+    try {
+        project.extensions.findByName("kotlin")?.sourceSets?.each { set ->
+            set.kotlin.srcDirs.each { kotlin << it.absolutePath }
+        }
+    } catch (Exception ignored) {}
+    try {
+        project.extensions.findByName("android")?.sourceSets?.each { set ->
+            set.java.srcDirs.each { java << it.absolutePath }
+            try {
+                set.kotlin.srcDirs.each { kotlin << it.absolutePath }
+            } catch (Exception ignored) {}
+        }
+    } catch (Exception ignored) {}
+    def level = null
+    try {
+        def javaExtension = project.extensions.findByName("java")
+        def toolchain = javaExtension?.toolchain?.languageVersion?.getOrNull()
+        level = toolchain != null ? toolchain.asInt().toString() : javaExtension?.sourceCompatibility?.majorVersion
+    } catch (Exception ignored) {}
+    [
+        module   : project.path,
+        dir      : project.projectDir.absolutePath,
+        java     : java.unique(),
+        kotlin   : kotlin.unique(),
+        javaLevel: level,
+    ]
+}
 
 def javakLspIsClasspath = { String name ->
     def lower = name.toLowerCase()
@@ -128,6 +173,9 @@ rootProject {
                 }
                 if (decompilerPath != null) {
                     writer.println(groovy.json.JsonOutput.toJson([decompiler: decompilerPath]))
+                }
+                rootProject.allprojects.each { project ->
+                    writer.println(groovy.json.JsonOutput.toJson(javakLspModule(project)))
                 }
             }
         }
