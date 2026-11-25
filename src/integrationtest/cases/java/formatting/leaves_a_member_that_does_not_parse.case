@@ -1,0 +1,19 @@
+//- /com/demo/Broken.java
+$0package com.demo;
+public class Broken {
+  int  a=1;
+  void bad(){ int x = ; foo(  ); }
+  void ok(){int y=2;}
+}
+//= expected
+package com.demo;
+
+public class Broken {
+	int a = 1;
+
+	void bad(){ int x = ; foo(  ); }
+
+	void ok() {
+		int y = 2;
+	}
+}

@@ -1,0 +1,24 @@
+//- /com/demo/Notes.java
+// Licensed under the
+// same terms as the
+// rest of the project.
+package com.demo;
+
+import java.util.List;
+
+/** A note. */
+class Notes$0 {
+    /* kept */ int count;
+    int size; // trailing
+    // first
+    // second
+    List<String> lines;
+}
+//= expected
+2..3 comment
+2..3 comment
+6..6 imports
+8..8 comment
+9..15
+10..10 comment
+12..13 comment

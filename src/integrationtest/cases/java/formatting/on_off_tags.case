@@ -8,3 +8,11 @@ $0package org.sample;
 // @formatter:on
 }
 //= expected
+package org.sample;
+
+public class Baz {
+// @formatter:off
+	void foo(){
+    }
+// @formatter:on
+}

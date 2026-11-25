@@ -1,0 +1,20 @@
+//- /com/demo/Shapes.java
+package com.demo;
+
+public abstract class Shapes$0 {
+    abstract double area();
+    double twice() { return area() * 2; }
+    interface Named { String name(); }
+    @interface Unit { String value() default "cm"; }
+    static class Square extends Shapes { double area() { return 1; } }
+}
+//= expected
+3..9
+4..4
+5..5
+6..6
+6..6
+7..7
+7..7
+8..8
+8..8

@@ -31,11 +31,11 @@ public class SimpleFoldingRange$0 {
 // single-line
 // comments
 //= expected
-3..4
-6..8
+3..4 imports
+6..8 comment
 9..27
-11..15
+11..15 comment
 16..18
 20..25
 21..23
-29..31
+29..31 comment

@@ -63,6 +63,17 @@ pub enum Kind {
 pub struct Fold {
     pub first_line: u32,
     pub last_line: u32,
+    /// What the region is, when it is a comment, the imports or a region
+    /// the source marks out.
+    pub kind: Option<FoldKind>,
+}
+
+/// The kinds of region LSP tells apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FoldKind {
+    Comment,
+    Imports,
+    Region,
 }
 
 /// An identifier in a file, and what it sits in.

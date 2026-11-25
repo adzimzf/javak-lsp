@@ -1,0 +1,22 @@
+//- /com/demo/Partial.java
+package com.demo;
+public class Partial {
+  int  a=1;
+$0      void m(){int x=1;
+    if(x>1){x++;}
+  }$1
+  void n( int y ){ y=y+1; }
+}
+//= expected
+package com.demo;
+public class Partial {
+  int  a=1;
+
+	void m() {
+		int x = 1;
+		if (x > 1) {
+			x++;
+		}
+	}
+  void n( int y ){ y=y+1; }
+}

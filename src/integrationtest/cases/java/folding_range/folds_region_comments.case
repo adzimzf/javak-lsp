@@ -25,10 +25,10 @@ public class RegionFoldingRange$0 {
     // </editor-fold>
 }
 //= expected
-3..5
+3..5 comment
 6..25
-8..16
+8..16 region
 9..11
 13..15
-18..24
-19..21
+18..24 region
+19..21 region

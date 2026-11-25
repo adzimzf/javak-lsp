@@ -6,6 +6,7 @@
 //! `java` and `kotlin`.
 
 pub mod completion;
+pub mod format;
 pub mod call_hierarchy;
 pub mod highlight;
 pub mod java;

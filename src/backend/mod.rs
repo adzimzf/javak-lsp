@@ -18,12 +18,13 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::feature::call_hierarchy;
 use crate::debugger::commands::{self as debug_commands, CommandOutcome, DebugCommands};
+use crate::feature::format;
 use crate::feature::highlight;
 use crate::feature::features;
 use crate::feature::semantic::{compiler, Found, Snapshot};
 use crate::indexer::Indexer;
 use crate::language::Language;
-use crate::parser::{Fold, Kind, Outline, Position};
+use crate::parser::{Fold, FoldKind, Kind, Outline, Position};
 use dependencies::DependencySync;
 
 /// How the protocol names a language.
@@ -64,6 +65,32 @@ pub struct Backend {
 }
 
 impl Backend {
+    /// The edits that format a Java file, or the lines `range` touches.
+    /// Other files are not formatted.
+    fn formatted(
+        &self,
+        uri: &Url,
+        options: &FormattingOptions,
+        range: Option<(Position, Position)>,
+    ) -> Option<Vec<TextEdit>> {
+        let text = self.indexer.text(uri)?;
+        if self.indexer.language(uri)? != Language::Java {
+            return None;
+        }
+        let options = format::Options {
+            tab_size: options.tab_size.max(1) as usize,
+            insert_spaces: options.insert_spaces,
+        };
+        let edits = format::java(&text, options, range)
+            .into_iter()
+            .map(|edit| TextEdit {
+                range: span_range((edit.start, edit.end)),
+                new_text: edit.text,
+            })
+            .collect();
+        Some(edits)
+    }
+
     /// Everything the server has to say about one file: its syntax errors;
     /// where its path names a package it does not declare, that; what it
     /// writes that the project's Java level does not have; the calls no
@@ -382,6 +409,8 @@ impl LanguageServer for Backend {
                     ..CompletionOptions::default()
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: debug_commands::COMMANDS.iter().map(|command| (*command).to_owned()).collect(),
@@ -920,6 +949,18 @@ impl LanguageServer for Backend {
         let folds = self.indexer.syntax(language).folds(&text);
         Ok(Some(folds.into_iter().map(folding_range).collect()))
     }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        Ok(self.formatted(&params.text_document.uri, &params.options, None))
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let range = (cursor(params.range.start), cursor(params.range.end));
+        Ok(self.formatted(&params.text_document.uri, &params.options, Some(range)))
+    }
 }
 
 /// A member as a call hierarchy item, selected at its name — or at
@@ -982,6 +1023,11 @@ fn folding_range(fold: Fold) -> FoldingRange {
     FoldingRange {
         start_line: fold.first_line,
         end_line: fold.last_line,
+        kind: fold.kind.map(|kind| match kind {
+            FoldKind::Comment => FoldingRangeKind::Comment,
+            FoldKind::Imports => FoldingRangeKind::Imports,
+            FoldKind::Region => FoldingRangeKind::Region,
+        }),
         ..FoldingRange::default()
     }
 }
