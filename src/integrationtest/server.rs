@@ -803,7 +803,12 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
         let class = contents.split('?').next()?;
         let (container, rest) = class.split_once('/')?;
         let (package, file) = rest.rsplit_once('/')?;
-        let name = file.strip_suffix(".class")?;
+        // jdtls names the class file (`Array.class`) or, since 1.5x, the
+        // source file it would show (`Array.java`, the top-level class's
+        // file for a nested one).
+        let name = file
+            .strip_suffix(".class")
+            .or_else(|| file.strip_suffix(".java"))?;
         return Some(format!(
             "{LIBRARY}/{container}/{}/{name}.java",
             package.replace('.', "/")

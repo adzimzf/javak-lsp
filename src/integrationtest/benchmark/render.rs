@@ -171,7 +171,13 @@ impl View<'_> {
         let range = location
             .get("targetSelectionRange")
             .unwrap_or(&location["range"]);
-        format!("{}:{}", self.place(uri), start(range))
+        let place = self.place(uri);
+        // Each server reads its own copy of a library file (a class file,
+        // a source jar), so only the file is compared, not the line.
+        if place.starts_with(LIBRARY) {
+            return place;
+        }
+        format!("{place}:{}", start(range))
     }
 
     fn locations(&self, answer: &Value) -> Vec<String> {
