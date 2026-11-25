@@ -4,6 +4,7 @@
 //! `kotlin`; dependency sync runs from [`dependencies`].
 
 mod dependencies;
+pub mod service;
 pub mod java;
 pub mod kotlin;
 
@@ -65,6 +66,70 @@ pub struct Backend {
 }
 
 impl Backend {
+    fn prepared_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let at = params.text_document_position_params;
+        if self.indexer.language(&at.text_document.uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&at.text_document.uri) else {
+            return Ok(None);
+        };
+        let item = crate::feature::type_hierarchy::item_at(&snapshot, file, cursor(at.position));
+        Ok(item.map(|item| vec![type_item(&snapshot, &item, None)]))
+    }
+
+    fn type_hierarchy_related(&self, item: &TypeHierarchyItem, up: bool) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        use crate::feature::type_hierarchy as hierarchy;
+        let snapshot = self.indexer.snapshot();
+        let place = |key: &str| -> Option<(Url, Position)> {
+            let data = item.data.as_ref()?.get(key)?;
+            let uri = Url::parse(data.get("uri")?.as_str()?).ok()?;
+            let at = Position {
+                line: data.get("line")?.as_u64()? as u32,
+                column: data.get("character")?.as_u64()? as u32,
+            };
+            Some((uri, at))
+        };
+        let Some((uri, at)) = place("type") else {
+            return Ok(None);
+        };
+        let Some(of) = snapshot.declaration_at(&uri, at) else {
+            return Ok(None);
+        };
+        // The method asked about first, which every expansion matches.
+        let target = place("method").and_then(|(uri, at)| snapshot.declaration_at(&uri, at));
+        let method = target.as_ref().and_then(|target| {
+            if (&target.file.uri, target.selection()) == (&of.file.uri, of.selection()) {
+                return Some(target.clone());
+            }
+            None
+        });
+        let of = match &method {
+            Some(method) => hierarchy::owner(method).unwrap_or(of),
+            None => of,
+        };
+        let asked = hierarchy::Item {
+            of,
+            method: method.or_else(|| target.clone()),
+            without_method: false,
+        };
+        let related = if up {
+            hierarchy::supertypes(&snapshot, &asked)
+        } else {
+            hierarchy::subtypes(&snapshot, &asked)
+        };
+        Ok(Some(
+            related
+                .iter()
+                .map(|related| type_item(&snapshot, related, target.as_ref()))
+                .collect(),
+        ))
+    }
+
     /// What jdtls names the place a declaration is in: the project, or for
     /// a library source the module or jar it was extracted from.
     fn source_label(&self, file: &crate::feature::semantic::FileView) -> String {
@@ -190,6 +255,53 @@ fn is_constructor(found: &crate::feature::semantic::Found<'_>) -> bool {
 /// the start of the import's qualified name (`org.jsoup.parser.Parser`),
 /// a constructor called by `new Reader(in)` at its `new`, and the variable
 /// of an enhanced `for` is not listed at its own declaration.
+/// A type hierarchy item as jdtls makes one: the type's name and kind, at
+/// the method shown where there is one; `null` for a type without the
+/// method asked about. Its data says where the type (or method) and the
+/// method first asked about are.
+fn type_item(
+    snapshot: &Snapshot,
+    item: &crate::feature::type_hierarchy::Item<'_>,
+    target: Option<&Found<'_>>,
+) -> TypeHierarchyItem {
+    let shown = item.shown();
+    let (name, detail) = crate::feature::type_hierarchy::name_and_detail(snapshot, &item.of);
+    let kind = if item.without_method {
+        SymbolKind::NULL
+    } else {
+        match item.of.node.kind.as_str() {
+            "interface_declaration" | "annotation_type_declaration" => SymbolKind::INTERFACE,
+            "enum_declaration" => SymbolKind::ENUM,
+            _ => SymbolKind::CLASS,
+        }
+    };
+    let place = |found: &Found<'_>| {
+        serde_json::json!({
+            "uri": found.file.uri,
+            "line": found.selection().line,
+            "character": found.selection().column,
+        })
+    };
+    let target = target.or(item.method.as_ref());
+    let name_end = Position {
+        line: shown.name.start.line,
+        column: shown.name.start.column + shown.name.text.split('<').next().unwrap_or_default().trim().encode_utf16().count() as u32,
+    };
+    TypeHierarchyItem {
+        name,
+        kind,
+        tags: None,
+        detail: Some(detail),
+        uri: shown.file.uri.clone(),
+        range: span_range((shown.node.start, shown.node.end)),
+        selection_range: span_range((shown.name.start, name_end)),
+        data: Some(serde_json::json!({
+            "type": place(shown),
+            "method": target.map(place),
+        })),
+    }
+}
+
 /// The names jdtls puts a code lens on: each type, nested ones too, and
 /// each method, constructor or annotation element a type declares — not
 /// what is declared inside a method.
@@ -1250,6 +1362,27 @@ impl LanguageServer for Backend {
         })
         .collect();
         Ok(Some(hints))
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        self.prepared_type_hierarchy(params)
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        self.type_hierarchy_related(&params.item, true)
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        self.type_hierarchy_related(&params.item, false)
     }
 
     async fn selection_range(

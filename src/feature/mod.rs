@@ -17,6 +17,7 @@ pub mod query;
 pub mod semantic;
 pub mod selection;
 pub mod signature;
+pub mod type_hierarchy;
 
 use crate::language::Language;
 use crate::parser::Syn;

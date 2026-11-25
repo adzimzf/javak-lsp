@@ -428,7 +428,7 @@ impl Snapshot {
     }
 
     /// The supertypes of a declaration, resolved.
-    fn supertypes<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
+    pub(crate) fn supertypes<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
         let mut found = Vec::new();
         if of.node.kind == "object_creation_expression" {
             let created = of.node.child("type").map(type_of_node);
@@ -3333,7 +3333,7 @@ impl Snapshot {
     /// A method's parameter types with their arguments dropped, and a type
     /// variable of the method or its type as `?`: what two overriding
     /// declarations agree on however each names its type parameters.
-    fn erased_parameter_types(&self, method: &Found<'_>) -> Vec<String> {
+    pub(crate) fn erased_parameter_types(&self, method: &Found<'_>) -> Vec<String> {
         let mut variables = type_parameter_names(method.node);
         if let Some(owner) = self.owning_type(method) {
             variables.extend(type_parameter_names(owner.node));
