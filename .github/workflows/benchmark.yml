@@ -1,0 +1,86 @@
+name: benchmark
+
+# javak-lsp vs jdtls on real projects. The work is the Rust test
+# `integrationtest::benchmark` (src/integrationtest/benchmark); this only sets up the
+# tools it needs and keeps what it writes.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: "Projects to compare, comma separated (empty: all)"
+        required: false
+        default: ""
+      pr:
+        description: "Pull request to comment on (empty: the branch's open one)"
+        required: false
+        default: ""
+      seed:
+        description: "Seed of the random questions, to replay a run (empty: a new random one)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # jdtls 1.63's launcher accepts Java 21, but its org.eclipse.jdt.core
+          # bundle needs JavaSE-25: on 21 OSGi cannot resolve it and jdtls
+          # exits before reading `initialize` (a broken pipe in the test).
+          java-version: "25"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Maven, Gradle and jdtls
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cache/javak-lsp/jdtls
+          key: benchmark-${{ runner.os }}-${{ hashFiles('src/integrationtest/benchmark/catalog.rs', 'src/integrationtest/benchmark/prepare.rs') }}
+          restore-keys: benchmark-${{ runner.os }}-
+
+      - name: Build javak-lsp
+        run: cargo build --release
+
+      - name: Compare with jdtls
+        env:
+          JDTLS_COMPAT: "1"
+          JDTLS_COMPAT_COMMENT: "1"
+          JDTLS_COMPAT_REPOS: ${{ inputs.repos }}
+          JDTLS_COMPAT_PR: ${{ inputs.pr || github.event.pull_request.number }}
+          # A new random seed each run, printed and shown in the report so
+          # the run can be replayed; the `seed` input replays one.
+          JDTLS_COMPAT_SEED: ${{ inputs.seed || 'random' }}
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          cargo test --release --lib
+          integrationtest::benchmark::javak_answers_what_jdtls_answers_on_real_projects
+          -- --nocapture --test-threads=1
+
+      - name: Keep the recordings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: target/jdtls-compat
+          if-no-files-found: ignore

@@ -1,0 +1,41 @@
+---
+name: commit
+description: Commit work in small, frequent steps with messages that explain the background. Use after every self-contained change (a fix, a feature slice, a test, a refactor) instead of batching work into one large commit.
+---
+
+# Commit often, explain why
+
+## When to commit
+
+Commit as soon as a change is self-contained and the build passes:
+- one behavior added or fixed, with its tests
+- one refactor that does not change behavior
+- one benchmark, workflow or tooling change
+
+Do not wait for a whole task to finish. Do not mix unrelated changes in one
+commit; stage only the paths that belong to it (`git add <path>`).
+
+Before each commit:
+1. `cargo build` and `cargo test` (or the narrower test for what changed) pass.
+2. `git diff --staged` contains only this change.
+3. If not on a feature branch, create one first; never commit to `main`.
+   The branch name must be readable: short lowercase words joined by
+   hyphens that say what the work is (`fix-kotlin-hover-nullability`), not
+   random IDs, hashes or generated names (`claude/abc123`, `tmp-x9f2`).
+
+## Message
+
+```
+<imperative summary, under 72 chars>
+
+<Background: why this change is needed — the problem, the jdtls/KotlinLSP
+behavior being matched, the bug report, or the measurement that motivated it.>
+
+<What changed, in terms of observable behavior, not a file list.>
+
+<Compatibility, speed and memory impact when relevant: does it match
+jdtls/KotlinLSP, is it slower, does it use more memory.>
+```
+
+Every commit body must state the background. A message with only a summary
+line is not acceptable, even for small changes.
