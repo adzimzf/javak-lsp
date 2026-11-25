@@ -190,6 +190,21 @@ fn is_constructor(found: &crate::feature::semantic::Found<'_>) -> bool {
 /// the start of the import's qualified name (`org.jsoup.parser.Parser`),
 /// a constructor called by `new Reader(in)` at its `new`, and the variable
 /// of an enhanced `for` is not listed at its own declaration.
+/// Whether the name at `at` is called as `super.name(…)`.
+fn is_super_call(snapshot: &crate::feature::semantic::Snapshot, uri: &Url, at: Position) -> bool {
+    let Some(file) = snapshot.file(uri) else {
+        return false;
+    };
+    crate::feature::semantic::path_to(&file.tree, at)
+        .iter()
+        .rev()
+        .find(|node| node.kind == "method_invocation")
+        .is_some_and(|call| {
+            call.child("name").is_some_and(|name| name.start == at)
+                && call.child("object").is_some_and(|object| object.kind == "super")
+        })
+}
+
 fn as_jdtls_reports<'a>(
     snapshot: &'a crate::feature::semantic::Snapshot,
     found: &crate::feature::semantic::Found<'_>,
@@ -197,6 +212,7 @@ fn as_jdtls_reports<'a>(
 ) -> Vec<(&'a Url, Position)> {
     let declared_by_for = found.node.kind == "enhanced_for_statement";
     let constructor = is_constructor(found);
+    let is_type = crate::feature::semantic::is_type_declaration(found.node);
     uses.into_iter()
         .filter(|(uri, at)| {
             !(declared_by_for && **uri == found.file.uri && *at == found.selection())
@@ -219,7 +235,27 @@ fn as_jdtls_reports<'a>(
                     matches!(child.kind.as_str(), "scoped_identifier" | "identifier")
                 })
             });
-            (uri, name.map_or(at, |name| name.start))
+            if let Some(name) = name {
+                return (uri, name.start);
+            }
+            // A type named with its qualifier (`org.demo.Shape`,
+            // `Outer.Inner`) is reported from where the qualifier starts.
+            if is_type {
+                let qualified = path.iter().rev().find(|node| {
+                    matches!(
+                        node.kind.as_str(),
+                        "scoped_type_identifier" | "scoped_identifier" | "field_access"
+                    ) && node.children.last().is_some_and(|last| last.start == at)
+                        && node
+                            .text
+                            .chars()
+                            .all(|character| character.is_alphanumeric() || matches!(character, '_' | '$' | '.') || character.is_whitespace())
+                });
+                if let Some(qualified) = qualified {
+                    return (uri, qualified.start);
+                }
+            }
+            (uri, at)
         })
         .collect()
 }
@@ -640,6 +676,21 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
+        if language == Language::Java {
+            match found.node.kind.as_str() {
+                // jdtls goes to the type of a variable, not of what a
+                // method returns.
+                "method_declaration" | "constructor_declaration" => return Ok(None),
+                // A type variable is a type: its own declaration.
+                "type_parameter" => {
+                    return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
+                        uri: found.file.uri.clone(),
+                        range: at_name(found.selection()),
+                    })));
+                }
+                _ => {}
+            }
+        }
         let Some(written) = snapshot.type_of_declaration(&found) else {
             return Ok(None);
         };
@@ -711,8 +762,28 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let mut uses = snapshot.uses_of(&found);
-        for also in features(found.file.language).also_referenced(&snapshot, &found) {
-            uses.extend(snapshot.uses_of(&also));
+        let also = features(found.file.language).also_referenced(&snapshot, &found);
+        if found.file.language == Language::Java && found.node.kind == "method_declaration" {
+            // A call of a method it overrides or is overridden by may run
+            // it: jdtls lists those calls too — but not `super.m()`, which
+            // runs the one it names.
+            for related in snapshot.dispatching_to(&found) {
+                let declared = (&related.file.uri, related.selection());
+                uses.extend(snapshot.uses_of(&related).into_iter().filter(|(uri, at)| {
+                    (*uri, *at) != declared && !is_super_call(&snapshot, uri, *at)
+                }));
+            }
+        }
+        let java = found.file.language == Language::Java;
+        for also in also {
+            // In Java their uses, not where they are declared.
+            let declared = (&also.file.uri, also.selection());
+            uses.extend(
+                snapshot
+                    .uses_of(&also)
+                    .into_iter()
+                    .filter(|(uri, at)| !java || (*uri, *at) != declared),
+            );
         }
         if found.file.language == Language::Java {
             // `this(in)` and `super(in)` call a constructor without naming it.
@@ -721,6 +792,7 @@ impl LanguageServer for Backend {
                 uses.extend(calls.into_iter().map(|(file, start, _)| (&file.uri, start)));
             }
             uses = as_jdtls_reports(&snapshot, &found, uses);
+            uses.extend(snapshot.javadoc_uses_of(&found));
         }
         uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         uses.dedup();
@@ -796,6 +868,22 @@ impl LanguageServer for Backend {
             .into_iter()
             .filter_map(|at| highlight::shown(file, at, names_a_type))
             .collect();
+        // A javadoc naming it (`{@link #area()}`) is read there.
+        let length = found.name.text.encode_utf16().count() as u32;
+        places.extend(
+            snapshot
+                .javadoc_uses_of(&found)
+                .into_iter()
+                .filter(|(in_file, _)| **in_file == uri)
+                .map(|(_, at)| highlight::Highlight {
+                    start: at,
+                    end: Position {
+                        line: at.line,
+                        column: at.column + length,
+                    },
+                    write: false,
+                }),
+        );
         places.sort();
         places.dedup();
         Ok(Some(places.into_iter().map(highlighted).collect()))
@@ -816,6 +904,7 @@ impl LanguageServer for Backend {
         let mut places: Vec<(&Url, Position)> = Vec::new();
         for tied in snapshot.tied_to(&found) {
             places.extend(snapshot.uses_of(&tied));
+            places.extend(snapshot.javadoc_uses_of(&tied));
         }
         places.extend(snapshot.javadoc_tags_of(&found));
         places.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));

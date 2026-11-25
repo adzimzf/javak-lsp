@@ -93,6 +93,9 @@ pub struct Type {
     /// `? extends ` or `? super ` in front of a type argument that is a
     /// bounded wildcard, the type being its bound; a bare `?` is named `?`.
     pub wildcard: Option<&'static str>,
+    /// What the name is qualified with where it is written so
+    /// (`org.demo` of `org.demo.Shape`, `Outer` of `Outer.Inner`).
+    pub qualifier: Option<String>,
 }
 
 impl Type {
@@ -419,17 +422,11 @@ impl Snapshot {
                 "superclass" | "super_interfaces" | "extends_interfaces" | "interface_type_list"
             )
         }) {
-            for named in list.walk() {
-                let is_type = matches!(
-                    named.kind.as_str(),
-                    "type_identifier" | "generic_type" | "scoped_type_identifier"
-                );
-                if !is_type {
-                    continue;
-                }
+            // Each type listed, whole: `Outer.Base<T>` is one supertype, not
+            // `Outer`, `Base` and `T`.
+            for named in outermost_types(list) {
                 let written = substituted(type_of_node(named), &of.bindings);
-                if let Some(mut supertype) = self.type_named(&written.name, of.file) {
-                    supertype.bindings = bound(supertype.node, &written.arguments);
+                if let Some(supertype) = self.of_type(&written, of.file) {
                     found.push(supertype);
                 }
             }
@@ -448,6 +445,10 @@ impl Snapshot {
     ) -> Option<Found<'a>> {
         let mut candidates = Vec::new();
         self.members_named(of, name, &mut candidates, &mut 0);
+        // A call means a method, not a field of the same name.
+        if call.is_some() && candidates.iter().any(|candidate| is_callable(candidate.node)) {
+            candidates.retain(|candidate| is_callable(candidate.node));
+        }
         if candidates.len() > 1
             && let Some((arguments, from)) = call
         {
@@ -703,10 +704,35 @@ impl Snapshot {
         }?;
         let written = if written.name == "var" {
             self.inferred(declaration).unwrap_or(written)
+        } else if declaration.file.language == Language::Java {
+            // Read where it is written: `Node` in a file importing
+            // `org.demo.Node` is that one, wherever the declaration is used.
+            let mut variables = type_parameter_names(node);
+            for enclosing in path_to(&declaration.file.tree, node.start) {
+                variables.extend(type_parameter_names(enclosing));
+            }
+            self.anchored(written, declaration.file, &variables)
         } else {
             written
         };
         Some(substituted(written, &declaration.bindings))
+    }
+
+    /// `written` with the qualifier of the type each name means in `file`,
+    /// type variables left as they are.
+    fn anchored(&self, mut written: Type, file: &FileView, variables: &[String]) -> Type {
+        written.arguments = std::mem::take(&mut written.arguments)
+            .into_iter()
+            .map(|argument| self.anchored(argument, file, variables))
+            .collect();
+        if written.qualifier.is_some() || written.name == "?" || variables.contains(&written.name) {
+            return written;
+        }
+        if let Some(found) = self.type_named(&written.name, file) {
+            let qualified = self.qualified_type_name(found.file, found.node);
+            written.qualifier = qualified.rsplit_once('.').map(|(qualifier, _)| qualifier.to_owned());
+        }
+        written
     }
 
     /// What a `var` is: the type of the expression it is given. An
@@ -787,7 +813,14 @@ impl Snapshot {
 
     /// The declaration of a type, by the type as written.
     pub fn of_type<'a>(&'a self, written: &Type, from: &'a FileView) -> Option<Found<'a>> {
-        let mut declaration = self.type_named(&written.name, from)?;
+        let qualified = written
+            .qualifier
+            .as_ref()
+            .and_then(|qualifier| self.type_named(&format!("{qualifier}.{}", written.name), from));
+        let mut declaration = match qualified {
+            Some(declaration) => declaration,
+            None => self.type_named(&written.name, from)?,
+        };
         declaration.bindings = bound(declaration.node, &written.arguments);
         Some(declaration)
     }
@@ -1292,6 +1325,7 @@ fn substituted(written: Type, bindings: &Bindings) -> Type {
             .collect(),
         dimensions: written.dimensions,
         wildcard: written.wildcard,
+        qualifier: written.qualifier,
     }
 }
 
@@ -1304,6 +1338,11 @@ pub fn type_of_node(node: &Syn) -> Type {
                 .first()
                 .map(|child| last_segment(&child.text).to_owned())
                 .unwrap_or_default();
+            let qualifier = node
+                .children
+                .first()
+                .filter(|child| child.kind == "scoped_type_identifier")
+                .and_then(|child| qualifier_of(&child.text));
             let arguments = node
                 .first("type_arguments")
                 .map(|arguments| {
@@ -1318,6 +1357,7 @@ pub fn type_of_node(node: &Syn) -> Type {
             Type {
                 name,
                 arguments,
+                qualifier,
                 ..Type::default()
             }
         }
@@ -1347,8 +1387,20 @@ pub fn type_of_node(node: &Syn) -> Type {
                 None => Type::named("?"),
             }
         }
-        _ => Type::named(last_segment(node.text.trim())),
+        _ => {
+            let mut written = Type::named(last_segment(node.text.trim()));
+            if node.kind == "scoped_type_identifier" {
+                written.qualifier = qualifier_of(node.text.trim());
+            }
+            written
+        }
     }
+}
+
+/// `org.demo` of `org.demo.Shape`: what a dotted name is qualified with.
+fn qualifier_of(name: &str) -> Option<String> {
+    let name: String = name.chars().filter(|character| !character.is_whitespace()).collect();
+    name.rsplit_once('.').map(|(qualifier, _)| qualifier.to_owned())
 }
 
 fn last_segment(name: &str) -> &str {
@@ -1383,6 +1435,34 @@ pub fn types_of(file: &FileView) -> Vec<(&str, &Syn)> {
 /// An anonymous class: `new Section() { … }` declares a type of its own.
 pub fn is_anonymous_class(node: &Syn) -> bool {
     node.kind == "object_creation_expression" && node.first("class_body").is_some()
+}
+
+/// The type nodes below `node` that no other type node holds.
+fn outermost_types(node: &Syn) -> Vec<&Syn> {
+    let mut found = Vec::new();
+    for child in &node.children {
+        if matches!(
+            child.kind.as_str(),
+            "type_identifier" | "generic_type" | "scoped_type_identifier"
+        ) {
+            found.push(child);
+        } else {
+            found.extend(outermost_types(child));
+        }
+    }
+    found
+}
+
+/// A declaration a call can mean.
+fn is_callable(node: &Syn) -> bool {
+    matches!(
+        node.kind.as_str(),
+        "method_declaration"
+            | "constructor_declaration"
+            | "compact_constructor_declaration"
+            | "annotation_type_element_declaration"
+            | "function_declaration"
+    )
 }
 
 pub fn is_type_declaration(node: &Syn) -> bool {
@@ -1546,9 +1626,10 @@ fn recovered_members(body: &Syn) -> Vec<(&Syn, &Syn)> {
     let owned: std::collections::BTreeSet<Position> = nodes
         .iter()
         .filter(|node| {
+            // A lambda's or a record's parameters are not a method's.
             matches!(
                 node.kind.as_str(),
-                "method_declaration" | "constructor_declaration"
+                "method_declaration" | "constructor_declaration" | "lambda_expression" | "record_declaration"
             )
         })
         .filter_map(|node| node.child("parameters"))
@@ -1884,8 +1965,16 @@ impl Snapshot {
                     .type_of_expression(object, file)
                     .and_then(|receiver| self.of_type(&receiver, file))
                     .and_then(|owner| self.member(&owner, &name.text, None));
-                member.or_else(|| self.name_in_scope(&name.text, file, name.start))
+                // `org.demo.Shape.ORIGIN`: a type named in full.
+                member
+                    .or_else(|| self.dotted_type(parent, file))
+                    .or_else(|| self.name_in_scope(&name.text, file, name.start))
             }
+            // `import static org.demo.Shape.Kind.ROUND;`: the types on the
+            // way are named in full.
+            "scoped_identifier" if names_it("name") => self
+                .dotted_type(parent, file)
+                .or_else(|| self.name_in_scope(&name.text, file, name.start)),
             "object_creation_expression" => self.created(parent, file),
             "method_reference" => {
                 let receiver = parent.children.first()?;
@@ -1917,6 +2006,20 @@ impl Snapshot {
             }
             _ => self.name_in_scope(&name.text, file, name.start),
         }
+    }
+
+    /// The type a dotted name of identifiers names in full
+    /// (`org.demo.Outer.Inner`), if it names one.
+    fn dotted_type<'a>(&'a self, dotted: &Syn, file: &'a FileView) -> Option<Found<'a>> {
+        let written: String = dotted.text.chars().filter(|character| !character.is_whitespace()).collect();
+        let is_dotted = written.contains('.')
+            && written
+                .split('.')
+                .all(|part| !part.is_empty() && part.chars().all(|character| character.is_alphanumeric() || matches!(character, '_' | '$')));
+        if !is_dotted {
+            return None;
+        }
+        self.type_named(&written, file)
     }
 
     /// The type a `switch` switches on: a `case` label names its members.
@@ -2636,6 +2739,249 @@ impl Snapshot {
     }
 }
 
+/// Where javadoc comments name a declaration — `{@link Type#member(String)}`,
+/// `{@linkplain …}`, `{@value …}`, `@see`, `@throws` — which jdtls lists
+/// among its references and renames with it.
+impl Snapshot {
+    pub fn javadoc_uses_of<'a>(&'a self, declaration: &Found<'_>) -> Vec<(&'a Url, Position)> {
+        if declaration.file.language != Language::Java {
+            return Vec::new();
+        }
+        let wanted = (&declaration.file.uri, declaration.selection());
+        let name = declaration.name.text.as_str();
+        let mut places = Vec::new();
+        for file in self.files.iter().filter(|file| !file.library && file.text.contains(name)) {
+            if file.language != Language::Java {
+                continue;
+            }
+            for comment in file.tree.walk() {
+                if comment.kind != "block_comment"
+                    || !comment.text.starts_with("/**")
+                    || !comment.text.contains(name)
+                {
+                    continue;
+                }
+                for (written, start) in javadoc_references(comment) {
+                    for (at, found) in self.javadoc_reference_names(file, comment, &written, start, name) {
+                        if (&found.file.uri, found.selection()) == wanted {
+                            places.push((&file.uri, at));
+                        }
+                    }
+                }
+            }
+        }
+        places
+    }
+
+    /// The names called `name` in a javadoc reference written at `start`,
+    /// each with what it means: the types of `pkg.Outer.Inner`, and the
+    /// member after `#`, its overload picked by the parameter types written.
+    fn javadoc_reference_names<'a>(
+        &'a self,
+        file: &'a FileView,
+        comment: &Syn,
+        written: &str,
+        start: Position,
+        name: &str,
+    ) -> Vec<(Position, Found<'a>)> {
+        let mut named = Vec::new();
+        let (type_part, member_part) = match written.split_once('#') {
+            Some((type_part, member)) => (type_part, Some(member)),
+            None => (written, None),
+        };
+        let column_of = |offset: usize| Position {
+            line: start.line,
+            column: start.column + written[..offset].encode_utf16().count() as u32,
+        };
+        // A type named with its qualifier is reported where the qualifier
+        // starts, as jdtls reports `org.demo.Outer.Inner`.
+        let mut offset = 0;
+        for segment in type_part.split('.') {
+            if segment == name {
+                if let Some(found) = self.type_named(&type_part[..offset + segment.len()], file) {
+                    named.push((column_of(0), found));
+                }
+            }
+            offset += segment.len() + 1;
+        }
+        let Some(member) = member_part else {
+            return named;
+        };
+        let (member_name, written_parameters) = match member.split_once('(') {
+            Some((member_name, rest)) => (member_name, Some(rest.trim_end_matches(')'))),
+            None => (member, None),
+        };
+        // The types of `#member(Document, int)` are references too.
+        if let Some(written_parameters) = written_parameters {
+            let mut offset = type_part.len() + 1 + member_name.len() + 1;
+            for parameter in written_parameters.split(',') {
+                let leading = parameter.len() - parameter.trim_start().len();
+                let type_written = parameter.split_whitespace().next().unwrap_or_default();
+                let raw = type_written.split('<').next().unwrap_or_default().trim_end_matches("...");
+                let raw = raw.trim_end_matches("[]");
+                if raw.rsplit('.').next() == Some(name) {
+                    if let Some(found) = self.type_named(raw, file) {
+                        named.push((column_of(offset + leading), found));
+                    }
+                }
+                offset += parameter.len() + 1;
+            }
+        }
+        if member_name != name {
+            return named;
+        }
+        let owner = if type_part.is_empty() {
+            self.documented_type(file, comment)
+        } else {
+            self.type_named(type_part, file)
+        };
+        let Some(owner) = owner else {
+            return named;
+        };
+        let candidates = self.members_called(&owner, name);
+        let wanted_types: Option<Vec<String>> = written_parameters.map(|written_parameters| {
+            written_parameters
+                .split(',')
+                .map(str::trim)
+                .filter(|parameter| !parameter.is_empty())
+                .map(|parameter| {
+                    // `String name` or `java.lang.String`: the type, simply named.
+                    let written = parameter.split_whitespace().next().unwrap_or(parameter);
+                    let raw = written.split('<').next().unwrap_or(written);
+                    let simple = raw.rsplit('.').next().unwrap_or(raw);
+                    format!("{simple}{}", if written.ends_with("...") { "..." } else { "" })
+                })
+                .collect()
+        });
+        let chosen = candidates.into_iter().find(|candidate| {
+            let Some(wanted_types) = &wanted_types else {
+                return true;
+            };
+            if !matches!(
+                candidate.node.kind.as_str(),
+                "method_declaration" | "constructor_declaration"
+            ) {
+                return false;
+            }
+            let declared: Vec<String> = parameters(candidate.node, &Bindings::new())
+                .into_iter()
+                .map(|parameter| {
+                    let raw = parameter.written.split('<').next().unwrap_or_default().to_owned();
+                    let raw = raw.rsplit('.').next().unwrap_or_default().to_owned();
+                    let dimensions = "[]".repeat(parameter.written.matches("[]").count());
+                    let raw = raw.trim_end_matches("[]").to_owned();
+                    if parameter.spread {
+                        format!("{raw}{dimensions}...")
+                    } else {
+                        format!("{raw}{dimensions}")
+                    }
+                })
+                .collect();
+            declared == *wanted_types
+        });
+        if let Some(chosen) = chosen {
+            named.push((column_of(type_part.len() + 1), chosen));
+        }
+        named
+    }
+
+    /// The type a javadoc's `#member` belongs to: the type it documents,
+    /// else the one it is written in.
+    fn documented_type<'a>(&'a self, file: &'a FileView, comment: &Syn) -> Option<Found<'a>> {
+        let after = path_to(&file.tree, comment.start)
+            .into_iter()
+            .rev()
+            .find_map(|parent| {
+                let index = parent
+                    .children
+                    .iter()
+                    .position(|child| child.start == comment.start && child.kind == comment.kind)?;
+                parent.children[index + 1..]
+                    .iter()
+                    .find(|next| !matches!(next.kind.as_str(), "line_comment" | "block_comment"))
+            });
+        if let Some(documented) = after.filter(|node| is_type_declaration(node)) {
+            return self.enclosing(file, documented.child("name")?.start);
+        }
+        self.enclosing(file, comment.start)
+    }
+}
+
+/// The references a javadoc comment writes, each with where it starts:
+/// what follows `{@link`, `{@linkplain`, `{@value`, `@see`, `@throws` and
+/// `@exception`, on the same line or the next.
+fn javadoc_references(comment: &Syn) -> Vec<(String, Position)> {
+    const TAGS: &[&str] = &["{@link", "{@linkplain", "{@value", "@see", "@throws", "@exception"];
+    let text = &comment.text;
+    let mut found = Vec::new();
+    let position_of = |offset: usize| {
+        let before = &text[..offset];
+        let line = before.matches('\n').count() as u32;
+        let line_start = before.rfind('\n').map_or(0, |at| at + 1);
+        let column = before[line_start..].encode_utf16().count() as u32;
+        if line == 0 {
+            Position {
+                line: comment.start.line,
+                column: comment.start.column + column,
+            }
+        } else {
+            Position {
+                line: comment.start.line + line,
+                column,
+            }
+        }
+    };
+    for tag in TAGS {
+        let mut from = 0;
+        while let Some(at) = text[from..].find(tag) {
+            let after = from + at + tag.len();
+            from = after;
+            // `{@link` must not be the start of `{@linkplain`.
+            if text[after..].starts_with(|character: char| character.is_alphanumeric()) {
+                continue;
+            }
+            // Spaces, and a line break with the next line's margin.
+            let mut start = after;
+            let bytes = text.as_bytes();
+            let mut crossed = false;
+            while start < text.len() {
+                match bytes[start] {
+                    b' ' | b'\t' | b'\r' => start += 1,
+                    b'\n' if !crossed => {
+                        crossed = true;
+                        start += 1;
+                        while start < text.len() && matches!(bytes[start], b' ' | b'\t') {
+                            start += 1;
+                        }
+                        if text[start..].starts_with('*') && !text[start..].starts_with("*/") {
+                            start += 1;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            let mut end = start;
+            let mut depth = 0usize;
+            for (offset, character) in text[start..].char_indices() {
+                match character {
+                    '(' => depth += 1,
+                    ')' => depth = depth.saturating_sub(1),
+                    '}' if depth == 0 => break,
+                    _ if character.is_whitespace() && depth == 0 => break,
+                    _ => {}
+                }
+                end = start + offset + character.len_utf8();
+            }
+            let written = text[start..end].replace(['\n', '\r', '*'], " ");
+            let written: String = written.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !written.is_empty() && !written.starts_with('"') && !written.starts_with('<') {
+                found.push((written, position_of(start)));
+            }
+        }
+    }
+    found
+}
+
 /// A rename changes one name, but a name can be two declarations tied
 /// together: a class and its constructors, a record component and its
 /// accessor, a method and the ones it overrides or is overridden by.
@@ -2767,7 +3113,7 @@ impl Snapshot {
 
     /// Every method of the same name and arity declared by a type tied to
     /// this one by inheritance — what jdtls renames along with an override.
-    fn overrides_of<'a>(&'a self, method: &Found<'a>) -> Vec<Found<'a>> {
+    pub fn overrides_of<'a>(&'a self, method: &Found<'a>) -> Vec<Found<'a>> {
         let Some(owner) = self.owning_type(method) else {
             return Vec::new();
         };
@@ -2791,6 +3137,76 @@ impl Snapshot {
             }
         }
         found
+    }
+
+    /// The methods whose calls may run `method`, as jdtls counts them among
+    /// its references: the ones it overrides up its supertypes and the ones
+    /// overriding it down its subtypes, with the same parameter types — not
+    /// a sibling's, and none for a static or private method.
+    pub fn dispatching_to<'a>(&'a self, method: &Found<'a>) -> Vec<Found<'a>> {
+        if method.node.kind != "method_declaration" {
+            return Vec::new();
+        }
+        let modifiers = method.node.first("modifiers").map(|modifiers| modifiers.text.as_str()).unwrap_or_default();
+        if modifiers.split_whitespace().any(|word| word == "static" || word == "private") {
+            return Vec::new();
+        }
+        let Some(owner) = self.owning_type(method) else {
+            return Vec::new();
+        };
+        let mut related: Vec<Found<'a>> = Vec::new();
+        let mut seen = vec![(owner.file.uri.clone(), owner.name.start)];
+        let mut queue: std::collections::VecDeque<Found<'a>> = self.supertypes(&owner).into();
+        while let Some(supertype) = queue.pop_front() {
+            let place = (supertype.file.uri.clone(), supertype.name.start);
+            if seen.contains(&place) || seen.len() > 64 {
+                continue;
+            }
+            seen.push(place);
+            queue.extend(self.supertypes(&supertype));
+            related.push(supertype);
+        }
+        related.extend(self.subtypes_of(&owner));
+        let wanted = self.erased_parameter_types(method);
+        let mut found = Vec::new();
+        for relative in related {
+            for (member, named) in members_of(relative.node) {
+                if member.kind != "method_declaration" || named.text != method.name.text {
+                    continue;
+                }
+                let candidate = Found {
+                    file: relative.file,
+                    node: member,
+                    name: named,
+                    bindings: Bindings::new(),
+                };
+                if self.erased_parameter_types(&candidate) == wanted {
+                    found.push(candidate);
+                }
+            }
+        }
+        found
+    }
+
+    /// A method's parameter types with their arguments dropped, and a type
+    /// variable of the method or its type as `?`: what two overriding
+    /// declarations agree on however each names its type parameters.
+    fn erased_parameter_types(&self, method: &Found<'_>) -> Vec<String> {
+        let mut variables = type_parameter_names(method.node);
+        if let Some(owner) = self.owning_type(method) {
+            variables.extend(type_parameter_names(owner.node));
+        }
+        parameters(method.node, &Bindings::new())
+            .into_iter()
+            .map(|parameter| {
+                let raw = parameter.written.split('<').next().unwrap_or_default();
+                let dimensions = parameter.written.matches("[]").count();
+                let raw = raw.trim_end_matches("[]");
+                let raw = raw.rsplit('.').next().unwrap_or(raw);
+                let name = if variables.iter().any(|variable| variable == raw) { "?" } else { raw };
+                format!("{name}{}{}", "[]".repeat(dimensions), if parameter.spread { "..." } else { "" })
+            })
+            .collect()
     }
 
     /// The method `method` overrides or implements: the nearest one of the
@@ -2983,55 +3399,52 @@ impl Snapshot {
 impl Snapshot {
     /// Every type declared below `of`, however deep.
     pub fn subtypes_of<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
-        let mut below: Vec<(&Url, Position)> = vec![(&of.file.uri, of.name.start)];
-        let mut grew = true;
-        while grew {
-            grew = false;
-            for file in &self.files {
-                for (_, declaration) in types_of(file) {
-                    let Some(named) = declaration.child("name") else {
-                        continue;
-                    };
-                    let here = (&file.uri, named.start);
-                    if below.contains(&here) {
-                        continue;
-                    }
-                    let candidate = Found {
-                        file,
-                        node: declaration,
-                        name: named,
-                        bindings: Bindings::new(),
-                    };
-                    let extends_one = self
-                        .supertypes(&candidate)
-                        .iter()
-                        .any(|supertype| below.contains(&(&supertype.file.uri, supertype.name.start)));
-                    if extends_one {
-                        below.push(here);
-                        grew = true;
-                    }
+        let wanted = (&of.file.uri, of.name.start);
+        let mut below = Vec::new();
+        for file in self.files.iter().filter(|file| !file.library) {
+            // Named types and anonymous classes (`new Iterator<T>() { … }`).
+            let declarations = file.tree.walk().into_iter().filter_map(|node| {
+                if is_type_declaration(node) {
+                    Some((node, node.child("name")?))
+                } else if is_anonymous_class(node) {
+                    Some((node, node.child("type")?))
+                } else {
+                    None
+                }
+            });
+            for (declaration, named) in declarations {
+                if (&file.uri, named.start) == wanted {
+                    continue;
+                }
+                let candidate = Found {
+                    file,
+                    node: declaration,
+                    name: named,
+                    bindings: Bindings::new(),
+                };
+                // Through a library type too: `extends ArrayList` is a
+                // `Collection`.
+                if self.ancestors(&candidate).contains(&wanted) {
+                    below.push(candidate);
                 }
             }
         }
-        below.remove(0);
         below
-            .into_iter()
-            .filter_map(|(uri, at)| self.type_at(uri, at))
-            .collect()
     }
 
-    fn type_at(&self, uri: &Url, at: Position) -> Option<Found<'_>> {
-        let file = self.file(uri)?;
-        let declaration = types_of(file)
-            .into_iter()
-            .map(|(_, declaration)| declaration)
-            .find(|declaration| declaration.child("name").is_some_and(|named| named.start == at))?;
-        Some(Found {
-            file,
-            node: declaration,
-            name: declaration.child("name")?,
-            bindings: Bindings::new(),
-        })
+    /// Every type above `of`, however far, as places.
+    fn ancestors<'a>(&'a self, of: &Found<'a>) -> Vec<(&'a Url, Position)> {
+        let mut seen: Vec<(&'a Url, Position)> = Vec::new();
+        let mut queue: std::collections::VecDeque<Found<'a>> = self.supertypes(of).into();
+        while let Some(supertype) = queue.pop_front() {
+            let place = (&supertype.file.uri, supertype.name.start);
+            if seen.contains(&place) || seen.len() > 64 {
+                continue;
+            }
+            seen.push(place);
+            queue.extend(self.supertypes(&supertype));
+        }
+        seen
     }
 
     /// The declarations `textDocument/implementation` answers with: the
@@ -3044,19 +3457,30 @@ impl Snapshot {
         let Some(file) = self.file(uri) else {
             return Vec::new();
         };
+        let at_its_declaration = found.file.uri == *uri && (found.name.covers(at) || found.name.end == at);
+        let itself = || Found {
+            file: found.file,
+            node: found.node,
+            name: found.name,
+            bindings: Bindings::new(),
+        };
         if is_type_declaration(found.node) {
-            let at_its_declaration =
-                found.file.uri == *uri && found.name.covers(at) || found.name.end == at;
+            // A use of a class names the class too; an interface or an
+            // abstract class only when nothing is below it.
             let mut answer = Vec::new();
-            if !at_its_declaration {
-                answer.push(Found {
-                    file: found.file,
-                    node: found.node,
-                    name: found.name,
-                    bindings: Bindings::new(),
-                });
+            let concrete = found.node.kind != "interface_declaration"
+                && found.node.kind != "annotation_type_declaration"
+                && !found
+                    .node
+                    .first("modifiers")
+                    .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|word| word == "abstract"));
+            if !at_its_declaration && concrete {
+                answer.push(itself());
             }
             answer.extend(self.subtypes_of(&found));
+            if answer.is_empty() && !at_its_declaration {
+                answer.push(itself());
+            }
             return answer;
         }
         if found.node.kind != "method_declaration" {
@@ -3067,13 +3491,8 @@ impl Snapshot {
             .iter()
             .any(|node| node.children.iter().any(|child| child.kind == "super"));
         let mut answer = Vec::new();
-        if !is_abstract(found.node) {
-            answer.push(Found {
-                file: found.file,
-                node: found.node,
-                name: found.name,
-                bindings: Bindings::new(),
-            });
+        if !is_abstract(found.node) && !at_its_declaration {
+            answer.push(itself());
         }
         if through_super {
             return answer;
@@ -3081,13 +3500,18 @@ impl Snapshot {
         let Some(owner) = self.owning_type(&found) else {
             return answer;
         };
-        let arity = parameters_of(found.node).len();
+        let wanted = self.erased_parameter_types(&found);
         for subtype in self.subtypes_of(&owner) {
             let implementing = members_of(subtype.node).into_iter().find(|(member, named)| {
                 member.kind == "method_declaration"
                     && named.text == found.name.text
-                    && parameters_of(member).len() == arity
                     && !is_abstract(member)
+                    && self.erased_parameter_types(&Found {
+                        file: subtype.file,
+                        node: member,
+                        name: named,
+                        bindings: Bindings::new(),
+                    }) == wanted
             });
             if let Some((member, named)) = implementing {
                 answer.push(Found {
@@ -3098,7 +3522,7 @@ impl Snapshot {
                 });
             }
         }
-        if answer.is_empty() {
+        if answer.is_empty() && !at_its_declaration {
             answer.push(found);
         }
         answer
