@@ -2797,10 +2797,10 @@ impl Snapshot {
         // starts, as jdtls reports `org.demo.Outer.Inner`.
         let mut offset = 0;
         for segment in type_part.split('.') {
-            if segment == name {
-                if let Some(found) = self.type_named(&type_part[..offset + segment.len()], file) {
-                    named.push((column_of(0), found));
-                }
+            if segment == name
+                && let Some(found) = self.type_named(&type_part[..offset + segment.len()], file)
+            {
+                named.push((column_of(0), found));
             }
             offset += segment.len() + 1;
         }
@@ -2819,10 +2819,10 @@ impl Snapshot {
                 let type_written = parameter.split_whitespace().next().unwrap_or_default();
                 let raw = type_written.split('<').next().unwrap_or_default().trim_end_matches("...");
                 let raw = raw.trim_end_matches("[]");
-                if raw.rsplit('.').next() == Some(name) {
-                    if let Some(found) = self.type_named(raw, file) {
-                        named.push((column_of(offset + leading), found));
-                    }
+                if raw.rsplit('.').next() == Some(name)
+                    && let Some(found) = self.type_named(raw, file)
+                {
+                    named.push((column_of(offset + leading), found));
                 }
                 offset += parameter.len() + 1;
             }
