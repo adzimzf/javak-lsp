@@ -38,5 +38,6 @@
 mod cases;
 mod compat;
 mod fixture;
+mod benchmark;
 mod request;
 mod server;

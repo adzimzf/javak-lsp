@@ -152,4 +152,21 @@ expressions) against a debug build.
 ```sh
 cargo test                                   # unit tests
 INTEGRATION=1 cargo test --lib integrationtest   # every case under src/integrationtest/cases
+just benchmark                                  # javak-lsp vs jdtls on real projects
+just benchmark jsoup                            # one project
+just benchmark "" random                        # random questions; the seed is printed
+just benchmark jsoup 42                         # replay seed 42 exactly
+just benchmark-quick                            # reuse jdtls's recorded answers
 ```
+
+`just benchmark` clones the projects listed in
+`src/integrationtest/benchmark/catalog.rs`, fetches their libraries with Maven
+or Gradle, asks jdtls questions chosen from their code (navigation, hover,
+references, rename, hierarchies, outline, folding, semantic tokens,
+formatting, and completion and diagnostics after an edit), asks javak-lsp
+the same about a clean copy, and shows only the answers that differ.
+Recordings and `report.md` are written to `target/jdtls-compat`. jdtls is
+`$JDTLS_CMD`, the `jdtls` on the `PATH`, or a milestone downloaded into
+`~/.cache/javak-lsp/jdtls`. The `jdtls compat` workflow runs the same on
+every pull request and keeps one comment on it up to date with the result;
+the variables it reads are listed in `src/integrationtest/benchmark/mod.rs`.

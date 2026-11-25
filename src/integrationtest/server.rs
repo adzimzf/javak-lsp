@@ -32,6 +32,8 @@ const PATIENCE: Duration = Duration::from_secs(5);
 /// The same, for a server in another process: a JVM answers its first
 /// requests while it is still warming up.
 const CHILD_PATIENCE: Duration = Duration::from_secs(30);
+/// How often a server's import says it is still going.
+const HEARTBEAT: Duration = Duration::from_secs(15);
 /// How long pushed diagnostics must stay unchanged to be the answer.
 const QUIET: Duration = Duration::from_secs(3);
 /// `FileChangeType` of `workspace/didChangeWatchedFiles`.
@@ -164,6 +166,147 @@ impl Session {
         session
     }
 
+    /// Another server, run as `program args…` inside a real project at
+    /// `project_root`: the project's files are already on disk, every path
+    /// is read from the project down, and nothing is written. Documents are
+    /// opened one at a time ([`Self::open_document`]).
+    pub(super) async fn spawn_in_project(
+        program: &str,
+        arguments: &[String],
+        project_root: &Path,
+        stderr: std::process::Stdio,
+        patience: Duration,
+    ) -> Self {
+        let mut child = tokio::process::Command::new(program)
+            .args(arguments)
+            .current_dir(project_root)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(stderr)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap_or_else(|error| panic!("{program} starts: {error}"));
+        let reader = child.stdout.take().expect("a piped stdout");
+        let writer = child.stdin.take().expect("a piped stdin");
+        let root = directory_url(project_root);
+        let mut session = Self {
+            writer: Box::new(writer),
+            incoming: frames(Box::new(reader)),
+            next_id: 0,
+            diagnosed: HashSet::new(),
+            published: HashMap::new(),
+            project: root.clone(),
+            root,
+            disk: None,
+            patience,
+            capabilities: Value::Null,
+            _host: None,
+            _child: Some(child),
+            _scratch: None,
+        };
+        session.initialize().await;
+        session
+    }
+
+    /// Waits until the server says it has read the project, then until it
+    /// has been quiet for a moment. A message (`language/status`, a log or a
+    /// shown message) containing one of `markers`' texts is the signal; each
+    /// marker names how long the quiet after it must last. `false` when
+    /// `deadline` passes first, or the server goes away.
+    ///
+    /// What the server says meanwhile is printed as `[label] …`, and a line
+    /// every [`HEARTBEAT`] says how long it has been, so a long import is
+    /// seen to be moving.
+    pub(super) async fn wait_until_ready(
+        &mut self,
+        label: &str,
+        markers: &[(&str, Duration)],
+        deadline: Instant,
+    ) -> bool {
+        let started = Instant::now();
+        let mut heartbeat = started + HEARTBEAT;
+        let mut quiet: Option<(Duration, Instant)> = None;
+        let mut last_said = String::new();
+        loop {
+            let now = Instant::now();
+            if let Some((_, until)) = quiet {
+                if now >= until {
+                    return true;
+                }
+            }
+            if now >= deadline {
+                eprintln!("    [{label}] not ready after {}s", started.elapsed().as_secs());
+                return quiet.is_some();
+            }
+            if now >= heartbeat {
+                eprintln!("    [{label}] still importing… {}s", started.elapsed().as_secs());
+                heartbeat = now + HEARTBEAT;
+            }
+            let wait = quiet
+                .map_or(deadline, |(_, until)| until.min(deadline))
+                .min(heartbeat);
+            let message = match timeout_at(wait, self.incoming.recv()).await {
+                Err(_) => continue,
+                Ok(None) => {
+                    eprintln!("    [{label}] the server went away");
+                    return false;
+                }
+                Ok(Some(message)) => message,
+            };
+            let said = what_it_says(&message);
+            if !said.is_empty() && said != last_said {
+                eprintln!("    [{label}] {said}");
+                last_said = said.clone();
+            }
+            let text = format!(
+                "{} {}",
+                message["params"]["type"].as_str().unwrap_or_default(),
+                message["params"]["message"].as_str().unwrap_or_default()
+            );
+            if let Some((_, after)) = markers.iter().find(|(marker, _)| text.contains(marker)) {
+                let after = quiet.map_or(*after, |(current, _)| current.min(*after));
+                quiet = Some((after, Instant::now() + after));
+            } else if let Some((after, _)) = quiet {
+                // Still talking: the quiet starts again.
+                quiet = Some((after, Instant::now() + after));
+            }
+            self.answer_server(&message).await;
+        }
+    }
+
+    /// Opens the file at `path` (below the root) with `text`. Diagnostics
+    /// published for it before are forgotten, so the next ones are fresh.
+    pub(super) async fn open_document(&mut self, path: &str, text: &str) {
+        self.published.remove(self.uri(path).as_str());
+        self.did_open(path, text).await;
+    }
+
+    /// Replaces the open file's text, as an editor with full sync does.
+    pub(super) async fn change_document(&mut self, path: &str, version: i32, text: &str) {
+        let uri = self.uri(path);
+        self.published.remove(uri.as_str());
+        let params = json!({
+            "textDocument": {"uri": uri, "version": version},
+            "contentChanges": [{"text": text}],
+        });
+        self.notify("textDocument/didChange", params).await;
+    }
+
+    pub(super) async fn close_document(&mut self, path: &str) {
+        let document = json!({"uri": self.uri(path)});
+        self.notify("textDocument/didClose", json!({"textDocument": document}))
+            .await;
+        self.published.remove(self.uri(path).as_str());
+    }
+
+    /// Asks the server to stop, without waiting long for it.
+    pub(super) async fn shutdown(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        self.request("shutdown", Value::Null, OnError::AnswerNothing, deadline)
+            .await;
+        self.notify("exit", Value::Null).await;
+    }
+
     /// Puts the fixture in front of the server and waits until it has read
     /// it: on disk where there is one, and the files an editor would have
     /// open opened.
@@ -199,6 +342,12 @@ impl Session {
         }
         self.diagnosed.clear();
         self.published.clear();
+    }
+
+    /// Whether the server answers `textDocument/diagnostic` (pull), as it
+    /// said in its `initialize` answer; otherwise it only pushes them.
+    pub(super) fn pulls_diagnostics(&self) -> bool {
+        !self.capabilities["diagnosticProvider"].is_null()
     }
 
     /// The token types and modifiers the server's semantic tokens index.
@@ -456,6 +605,8 @@ impl Session {
                         "formats": ["relative"],
                     },
                 },
+                // Progress while a project is imported, for whoever watches.
+                "window": {"workDoneProgress": true},
                 "workspace": {
                     "workspaceEdit": {"documentChanges": true},
                     "symbol": {},
@@ -489,6 +640,34 @@ impl Session {
         });
         self.notify("textDocument/didOpen", json!({"textDocument": document}))
             .await;
+    }
+}
+
+/// What a message from the server tells a person watching: a status, a log
+/// line, a progress report. Empty for everything else.
+fn what_it_says(message: &Value) -> String {
+    let params = &message["params"];
+    let text = |value: &Value| value.as_str().unwrap_or_default().trim().to_owned();
+    match message["method"].as_str().unwrap_or_default() {
+        "window/logMessage" | "window/showMessage" => text(&params["message"]),
+        "language/status" => format!("{}: {}", text(&params["type"]), text(&params["message"])),
+        "$/progress" => {
+            let value = &params["value"];
+            let parts: Vec<String> = [text(&value["title"]), text(&value["message"])]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect();
+            let percentage = value["percentage"]
+                .as_u64()
+                .map(|percentage| format!(" ({percentage}%)"))
+                .unwrap_or_default();
+            match value["kind"].as_str() {
+                Some("end") if parts.is_empty() => "done".to_owned(),
+                _ if parts.is_empty() => String::new(),
+                _ => format!("{}{percentage}", parts.join(" — ")),
+            }
+        }
+        _ => String::new(),
     }
 }
 
