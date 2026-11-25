@@ -5,4 +5,5 @@ public class E123 {
         return x;
     }
 }
-//= expected
+//= expected (pending)
+/src/main/java/test1/E123.java:4:16  x cannot be resolved to a variable

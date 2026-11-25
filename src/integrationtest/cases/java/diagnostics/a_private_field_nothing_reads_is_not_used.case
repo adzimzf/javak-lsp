@@ -1,0 +1,25 @@
+//- /src/main/java/p/Fields.java
+$0package p;
+public class Fields {
+    private int unused;
+    private int read = 1;
+    private int written;
+    @Deprecated private int annotated;
+    private static final long serialVersionUID = 1L;
+    private int a, b;
+    private int self;
+    @SuppressWarnings("unused") private int quiet;
+    int packagePrivate;
+    void w() { written = 2; a = b; this.self = 3; System.out.println(read); }
+    static class Inner {
+        private String alsoUnused;
+    }
+}
+//= expected
+/src/main/java/p/Fields.java:3:17  The value of the field Fields.unused is not used
+/src/main/java/p/Fields.java:5:17  The value of the field Fields.written is not used
+/src/main/java/p/Fields.java:6:29  The value of the field Fields.annotated is not used
+/src/main/java/p/Fields.java:7:31  The value of the field Fields.serialVersionUID is not used
+/src/main/java/p/Fields.java:8:17  The value of the field Fields.a is not used
+/src/main/java/p/Fields.java:9:17  The value of the field Fields.self is not used
+/src/main/java/p/Fields.java:14:24  The value of the field Fields.Inner.alsoUnused is not used

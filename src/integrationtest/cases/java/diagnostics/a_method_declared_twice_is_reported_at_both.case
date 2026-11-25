@@ -1,0 +1,26 @@
+//- /src/main/java/p/Outer.java
+$0package p;
+import java.util.List;
+public class Outer {
+    Outer() {}
+    Outer() {}
+    static class Inner {
+        void m(String s, int[] x) {}
+        void m(String s, int[] x) {}
+        void v(String... s) {}
+        void v(String[] s) {}
+        void g(List<String> l) {}
+        void g(List<String> l) {}
+        void distinct(int x) {}
+        void distinct(long x) {}
+    }
+}
+//= expected
+/src/main/java/p/Outer.java:4:5  Duplicate method Outer() in type Outer
+/src/main/java/p/Outer.java:5:5  Duplicate method Outer() in type Outer
+/src/main/java/p/Outer.java:7:14  Duplicate method m(String, int[]) in type Outer.Inner
+/src/main/java/p/Outer.java:8:14  Duplicate method m(String, int[]) in type Outer.Inner
+/src/main/java/p/Outer.java:9:14  Duplicate method v(String...) in type Outer.Inner
+/src/main/java/p/Outer.java:10:14  Duplicate method v(String[]) in type Outer.Inner
+/src/main/java/p/Outer.java:11:14  Duplicate method g(List<String>) in type Outer.Inner
+/src/main/java/p/Outer.java:12:14  Duplicate method g(List<String>) in type Outer.Inner

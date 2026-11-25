@@ -9,4 +9,8 @@ public class MyTest {
         any();
     }
 }
-//= expected
+//= expected (pending)
+/src/test/java/org/sample/MyTest.java:4:5  Test cannot be resolved to a type
+/src/test/java/org/sample/MyTest.java:6:9  The method assertEquals(int, int, String) is undefined for the type MyTest
+/src/test/java/org/sample/MyTest.java:7:9  The method assertThat(String, boolean) is undefined for the type MyTest
+/src/test/java/org/sample/MyTest.java:8:9  The method any() is undefined for the type MyTest

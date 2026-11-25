@@ -1,3 +1,4 @@
 //- /src/main/java/foo/Foo.java
 $0package foo;
 //= expected
+(nothing)

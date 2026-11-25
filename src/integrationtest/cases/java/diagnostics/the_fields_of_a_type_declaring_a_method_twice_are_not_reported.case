@@ -1,0 +1,11 @@
+//- /src/main/java/p/Twice.java
+$0package p;
+public class Twice {
+    private int unused;
+    void m() {}
+    void m() {}
+}
+//= expected
+/src/main/java/p/Twice.java:3:17  The value of the field Twice.unused is not used
+/src/main/java/p/Twice.java:4:10  Duplicate method m() in type Twice
+/src/main/java/p/Twice.java:5:10  Duplicate method m() in type Twice

@@ -1,0 +1,18 @@
+//- /src/main/java/p/Imports.java
+$0package p;
+import java.util.List;
+import java.util.Map;
+import java.io.File;
+import java.util.Set;
+import java.util.Map;
+import static java.lang.Math.abs;
+import static java.lang.Math.max;
+/** see {@link File} */
+public class Imports {
+    int f(Map<String, String> m) { return max(1, 2); }
+}
+//= expected
+/src/main/java/p/Imports.java:2:8  The import java.util.List is never used
+/src/main/java/p/Imports.java:5:8  The import java.util.Set is never used
+/src/main/java/p/Imports.java:6:8  The import java.util.Map is never used
+/src/main/java/p/Imports.java:7:15  The import java.lang.Math.abs is never used

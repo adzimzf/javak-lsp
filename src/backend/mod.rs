@@ -19,7 +19,7 @@ use tower_lsp::{Client, LanguageServer};
 use crate::feature::call_hierarchy;
 use crate::debugger::commands::{self as debug_commands, CommandOutcome, DebugCommands};
 use crate::feature::features;
-use crate::feature::semantic::{Found, Snapshot};
+use crate::feature::semantic::{compiler, Found, Snapshot};
 use crate::indexer::Indexer;
 use crate::language::Language;
 use crate::parser::{Fold, Kind, Outline, Position};
@@ -61,8 +61,9 @@ pub struct Backend {
 impl Backend {
     /// Everything the server has to say about one file: its syntax errors;
     /// where its path names a package it does not declare, that; what it
-    /// writes that the project's Java level does not have; and the calls
-    /// no method of their name can take.
+    /// writes that the project's Java level does not have; the calls no
+    /// method of their name can take; and what else the Eclipse compiler
+    /// says of its text ([`compiler::reports`]).
     fn diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
         let Some(text) = self.indexer.text(uri) else {
             return Vec::new();
@@ -81,11 +82,15 @@ impl Backend {
         }
         let mut findings = syntax.syntax_errors(&text);
         let snapshot = self.indexer.snapshot();
+        let mut reports = Vec::new();
         if let Some(file) = snapshot.file(uri) {
             if let Some(level) = self.indexer.java_level() {
                 findings.extend(syntax.above_java_level(&file.tree, level));
             }
             findings.extend(snapshot.inapplicable_calls(file));
+            let on_source_root = self.indexer.on_source_root(uri);
+            let has_errors = !findings.is_empty() || !diagnostics.is_empty();
+            reports = compiler::reports(file, on_source_root, has_errors);
         }
         findings.sort_by_key(|finding| finding.at);
         diagnostics.extend(
@@ -93,6 +98,7 @@ impl Backend {
                 .into_iter()
                 .map(|finding| reported(finding.at, finding.message)),
         );
+        diagnostics.extend(reports.into_iter().map(reported_by_compiler));
         diagnostics
     }
 
@@ -226,6 +232,19 @@ fn reported(at: Position, message: String) -> Diagnostic {
         severity: Some(DiagnosticSeverity::ERROR),
         message,
         ..Diagnostic::default()
+    }
+}
+
+fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
+    let severity = match report.level {
+        compiler::Level::Error => DiagnosticSeverity::ERROR,
+        compiler::Level::Warning => DiagnosticSeverity::WARNING,
+        compiler::Level::Information => DiagnosticSeverity::INFORMATION,
+    };
+    Diagnostic {
+        severity: Some(severity),
+        tags: report.unnecessary.then(|| vec![DiagnosticTag::UNNECESSARY]),
+        ..reported(report.finding.at, report.finding.message)
     }
 }
 

@@ -1,0 +1,11 @@
+//- /src/main/java/p/Hidden.java
+$0package p;
+public class Hidden {
+    private int unused;
+    static Object o = this;
+    static class Inner {
+        private int alsoUnused;
+    }
+}
+//= expected
+/src/main/java/p/Hidden.java:4:23  Cannot use this in a static context

@@ -789,4 +789,6 @@ public class Test{
         System.out.println("test");
     }
 }
-//= expected
+//= expected (pending)
+/nopackage/Test2.java:1:1  Test2.java is not on the classpath of project compat, only syntax errors are reported
+/nopackage/Test2.java:1:8  Syntax error on token "clas", class expected

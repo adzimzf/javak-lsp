@@ -7,4 +7,5 @@ public interface E {
 $0package test1;
 public class F implements E {
 }
-//= expected
+//= expected (pending)
+/src/main/java/test1/F.java:2:14  The type F must implement the inherited abstract method E.foo()

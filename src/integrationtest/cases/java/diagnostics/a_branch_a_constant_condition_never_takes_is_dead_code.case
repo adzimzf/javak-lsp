@@ -1,0 +1,21 @@
+//- /src/main/java/p/Branches.java
+$0package p;
+public class Branches {
+    boolean f(boolean b) {
+        if (false) {}
+        if ((false)) { return true; }
+        if (!true) { return true; }
+        if (true) { b = !b; } else { b = !b; }
+        if (b) { return true; } else if (false) { return false; }
+        while (b) { if (false) break; }
+        if (b) { return true; }
+        return false;
+    }
+}
+//= expected
+/src/main/java/p/Branches.java:4:20  Dead code
+/src/main/java/p/Branches.java:5:22  Dead code
+/src/main/java/p/Branches.java:6:20  Dead code
+/src/main/java/p/Branches.java:7:36  Dead code
+/src/main/java/p/Branches.java:8:49  Dead code
+/src/main/java/p/Branches.java:9:32  Dead code

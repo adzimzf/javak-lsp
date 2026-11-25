@@ -253,15 +253,26 @@ impl Indexer {
     /// package — no source root above it, nothing below it, or a directory
     /// that is not an identifier.
     pub fn package_of_path(&self, uri: &Url) -> Option<String> {
+        dotted_directories(&self.below_source_root(uri)?)
+    }
+
+    /// Whether a file sits below one of its language's source roots, the
+    /// default package included: the files a build compiles.
+    pub fn on_source_root(&self, uri: &Url) -> bool {
+        self.below_source_root(uri).is_some()
+    }
+
+    /// The path of a file below the source root it sits in.
+    fn below_source_root(&self, uri: &Url) -> Option<String> {
         let relative = self.relative_path(uri)?;
         let language = self
             .language(uri)
             .or_else(|| Language::of_path(&relative))?;
-        let below_root = layout(language)
+        layout(language)
             .source_roots()
             .iter()
-            .find_map(|root| relative.strip_prefix(&format!("{root}/")))?;
-        dotted_directories(below_root)
+            .find_map(|root| relative.strip_prefix(&format!("{root}/")))
+            .map(str::to_owned)
     }
 
     /// The package a file's folder stands for: the one its source root
