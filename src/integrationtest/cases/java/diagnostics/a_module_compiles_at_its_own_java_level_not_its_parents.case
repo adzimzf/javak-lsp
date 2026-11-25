@@ -1,0 +1,40 @@
+//- /pom.xml
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>javak.lsp</groupId>
+  <artifactId>shop</artifactId>
+  <version>1</version>
+  <packaging>pom</packaging>
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+  </properties>
+  <modules>
+    <module>legacy</module>
+  </modules>
+</project>
+//- /legacy/pom.xml
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>javak.lsp</groupId>
+    <artifactId>shop</artifactId>
+    <version>1</version>
+  </parent>
+  <artifactId>legacy</artifactId>
+  <properties>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+  </properties>
+</project>
+//- /legacy/src/main/java/com/demo/Old.java
+$0package com.demo;
+public class Old {
+    String text() {
+        return """
+            hello
+            """;
+    }
+}
+//= expected
+/legacy/src/main/java/com/demo/Old.java:4:16  The Java feature 'Text Blocks' is only available with source level 15 and above

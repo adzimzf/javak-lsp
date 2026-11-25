@@ -1,0 +1,13 @@
+//- /src/main/java/p/Broken.java
+$0package p;
+import java.util.List;
+import java.util.Set;
+import java.util.Set;
+public class Broken {
+    void f() {
+        int i = 5
+    }
+}
+//= expected
+/src/main/java/p/Broken.java:4:8  The import java.util.Set is never used
+/src/main/java/p/Broken.java:7:17  Syntax error, insert ";" to complete BlockStatements

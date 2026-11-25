@@ -10,3 +10,6 @@ public class Foo {
 	}
 }
 //= expected
+/src/main/java/java/Foo.java:4:22  Cannot use this in a static context
+/src/main/java/java/Foo.java:6:14  Duplicate method method1() in type Foo
+/src/main/java/java/Foo.java:8:14  Duplicate method method1() in type Foo

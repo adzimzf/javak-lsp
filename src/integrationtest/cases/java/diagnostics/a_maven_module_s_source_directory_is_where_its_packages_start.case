@@ -1,0 +1,19 @@
+//- /pom.xml
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>javak.lsp</groupId>
+  <artifactId>shop</artifactId>
+  <version>1</version>
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+  </properties>
+  <build>
+    <sourceDirectory>src/java</sourceDirectory>
+  </build>
+</project>
+//- /src/java/com/demo/Main.java
+$0package com.wrong;
+public class Main {}
+//= expected
+/src/java/com/demo/Main.java:1:9  The declared package "com.wrong" does not match the expected package "com.demo"

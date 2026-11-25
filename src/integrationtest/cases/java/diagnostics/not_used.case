@@ -4,3 +4,4 @@ public class E {
     private int i;
 }
 //= expected
+/src/main/java/test1/E.java:3:17  The value of the field E.i is not used

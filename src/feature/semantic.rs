@@ -3,6 +3,7 @@
 //! names its nodes the way the Java grammar does.
 
 mod checks;
+pub mod compiler;
 
 use std::collections::HashMap;
 use std::sync::Arc;

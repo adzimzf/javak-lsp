@@ -5,4 +5,7 @@ public class Foo extends UnknownType {
 		super.whatever()
 	}
 }
-//= expected
+//= expected (pending)
+/src/main/java/java/Foo.java:2:26  UnknownType cannot be resolved to a type
+/src/main/java/java/Foo.java:4:3  UnknownType cannot be resolved to a type
+/src/main/java/java/Foo.java:4:18  Syntax error, insert ";" to complete BlockStatements

@@ -1,0 +1,19 @@
+//- /src/main/java/p/Notes.java
+$0package p;
+public class Notes {
+    // TODO first FIXME second
+    /* XXX in block */
+    /** TODO in javadoc
+     * FIXME next line */
+    // todo lower  TODOx  aTODO
+    //TODO no space
+    // TODO: colon
+}
+//= expected
+/src/main/java/p/Notes.java:3:8  TODO first
+/src/main/java/p/Notes.java:3:19  FIXME second
+/src/main/java/p/Notes.java:4:8  XXX in block
+/src/main/java/p/Notes.java:5:9  TODO in javadoc
+/src/main/java/p/Notes.java:6:8  FIXME next line
+/src/main/java/p/Notes.java:8:7  TODO no space
+/src/main/java/p/Notes.java:9:8  TODO: colon

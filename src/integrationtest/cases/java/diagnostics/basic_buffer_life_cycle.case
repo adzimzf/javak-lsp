@@ -3,3 +3,4 @@ $0package test1;
 public class E123 {
 }
 //= expected
+(nothing)

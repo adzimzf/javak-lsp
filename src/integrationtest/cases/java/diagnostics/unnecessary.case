@@ -1,4 +1,5 @@
 //- /src/main/java/test1/E.java
 $0package test1;
 import java.security.*;
-//= expected
+//= expected (pending)
+/src/main/java/test1/E.java:2:8  The import java.security is never used

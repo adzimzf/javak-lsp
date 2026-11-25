@@ -6,4 +6,6 @@ public class E123 {
         int i = someInteger + 5
     }
 }
-//= expected
+//= expected (pending)
+/src/main/java/test1/E123.java:5:17  someInteger cannot be resolved to a variable
+/src/main/java/test1/E123.java:5:31  Syntax error, insert ";" to complete LocalVariableDeclarationStatement

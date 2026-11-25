@@ -50,14 +50,21 @@ Notes on how an answer is written down:
 - **hover** is the signature line as jdtls words it, with the hovered name
   unqualified.
 - **diagnostics** is the whole file's report (`textDocument/diagnostic`),
-  written as `path:line:column  message`. javak-lsp reports a Java file's
-  syntax errors and its missing `package` declaration in its own words, and
-  in jdtls's words a feature the build file's source level does not have
-  (a text block below 15) and a call no method of its name takes; a case
-  either names those or expects `(nothing)`. A `(nothing)` case is the
-  regression guard that a shape the parser handles stays unflagged. The
-  missing-package check reads the package out of the path, so those cases
-  live under `/src/main/java/`.
+  written as `path:line:column  message`, every severity alike. javak-lsp
+  reports a Java file's syntax errors and its missing `package` declaration
+  in its own words, and in jdtls's words a feature the build file's source
+  level does not have (a text block below 15), a call no method of its name
+  takes, and what the Eclipse compiler says of the file's own text: task
+  tags, a public type in a file of another name, a method declared twice,
+  `this` in a static context, dead branches, private fields nothing reads
+  and imports nothing uses. A `(nothing)` case is the regression guard that
+  a shape the parser handles stays unflagged. The missing-package check
+  reads the package out of the path, and jdtls compiles only the files of a
+  source root, so most cases live under `/src/main/java/`; a case that
+  brings build files (`pom.xml`, `settings.gradle`) lays out the projects
+  itself, a monorepo's modules included. jdtls only
+  pushes diagnostics (`textDocument/publishDiagnostics`): what it answers a
+  case is what it last published for the file.
 - A file whose header ends in `(not open)` is on disk and never opened, as
   is a build file: the server has to find it the way it finds the rest of a
   project. jdtls reads the whole project, not only the open files.
@@ -367,40 +374,52 @@ jdtls: `WorkspaceSymbolHandlerTest`.
 ## diagnostics
 
 jdtls: none — javak-lsp's own checks (syntax errors, missing `package`), and
-two of jdtls's worded as jdtls words them (source level, calls).
+jdtls's worded as jdtls words them (source level, calls, and the compiler's
+checks of `compiler.rs`). The answers of the compiler's checks were recorded
+from jdtls 1.64.0.
 
 | case | what it asks |
 | --- | --- |
 | `a_body_that_is_never_closed` | the unclosed brace of a method body |
 | `a_brace_with_nothing_left_to_close` | a `}` past the end of the class |
-| `a_call_whose_parenthesis_is_never_closed` | the `)` a call never gets |
+| `a_branch_a_constant_condition_never_takes_is_dead_code` | `Dead code` on the branch `if (false)`, `if ((false))`, `if (!true)` or `if (true) … else` never takes |
 | `a_call_missing_an_argument_is_reported` | the call `parse(test)` has no applicable overload of `parse(String, Parser)` |
 | `a_call_of_a_method_an_unknown_superclass_may_declare_is_not_reported` | nothing: the superclass may have the overload |
 | `a_call_of_an_overload_that_takes_its_arguments_is_not_reported` | nothing: another overload, or varargs, takes them |
+| `a_call_whose_parenthesis_is_never_closed` | the `)` a call never gets |
 | `a_call_with_too_many_arguments_is_reported` | `this.count(test, 1)` of `count()` |
 | `a_class_declared_without_a_body` | a class header with no `{}` after it |
 | `a_deeply_nested_package_is_named_in_full` | `com.demo.data.local`, every segment of the path |
 | `a_directory_that_is_not_an_identifier_names_no_package` | nothing: `my-demo` is no package segment |
 | `a_field_without_its_semicolon` | the missing `;` of a field |
 | `a_file_directly_at_its_source_root_has_no_package` | nothing: no package to name |
+| `a_file_outside_every_build_of_a_monorepo_is_only_read_for_its_syntax` | pending: jdtls compiles a non-project file on its own and says so |
 | `a_file_that_declares_its_package` | nothing |
 | `a_file_under_no_source_root_is_left_alone` | nothing: the path says no package |
 | `a_file_whose_package_is_not_declared` | the missing `package com.demo` |
 | `a_generic_method_with_bounds_and_wildcards_parses` | nothing |
 | `a_labelled_break_and_continue_parse` | nothing |
 | `a_lambda_with_a_block_body_and_a_method_reference_parse` | nothing |
+| `a_maven_module_s_source_directory_is_where_its_packages_start` | the package below `<sourceDirectory>src/java</sourceDirectory>` |
+| `a_method_declared_twice_is_reported_at_both` | each of two methods, or constructors, of one type with the same parameter types; `String...` and `String[]` are the same |
 | `a_method_with_throws_synchronized_and_a_do_while_parses` | nothing |
 | `a_missing_package_and_a_syntax_error_are_both_reported` | both, in source order |
+| `a_module_a_maven_parent_lists_is_compiled_from_its_own_source_root` | the package of `core/src/main/java`, a module the root `pom.xml` lists; a wrong package hides the unused field |
+| `a_module_compiles_at_its_own_java_level_not_its_parents` | a text block in a module at level 11 below a parent at 21 |
 | `a_nested_class_an_inner_class_and_a_local_class_parse` | nothing |
 | `a_package_declared_after_a_licence_header_is_a_package` | nothing: a comment above it is not a declaration |
 | `a_package_declared_after_an_import_is_still_a_package` | nothing |
+| `a_private_field_nothing_reads_is_not_used` | private fields never read, or only assigned: `serialVersionUID` and annotated ones too, not one that suppresses warnings |
+| `a_project_a_gradle_settings_file_includes_is_compiled_from_its_own_source_root` | the package of `services/api`, which `settings.gradle` includes |
+| `a_public_type_of_every_kind_in_a_file_of_another_name_is_reported` | a public class, enum, interface, annotation or record not named after its file |
 | `a_record_with_a_compact_constructor_and_a_static_member_parses` | nothing |
 | `a_statement_without_its_semicolon` | the missing `;` |
+| `a_static_initializer_with_an_error_hides_the_unused_fields` | the error of a static initializer, and none of the file's unused fields |
 | `a_string_that_is_never_closed` | what the parser makes of the rest of the file |
 | `a_switch_statement_with_fall_through_and_a_default_parses` | nothing |
 | `a_test_source_root_is_read_the_same_way` | the missing package of a `src/test/java` file |
-| `a_text_block_containing_quotes_and_braces_parses` | nothing: `"""` is not an unclosed string |
 | `a_text_block_at_source_level_15_is_not_reported` | nothing: `pom.xml` says 17 |
+| `a_text_block_containing_quotes_and_braces_parses` | nothing: `"""` is not an unclosed string |
 | `a_text_block_under_source_level_15_is_reported` | a text block in a project whose `pom.xml` says source level 11 |
 | `a_type_annotated_generic_field_parses` | nothing: nested generics and a `? super` bound |
 | `a_unicode_identifier_parses` | nothing: `café` is a name |
@@ -409,15 +428,20 @@ two of jdtls's worded as jdtls words them (source level, calls).
 | `an_arrow_switch_with_a_yielding_block_parses` | nothing: `yield` from a block arm |
 | `an_empty_file_is_only_its_missing_package` | the missing `package`, nothing else |
 | `an_enum_with_a_constructor_fields_and_a_constant_body_parses` | nothing: a constant with a body of its own |
+| `an_import_nothing_names_is_never_used` | imports nothing names, a repeated one and a static one; `{@link File}` uses `File` |
 | `an_initializer_with_no_expression` | `int x = ;` |
 | `an_instanceof_pattern_and_a_ternary_parse` | nothing |
 | `an_interface_with_default_static_and_private_methods_parses` | nothing |
+| `an_unused_import_is_left_alone_in_a_file_with_an_error_but_not_a_repeated_one` | in a file with a syntax error, only the repeated import |
 | `annotated_members_parse` | nothing: `@Override`/`@SafeVarargs` are not errors |
 | `braces_and_quotes_inside_comments_are_not_code` | nothing: an unbalanced `{` in a comment is text |
 | `each_statement_without_a_semicolon_is_its_own_error` | one error per statement |
 | `numeric_character_and_escape_literals_parse` | nothing: hex, binary, `_` groups, escapes |
 | `records_sealed_types_switch_patterns_and_text_blocks_parse` | nothing: modern Java is not a syntax error |
 | `static_and_instance_initializer_blocks_parse` | nothing |
+| `task_tags_stand_alone_and_end_at_the_next_tag` | `TODO`, `FIXME` and `XXX` in every kind of comment, each up to the next tag; not `todo`, `TODOx` or `aTODO` |
+| `the_fields_of_a_type_declaring_a_method_twice_are_not_reported` | the duplicates and the unused field: a duplicate hides nothing |
+| `this_in_a_static_context_is_reported_but_not_in_a_class_declared_there` | `this` in a static field, block, method and lambda, not in an anonymous or local class |
 | `try_with_resources_and_a_multi_catch_parse` | nothing |
 | `varargs_an_array_initializer_and_a_cast_parse` | nothing |
 
@@ -814,6 +838,15 @@ Answer: the places, as **definition** writes them.
 | `workspace_search_on_file_in_workspace` | `WorkspaceSymbolHandlerTest#testWorkspaceSearchOnFileInWorkspace` |
 
 ### diagnostics
+
+Answer: what jdtls 1.64.0 last published for the file, in the Maven project
+`compat` with `src/main/java` as its source root. A file outside it is "not on
+the classpath of project compat": jdtls reports only its syntax errors and
+task tags, and says so at its first line. The cases marked `(pending)` need
+what javak-lsp does not have: the JDK's and the classpath's types
+(`cannot be resolved`, `is undefined`, `deprecated`, `must implement`),
+that notice, or a syntax error recovered the way the Eclipse parser recovers
+it.
 
 | case | jdtls test |
 | --- | --- |

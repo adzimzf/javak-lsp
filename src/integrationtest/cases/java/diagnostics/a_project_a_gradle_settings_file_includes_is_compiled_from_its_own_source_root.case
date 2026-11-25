@@ -1,0 +1,20 @@
+//- /settings.gradle
+rootProject.name = 'shop'
+include ':services:api', ':moved'
+project(':moved').projectDir = file('libs/moved')
+//- /build.gradle
+
+//- /services/api/build.gradle
+plugins { id 'java' }
+//- /libs/moved/build.gradle
+plugins { id 'java' }
+//- /services/api/src/main/java/com/demo/Api.java
+$0package com.wrong;
+public class Api {
+    private int unused;
+}
+//- /libs/moved/src/main/java/com/demo/Moved.java (not open)
+package com.demo;
+public class Moved {}
+//= expected
+/services/api/src/main/java/com/demo/Api.java:1:9  The declared package "com.wrong" does not match the expected package "com.demo"

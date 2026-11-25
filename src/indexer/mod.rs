@@ -8,6 +8,7 @@
 pub mod java;
 pub mod kotlin;
 pub mod library;
+pub mod project;
 
 use std::collections::HashSet;
 use std::ops::ControlFlow;
@@ -22,7 +23,9 @@ use crate::feature::query;
 use crate::feature::semantic::{types_of, FileView, Snapshot};
 use crate::language::Language;
 use crate::parser::{syntax, Kind, Syn, Syntax};
+use crate::dependency_sync::ReportedModule;
 use library::Libraries;
+use project::Projects;
 
 /// Where a language keeps its sources.
 pub trait SourceLayout: Send + Sync {
@@ -107,8 +110,11 @@ pub struct Indexer {
     /// known ([`Self::read_workspace`]), again for each file the client says
     /// changed ([`Self::reread`]).
     on_disk: DashMap<Url, Document>,
-    /// The Java source level the project's build file names, once read.
-    java_level: RwLock<Option<u32>>,
+    /// The workspace's builds and their modules, once read
+    /// ([`Self::read_projects`]).
+    projects: RwLock<Projects>,
+    /// What the build tool last said of its projects' source roots.
+    reported: RwLock<Vec<ReportedModule>>,
     pub libraries: Arc<Libraries>,
 }
 
@@ -125,7 +131,8 @@ impl Indexer {
             workspace_root: OnceLock::new(),
             documents: DashMap::new(),
             on_disk: DashMap::new(),
-            java_level: RwLock::new(None),
+            projects: RwLock::new(Projects::default()),
+            reported: RwLock::new(Vec::new()),
             libraries: Arc::new(Libraries::default()),
         }
     }
@@ -197,22 +204,37 @@ impl Indexer {
         }
     }
 
-    /// Reads the Java source level the build file at the workspace root
-    /// names (`<release>11</release>`, `sourceCompatibility = 1.8`).
-    pub fn read_java_level(&self) {
-        let level = self
-            .workspace_root
-            .get()
-            .and_then(|root| crate::dependency_sync::declared_java_version(root))
-            .and_then(|level| level.parse().ok());
-        if let Ok(mut known) = self.java_level.write() {
-            *known = level;
+    /// Reads the workspace's builds again: every Maven and Gradle build in
+    /// it, each module's source roots and Java level (`<release>11</release>`,
+    /// `sourceCompatibility = 1.8`), and what the build tool last said of
+    /// them ([`Self::apply_reported`]).
+    pub fn read_projects(&self) {
+        let Some(root) = self.workspace_root.get() else {
+            return;
+        };
+        let mut projects = Projects::discover(root);
+        if let Ok(reported) = self.reported.read() {
+            projects.apply_reported(&reported);
+        }
+        if let Ok(mut known) = self.projects.write() {
+            *known = projects;
         }
     }
 
-    /// The Java source level of the project, where its build file names one.
-    pub fn java_level(&self) -> Option<u32> {
-        self.java_level.read().ok().and_then(|level| *level)
+    /// What the build tool said of its projects' source roots, which wins
+    /// over what their build files suggest.
+    pub(crate) fn apply_reported(&self, modules: &[ReportedModule]) {
+        if let Ok(mut reported) = self.reported.write() {
+            *reported = modules.to_vec();
+        }
+        self.read_projects();
+    }
+
+    /// The Java source level of the module a file is in, where its build
+    /// names one or inherits one.
+    pub fn java_level_of(&self, uri: &Url) -> Option<u32> {
+        let path = uri.to_file_path().ok()?;
+        self.projects.read().ok()?.java_level_of(&path)
     }
 
     pub fn change(&self, uri: &Url, text: String) {
@@ -253,15 +275,33 @@ impl Indexer {
     /// package — no source root above it, nothing below it, or a directory
     /// that is not an identifier.
     pub fn package_of_path(&self, uri: &Url) -> Option<String> {
-        let relative = self.relative_path(uri)?;
+        dotted_directories(&self.below_source_root(uri)?)
+    }
+
+    /// Whether a file sits below one of its language's source roots, the
+    /// default package included: the files a build compiles.
+    pub fn on_source_root(&self, uri: &Url) -> bool {
+        self.below_source_root(uri).is_some()
+    }
+
+    /// The path of a file below the source root of its module it sits in.
+    /// Before the builds are read, the workspace is one module.
+    fn below_source_root(&self, uri: &Url) -> Option<String> {
+        let path = uri.to_file_path().ok()?;
         let language = self
             .language(uri)
-            .or_else(|| Language::of_path(&relative))?;
-        let below_root = layout(language)
-            .source_roots()
-            .iter()
-            .find_map(|root| relative.strip_prefix(&format!("{root}/")))?;
-        dotted_directories(below_root)
+            .or_else(|| path.to_str().and_then(Language::of_path))?;
+        let projects = self.projects.read().ok()?;
+        let unread;
+        let projects = if projects.modules.is_empty() {
+            unread = Projects::single(self.workspace_root.get()?);
+            &unread
+        } else {
+            &*projects
+        };
+        let root = projects.source_root_of(&path, language)?;
+        let below = path.strip_prefix(root).ok()?;
+        Some(below.to_string_lossy().replace('\\', "/"))
     }
 
     /// The package a file's folder stands for: the one its source root

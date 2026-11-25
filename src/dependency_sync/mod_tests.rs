@@ -337,6 +337,7 @@ fn incomplete_manifest_is_retried_only_after_the_back_off() {
         dependencies: vec![],
         incomplete_sources: true,
         saved_at: 1_000,
+        modules: Vec::new(),
     };
     assert!(!manifest.is_due_for_retry(1_000 + 60));
     assert!(manifest.is_due_for_retry(1_000 + INCOMPLETE_RETRY_AFTER.as_secs()));
@@ -422,6 +423,32 @@ fn gradle_decompiler_line_is_read() {
 }
 
 #[test]
+fn gradle_module_lines_say_where_each_project_keeps_its_sources() {
+    let parsed = gradle::parse_output(concat!(
+        "{\"coordinate\":\"a:b:1\",\"jar\":\"/c/b-1.jar\",\"sources\":null}\n",
+        "{\"module\":\":app\",\"dir\":\"/w/app\",\"java\":[\"/w/app/src/main/java\"],",
+        "\"kotlin\":[\"/w/app/src/main/kotlin\"],\"javaLevel\":\"17\"}\n",
+        "{\"module\":\":\",\"dir\":\"/w\",\"java\":[],\"kotlin\":[],\"javaLevel\":null}\n",
+    ));
+    assert_eq!(parsed.dependencies.len(), 1);
+    assert_eq!(
+        parsed.modules,
+        [
+            ReportedModule {
+                dir: PathBuf::from("/w/app"),
+                java: vec![PathBuf::from("/w/app/src/main/java")],
+                kotlin: vec![PathBuf::from("/w/app/src/main/kotlin")],
+                java_level: Some("17".to_owned()),
+            },
+            ReportedModule {
+                dir: PathBuf::from("/w"),
+                ..ReportedModule::default()
+            },
+        ]
+    );
+}
+
+#[test]
 fn decompile_option_is_part_of_the_fingerprint() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "pom.xml", "<project/>");
@@ -447,6 +474,7 @@ fn decompiled_sources_stand_in_for_missing_sources() {
         }],
         incomplete_sources: false,
         saved_at: 0,
+        modules: Vec::new(),
     };
     assert_eq!(
         manifest.sources_jars_by_artifact(),
@@ -497,6 +525,7 @@ fn manifest_of(build_tool: &str, jar: Option<PathBuf>) -> DependencyManifest {
         }],
         incomplete_sources: false,
         saved_at: 0,
+        modules: Vec::new(),
     }
 }
 

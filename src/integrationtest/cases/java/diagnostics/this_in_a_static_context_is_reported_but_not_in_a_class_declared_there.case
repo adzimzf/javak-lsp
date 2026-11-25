@@ -1,0 +1,20 @@
+//- /src/main/java/p/Statics.java
+$0package p;
+public class Statics {
+    static Object field = this;
+    Object instance = this;
+    static { Object o = this; }
+    static void method() {
+        Object direct = this;
+        Runnable lambda = () -> System.out.println(this);
+        new Object() { Object inner = this; };
+        class Local { Object inner = this; }
+    }
+    void own() { Object o = this; }
+    static class Nested { Object o = this; }
+}
+//= expected
+/src/main/java/p/Statics.java:3:27  Cannot use this in a static context
+/src/main/java/p/Statics.java:5:25  Cannot use this in a static context
+/src/main/java/p/Statics.java:7:25  Cannot use this in a static context
+/src/main/java/p/Statics.java:8:52  Cannot use this in a static context
