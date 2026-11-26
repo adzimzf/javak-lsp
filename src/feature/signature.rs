@@ -175,13 +175,13 @@ fn code_characters(text: &str, at: Position) -> Vec<(char, Position)> {
                 continue;
             }
             '/' if characters.peek() == Some(&'/') => {
+                step(character, &mut line, &mut column);
                 while let Some(inner) = characters.next() {
                     step(inner, &mut line, &mut column);
                     if inner == '\n' {
                         break;
                     }
                 }
-                step(character, &mut line, &mut column);
                 continue;
             }
             '/' if characters.peek() == Some(&'*') => {
