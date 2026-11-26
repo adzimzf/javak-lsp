@@ -1,6 +1,20 @@
 # javak-lsp
 A Java Kotlin LSP
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/adzimzf/javak-lsp/main/scripts/install.sh | sh
+```
+
+This installs the newest release, release candidates included, as
+`~/.local/bin/javak-lsp`, with `javak-debug-server.jar` in
+`~/.local/share/javak-lsp`. Run it again to update. `--stable` skips release
+candidates, `--version v0.1.0-rc.3` picks one, and `--prefix /usr/local`
+installs elsewhere (Linux and macOS, x86_64 and arm64). Every pull request
+merged into `main` publishes a release candidate
+(`.github/workflows/release-candidate.yml`).
+
 ## Layout
 
 Each layer keeps what is particular to a language in a `java` and a `kotlin`
