@@ -18,6 +18,11 @@
 //!    — asked for in CI — as a comment on the branch's pull request, which
 //!    a later run updates.
 //!
+//! A question jdtls failed on with an internal error (`-32603`: a crash,
+//! such as a `NullPointerException` in its search) has no answer to agree
+//! with: it is listed apart and left out of the count. A refusal (`size()
+//! is read-only`) is an answer, "nothing", and is compared.
+//!
 //! It takes minutes and the network, so it runs only when asked:
 //!
 //! ```text

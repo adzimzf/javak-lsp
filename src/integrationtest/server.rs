@@ -59,6 +59,18 @@ pub(super) enum OnError {
     Panic,
     /// The error is the server's way of answering "nothing here".
     AnswerNothing,
+    /// As [`OnError::AnswerNothing`], except an internal error (`-32603`):
+    /// the server failed, which is answered as [`failure`] says.
+    AnswerNothingUnlessItFailed,
+}
+
+/// The key of the answer [`OnError::AnswerNothingUnlessItFailed`] gives for
+/// a request the server failed: `{"failed": "<what it said>"}`.
+pub(super) const FAILED: &str = "failed";
+
+/// What the server said when it failed to answer, where it did.
+pub(super) fn failure(answer: &Value) -> Option<&str> {
+    answer.get(FAILED).and_then(Value::as_str)
 }
 
 /// An initialized server with every file of a fixture open.
@@ -510,6 +522,25 @@ impl Session {
                     match on_error {
                         OnError::Panic => panic!("{method} failed: {error}"),
                         OnError::AnswerNothing => return Value::Null,
+                        OnError::AnswerNothingUnlessItFailed => {
+                            if error["code"] != json!(-32603) {
+                                return Value::Null;
+                            }
+                            // The message says little ("Internal error");
+                            // the first line of the data names the exception.
+                            let data = error["data"].as_str().unwrap_or_default();
+                            let cause = data
+                                .lines()
+                                .next()
+                                .unwrap_or_default()
+                                .trim_start_matches("java.util.concurrent.CompletionException: ");
+                            let said = if cause.is_empty() {
+                                error["message"].as_str().unwrap_or("internal error")
+                            } else {
+                                cause
+                            };
+                            return json!({ FAILED: said });
+                        }
                     }
                 }
                 return message.get("result").cloned().unwrap_or(Value::Null);

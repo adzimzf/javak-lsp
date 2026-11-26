@@ -26,6 +26,9 @@ pub(super) struct RepoReport {
     /// Per request: how many answers agree, of how many asked.
     pub(super) by_method: BTreeMap<String, (usize, usize)>,
     pub(super) differences: Vec<Difference>,
+    /// The questions jdtls failed on (an internal error, not an answer),
+    /// with what it said: left out of `total` and of the counts.
+    pub(super) jdtls_failed: Vec<(String, String)>,
     pub(super) jdtls: Timing,
     pub(super) javak: Timing,
 }
@@ -66,7 +69,13 @@ pub(super) fn compare(jdtls: &Recording, javak: &Recording) -> RepoReport {
         .collect();
     let mut by_method: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut differences = Vec::new();
+    let mut jdtls_failed = Vec::new();
     for expected in &jdtls.answers {
+        // A question jdtls failed on has no answer to agree with.
+        if let Some(said) = &expected.failed {
+            jdtls_failed.push((expected.probe.id.clone(), said.clone()));
+            continue;
+        }
         let method = expected.probe.method.name();
         let counts = by_method.entry(method).or_default();
         counts.1 += 1;
@@ -85,9 +94,10 @@ pub(super) fn compare(jdtls: &Recording, javak: &Recording) -> RepoReport {
     RepoReport {
         repo: jdtls.repo.clone(),
         commit: jdtls.commit.clone(),
-        total: jdtls.answers.len(),
+        total: jdtls.answers.len() - jdtls_failed.len(),
         by_method,
         differences,
+        jdtls_failed,
         jdtls: jdtls.into(),
         javak: javak.into(),
     }
@@ -170,6 +180,9 @@ pub(super) fn print(reports: &[RepoReport]) {
                 )
             )
         );
+        for (id, said) in &report.jdtls_failed {
+            eprintln!("\n{} {} — jdtls failed, not compared: {said}", paint("90", "∅"), id);
+        }
         for difference in &report.differences {
             eprintln!("\n{} {}", paint("33", "✗"), paint("1", &difference.id));
             for line in difference.diff.iter().take(TERMINAL_LINES) {
@@ -251,10 +264,25 @@ pub(super) fn markdown(reports: &[RepoReport], seed: Option<u64>) -> String {
         ),
         None => "Evenly spaced questions.\n\n".to_owned(),
     };
+    let failed: usize = reports.iter().map(|report| report.jdtls_failed.len()).sum();
+    let left_out = if failed == 0 {
+        String::new()
+    } else {
+        format!(" {failed} more questions were not compared: jdtls failed on them (below).")
+    };
     let mut body = format!(
-        "{COMMENT_MARK}\n## javak-lsp vs jdtls\n\n{questions}**{agreed}/{total}** answers agree with jdtls.\n\n{}",
+        "{COMMENT_MARK}\n## javak-lsp vs jdtls\n\n{questions}**{agreed}/{total}** answers agree with jdtls.{left_out}\n\n{}",
         summary_table(reports)
     );
+    if failed > 0 {
+        body.push_str("\n<details><summary>Not compared: jdtls failed</summary>\n\n");
+        for report in reports {
+            for (id, said) in &report.jdtls_failed {
+                let _ = writeln!(body, "- `{id}`: {said}");
+            }
+        }
+        body.push_str("\n</details>\n");
+    }
     let mut truncated = false;
     for report in reports {
         if report.differences.is_empty() {
@@ -365,6 +393,52 @@ mod tests {
 
     fn lines(text: &str) -> Vec<String> {
         text.split_whitespace().map(str::to_owned).collect()
+    }
+
+    fn recording(server: &str, answers: Vec<(&str, &str, Option<&str>)>) -> Recording {
+        let answers = answers
+            .into_iter()
+            .map(|(id, line, failed)| Answer {
+                probe: serde_json::from_value(serde_json::json!({
+                    "id": id, "file": "A.java", "method": "References",
+                    "line": 0, "character": 0, "word": "a", "edit": null,
+                }))
+                .expect("a probe"),
+                lines: vec![line.to_owned()],
+                millis: 0,
+                failed: failed.map(str::to_owned),
+            })
+            .collect();
+        Recording {
+            server: server.to_owned(),
+            repo: "demo".to_owned(),
+            commit: "0".to_owned(),
+            ready: true,
+            import_seconds: 0.0,
+            answer_seconds: 0.0,
+            answers,
+        }
+    }
+
+    #[test]
+    fn a_question_jdtls_failed_on_is_not_compared() {
+        let jdtls = recording(
+            "jdtls",
+            vec![("one", "x", None), ("two", "(failed: NullPointerException)", Some("NullPointerException"))],
+        );
+        let javak = recording("javak-lsp", vec![("one", "x", None), ("two", "y", None)]);
+        let report = compare(&jdtls, &javak);
+        assert_eq!((report.agreed(), report.total), (1, 1));
+        assert!(report.differences.is_empty());
+        assert_eq!(report.jdtls_failed, [("two".to_owned(), "NullPointerException".to_owned())]);
+    }
+
+    #[test]
+    fn a_question_javak_failed_on_differs() {
+        let jdtls = recording("jdtls", vec![("one", "x", None)]);
+        let javak = recording("javak-lsp", vec![("one", "(failed: boom)", Some("boom"))]);
+        let report = compare(&jdtls, &javak);
+        assert_eq!((report.agreed(), report.total), (0, 1));
     }
 
     #[test]

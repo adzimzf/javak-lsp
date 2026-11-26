@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::prepare::ServerCommand;
 use super::probe::{Method, Probe};
 use super::render::View;
-use crate::integrationtest::server::{OnError, Session};
+use crate::integrationtest::server::{failure, OnError, Session};
 
 /// How long one request may take on a real project, unless
 /// `JDTLS_COMPAT_PATIENCE` says otherwise (seconds).
@@ -47,6 +47,10 @@ pub(super) struct Answer {
     pub(super) probe: Probe,
     pub(super) lines: Vec<String>,
     pub(super) millis: u64,
+    /// What the server said where it failed with an internal error
+    /// instead of answering: such a question of jdtls's is not compared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) failed: Option<String>,
 }
 
 impl Recording {
@@ -169,12 +173,16 @@ pub(super) async fn record(
                     }
                 }
             };
-            let lines = View {
-                session: &session,
-                text: current,
-                word: &probe.word,
-            }
-            .render(probe.method, &answer);
+            let failed = failure(&answer).map(str::to_owned);
+            let lines = match &failed {
+                Some(said) => vec![format!("(failed: {said})")],
+                None => View {
+                    session: &session,
+                    text: current,
+                    word: &probe.word,
+                }
+                .render(probe.method, &answer),
+            };
             if edited.is_some() {
                 version += 1;
                 session.change_document(file, version, &text).await;
@@ -189,6 +197,8 @@ pub(super) async fn record(
                 probe.id,
                 if timed_out {
                     format!("no answer within {}s", patience().as_secs())
+                } else if failed.is_some() {
+                    lines.join(" ")
                 } else {
                     preview(&lines)
                 }
@@ -197,6 +207,7 @@ pub(super) async fn record(
                 probe: probe.clone(),
                 lines,
                 millis: took.as_millis() as u64,
+                failed,
             });
         }
         session.close_document(file).await;
@@ -261,7 +272,7 @@ async fn ask(session: &mut Session, probe: &Probe, text: &str) -> Value {
 
 async fn request(session: &mut Session, method: &str, params: Value) -> Value {
     session
-        .request_until(method, params, OnError::AnswerNothing, |_| true)
+        .request_until(method, params, OnError::AnswerNothingUnlessItFailed, |_| true)
         .await
 }
 
@@ -320,12 +331,18 @@ async fn hierarchy(
     up: &str,
     down: &str,
 ) -> Value {
+    if failure(prepared).is_some() {
+        return prepared.clone();
+    }
     let Some(item) = prepared.as_array().and_then(|items| items.first()).cloned() else {
         return Value::Null;
     };
     let mut lines = vec![format!("item {}", describe(session, &item))];
     for (direction, end) in [(up, "from"), (down, "to")] {
         let answer = request(session, &format!("{prefix}/{direction}"), json!({"item": item})).await;
+        if failure(&answer).is_some() {
+            return answer;
+        }
         let mut found: Vec<String> = answer
             .as_array()
             .into_iter()
