@@ -1,0 +1,27 @@
+//- /java/util/Arrays.java
+package java.util;
+public class Arrays {
+    public static java.util.List<String> asList() { return new ArrayList<>(); }
+    private static class ArrayList<E> extends java.util.AbstractList<E> {
+        public E get(int index) { return null; }
+        public int size() { return 0; }
+    }
+}
+//- /p/Errors.java
+package p;
+import java.util.ArrayList;
+public class Errors extends ArrayList<String> {
+}
+//- /p/Use.java
+package p;
+public class Use {
+    Errors errors;
+    void $0error(String message) {
+        java.util.Arrays.asList();
+        errors.add(message);
+    }
+}
+//= expected
+item error(String) : void  /p/Use.java:4:10  void error(String message) {
+outgoing add(E) : boolean  <library>/java.base/java/util/ArrayList.java
+outgoing asList() : List<String>  /java/util/Arrays.java:3:42  public static java.util.List<String> asList() { return new ArrayList<>(); }

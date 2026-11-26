@@ -1,0 +1,14 @@
+//- /p/Use.java
+package p;
+public class Use {
+    static void print(String msg, Object... args) {
+        System.out.print$0ln(String.format(msg, args));
+    }
+    void log(String s) {
+        System.out.println(s);
+    }
+}
+//= expected
+item println(String) : void  <library>/java.base/java/io/PrintStream.java
+incoming log(String) : void  /p/Use.java:7:20  System.out.println(s);
+incoming print(String, Object...) : void  /p/Use.java:4:20  System.out.println(String.format(msg, args));

@@ -1,0 +1,15 @@
+//- /p/D.java
+package p;
+
+public class D {
+    private int pos;
+    boolean matches(String s) { return $0consume(s) != null; }
+    private String consume(String s) { pos++; return s; }
+}
+//= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate Getters
+Generate Getters and Setters
+Generate Setters
+Invert conditions

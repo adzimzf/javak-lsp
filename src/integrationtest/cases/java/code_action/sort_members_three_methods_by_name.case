@@ -1,0 +1,13 @@
+//- /p/E.java
+package p;
+
+public class E {
+    void zeta() { $0alpha(); }
+    void alpha() {}
+    void beta() {}
+}
+//= expected
+Add Javadoc comment
+Generate toString()
+Inline Method
+Sort Members for 'E.java'

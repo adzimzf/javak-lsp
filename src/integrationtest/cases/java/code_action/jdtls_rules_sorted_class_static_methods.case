@@ -1,0 +1,20 @@
+//- /p/Links.java
+package p;
+
+import java.io.IOException;
+
+public class Links {
+    public static void main(String[] args) throws IOException {
+        String url = args[0];
+        print("%s", url);
+    }
+
+    private static void print(String msg, Object... args) {
+        System.out.$0println(String.format(msg, args));
+    }
+}
+//= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate toString()
+Inline Method

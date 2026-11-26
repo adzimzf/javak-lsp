@@ -29,6 +29,8 @@ pub struct Calls<'a> {
 
 /// The item the cursor asks about.
 pub fn item_at<'a>(snapshot: &'a Snapshot, uri: &Url, at: Position) -> Option<Found<'a>> {
+    // An item in a library file this snapshot has not read yet: read now.
+    snapshot.read_library_at(uri);
     let named = snapshot.declaration_at(uri, at);
     if let Some(found) = named.filter(|found| kind_of(found).is_some()) {
         return Some(found);
@@ -209,9 +211,34 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
             format!("{name}({})", parameter_types())
         }
         "static_initializer" | "block" => "{...}".to_owned(),
+        // Named after the method it implements, its type variables as the
+        // lambda's target type gives them (`accept(Node)` for a
+        // `Consumer<? super Node>`).
         "lambda_expression" => snapshot
             .lambda_method(node, found.file)
-            .map_or_else(|| "lambda$".to_owned(), |method| label(snapshot, &method)),
+            .map_or_else(|| "lambda$".to_owned(), |method| {
+                let bound: Bindings = method
+                    .bindings
+                    .iter()
+                    .map(|(variable, bound)| {
+                        let mut bound = bound.clone();
+                        bound.wildcard = None;
+                        (variable.clone(), bound)
+                    })
+                    .filter(|(_, bound)| bound.name != "?")
+                    .collect();
+                let parameter_types = parameters(method.node, &bound)
+                    .iter()
+                    .map(|parameter| format!("{}{}", parameter.written, if parameter.spread { "..." } else { "" }))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let returns = method
+                    .node
+                    .child("type")
+                    .map(|written| super::semantic::substituted(type_of_node(written), &bound).written())
+                    .unwrap_or_else(|| "void".to_owned());
+                format!("{}({parameter_types}) : {returns}", method.name.text)
+            }),
         _ if is_type_declaration(node) => {
             snapshot.signature_of(found).unwrap_or_else(|| name.clone())
         }
@@ -220,21 +247,62 @@ pub fn label(snapshot: &Snapshot, found: &Found<'_>) -> String {
 }
 
 /// Who calls `of`: each member with a call of it, at its first call. A
-/// call of a method `of` overrides or is overridden by may run `of` and
-/// counts too (not through `super`), and a call in a lambda is the
+/// call of a method `of` overrides may run `of` and counts too (not
+/// through `super`); one of a method overriding it does not, as jdtls
+/// counts them. A call in a lambda is the
 /// lambda's, as jdtls lists them.
 pub fn incoming<'a>(snapshot: &'a Snapshot, of: &Found<'_>) -> Vec<Calls<'a>> {
     let related = if of.file.language == crate::language::Language::Java && of.node.kind == "method_declaration" {
-        snapshot.dispatching_to(of)
+        snapshot.overridden_by_call(of)
     } else {
         Vec::new()
     };
     let mut targets: Vec<&Found<'_>> = vec![of];
     targets.extend(related.iter());
+    // The item's type and those above it: a call of a method the item
+    // overrides may run the item only on a receiver of one of them.
+    let ancestors: Vec<(Url, Position)> = if related.is_empty() {
+        Vec::new()
+    } else {
+        snapshot
+            .owner_of(of)
+            .map(|owner| {
+                snapshot
+                    .with_supertypes(&owner)
+                    .iter()
+                    .map(|ancestor| (ancestor.file.uri.clone(), ancestor.name.start))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let receiver_fits = |file: &FileView, start: Position| -> bool {
+        let Some(call) = path_to(&file.tree, start)
+            .into_iter()
+            .rev()
+            .find(|node| node.kind == "method_invocation" && node.child("name").is_some_and(|name| name.start == start))
+        else {
+            return true;
+        };
+        let receiver = match call.child("object") {
+            Some(object) => snapshot.type_of_expression(object, file).and_then(|written| snapshot.of_type(&written, file)),
+            None => snapshot.enclosing(file, start),
+        };
+        receiver.is_none_or(|receiver| ancestors.contains(&(receiver.file.uri.clone(), receiver.name.start)))
+    };
     let mut sites: Vec<(&FileView, Position, Position)> = call_sites_of_any(snapshot, &targets)
         .into_iter()
         // A call of a related method through `super` runs that one.
         .filter(|(file, start, _, index)| *index == 0 || !is_super_call(file, *start))
+        .filter(|(file, start, _, index)| {
+            // Only for a method above the item: one below it is called on
+            // its own type.
+            let above = index
+                .checked_sub(1)
+                .and_then(|at| related.get(at))
+                .and_then(|method| snapshot.owner_of(method))
+                .is_some_and(|owner| ancestors.contains(&(owner.file.uri.clone(), owner.name.start)));
+            !above || receiver_fits(file, *start)
+        })
         .map(|(file, start, end, _)| (file, start, end))
         .collect();
     // A caller is shown at the call JDT meets first walking the tree: the
@@ -354,6 +422,7 @@ pub fn call_sites_of_any<'a>(
                     let Some((called, start, end)) = call_of(snapshot, node, file) else {
                         continue;
                     };
+
                     if let Some(index) = wanted.iter().position(|wanted| identity(&called) == *wanted) {
                         found.push((file, start, end, index));
                     }

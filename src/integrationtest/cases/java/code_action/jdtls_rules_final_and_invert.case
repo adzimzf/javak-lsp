@@ -1,0 +1,26 @@
+//- /p/Reader.java
+package p;
+
+public class Reader {
+    private int pos;
+
+    boolean matches(String seq) {
+        String numRef = seq.isEmpty() ? "" : $0consume(seq);
+        return numRef.length() > 0 && numRef.equals(seq);
+    }
+
+    private String consume(String seq) {
+        pos++;
+        if (pos > 3) {
+            return seq;
+        }
+        return "";
+    }
+}
+//= expected
+Add Javadoc comment
+Add final modifier for 'numRef'
+Change modifiers to final where possible
+Generate Getters
+Generate Getters and Setters
+Generate Setters
