@@ -169,16 +169,27 @@ impl Type {
     }
 }
 
+/// Whether some of `places` in a library file is more than an import:
+/// a class file holds no import, so a file whose only use of a name is
+/// importing it (for its javadoc, say) does not use it, to jdtls.
+fn places_beyond_imports(text: &str, places: impl Iterator<Item = Position>) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    places.into_iter().any(|at| {
+        lines
+            .get(at.line as usize)
+            .is_none_or(|line| !line.trim_start().starts_with("import "))
+    })
+}
+
 /// Whether a search for uses looks into `file`, as jdtls (Eclipse JDT)
 /// searches: not into classes it has no source of — what a decompiler
 /// wrote, whole jars or the packages a sources jar lacks — where it cannot
-/// place a use; and for a field, not into the JDK, of which it lists the
-/// declaring file alone (`System.out` is used in no other JDK file there).
-fn searches_uses_in(file: &LibraryFile, is_field: bool) -> bool {
+/// place a use (a JDK without `src.zip` has none either), nor into a
+/// package's annotations (`package-info.java`).
+fn searches_uses_in(file: &LibraryFile) -> bool {
     let jar = file.jar.to_string_lossy();
     let decompiled = jar.ends_with("-decompiled-sources.jar") || jar.ends_with("-missing-sources.jar");
-    let jdk = file.jar.file_name().is_some_and(|name| name == "src.zip");
-    !decompiled && !(is_field && jdk)
+    !decompiled && !file.entry.ends_with("package-info.java")
 }
 
 /// Whether `text` has a `case` label naming `constant` (`case RUNTIME:`).
@@ -2838,6 +2849,8 @@ pub fn javadoc_markdown(comment: &str) -> String {
 /// keeps its lines, fenced, and a `<blockquote>` is quoted with `> `, as
 /// jdtls's converter writes them: a fence is never on a line of prose.
 fn html_to_markdown(text: &str) -> String {
+    let lowered = lowercase_tags(text);
+    let text = lowered.as_str();
     const BLOCK_TAGS: [&str; 4] = ["<pre>", "</pre>", "<blockquote>", "</blockquote>"];
     let mut blocks: Vec<(bool, String)> = Vec::new();
     let mut in_pre = false;
@@ -2882,6 +2895,27 @@ fn html_to_markdown(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// `text` with each HTML tag's name in lower case (`<PRE>` is `<pre>`):
+/// HTML does not tell them apart, and older javadoc writes them in capitals.
+fn lowercase_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let slash = usize::from(after.starts_with('/'));
+        let name_length = after[slash..]
+            .find(|character: char| !character.is_ascii_alphanumeric())
+            .unwrap_or(after.len() - slash);
+        out.push('<');
+        out.push_str(&after[..slash]);
+        out.push_str(&after[slash..slash + name_length].to_ascii_lowercase());
+        rest = &after[slash + name_length..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The lines of a `<pre>` block, without the blank lines around them or
@@ -2963,6 +2997,14 @@ mod html_to_markdown_tests {
             html_to_markdown(javadoc),
             "is equivalent to:\n\n> ```\n> char data[] = {'a', 'b'};\n> \
              String str = new String(data);\n> ```\n\nHere are more."
+        );
+    }
+
+    #[test]
+    fn a_tag_in_capitals_is_the_same_tag() {
+        assert_eq!(
+            html_to_markdown("Classes use:\n<PRE>\n Object readResolve();\n</PRE><P>\nMore."),
+            "Classes use:\n\n```\nObject readResolve();\n```\n\nMore."
         );
     }
 
@@ -3409,7 +3451,20 @@ impl Snapshot {
         });
         places.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         places.dedup();
+        // Sorted by file: each file's places are one run.
+        let declared: Vec<&Url> = declarations.iter().map(|declaration| &declaration.file.uri).collect();
         places
+            .chunk_by(|left, right| left.0 == right.0)
+            .filter(|run| {
+                let uri = run[0].0;
+                declared.contains(&uri)
+                    || self
+                        .file(uri)
+                        .is_none_or(|file| places_beyond_imports(&file.text, run.iter().map(|(_, at, _)| *at)))
+            })
+            .flatten()
+            .copied()
+            .collect()
     }
 
     /// What a type, or a field or enum constant of one, is to a search by
@@ -3487,7 +3542,7 @@ impl Snapshot {
         }
         // A file reaching the constant only through `case N:` cannot tell
         // from its tokens whose `N` it is: it is parsed and resolved.
-        candidates.retain(|(file, _)| searches_uses_in(file, member.is_some()));
+        candidates.retain(|(file, _)| searches_uses_in(file));
         let (by_case, named_in): (Vec<_>, Vec<_>) = candidates.drain(..).partition(|(file, text)| {
             enum_constant && file.package != package && !writes_word(text, &owner[0])
         });
@@ -3501,7 +3556,7 @@ impl Snapshot {
         };
         let java: Vec<&(LibraryFile, String)> = candidates
             .iter()
-            .filter(|(file, _)| file.language == Language::Java && searches_uses_in(file, member.is_some()))
+            .filter(|(file, _)| file.language == Language::Java && searches_uses_in(file))
             .collect();
         let threads = std::thread::available_parallelism()
             .map_or(4, std::num::NonZero::get)
@@ -3516,18 +3571,16 @@ impl Snapshot {
                         let mut found = Vec::new();
                         for (file, text) in chunk {
                             let offsets = crate::indexer::words::named_uses(text, named);
-                            if offsets.is_empty() {
+                            let positions: Vec<Position> =
+                                offsets.iter().map(|offset| crate::parser::position_of(text, *offset)).collect();
+                            if !places_beyond_imports(text, positions.iter().copied()) {
                                 continue;
                             }
                             let Some(uri) = libraries.uri_of(file) else {
                                 continue;
                             };
                             self.searched_files.insert(uri.clone(), file.clone());
-                            found.extend(
-                                offsets
-                                    .into_iter()
-                                    .map(|offset| (uri.clone(), crate::parser::position_of(text, offset))),
-                            );
+                            found.extend(positions.into_iter().map(|at| (uri.clone(), at)));
                         }
                         found
                     })
@@ -3592,7 +3645,6 @@ impl Snapshot {
         } else {
             self.library_files_containing(name)
         };
-        let is_field = self.named_target(declaration).is_some_and(|(_, _, member, _)| member.is_some());
         files
             .into_iter()
             .filter(|file| !package_private || self.package(file).unwrap_or_default() == package)
@@ -3601,7 +3653,7 @@ impl Snapshot {
                     || self
                         .searched_files
                         .get(&file.uri)
-                        .is_none_or(|searched| searches_uses_in(&searched, is_field))
+                        .is_none_or(|searched| searches_uses_in(&searched))
             })
             .collect()
     }
