@@ -1816,7 +1816,30 @@ fn outgoing_calls_now(indexer: &Indexer, params: CallHierarchyOutgoingCallsParam
     }
 
 /// Runs `work` on a thread of its own and waits for it without holding up
-/// the request loop.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
-    tokio::task::spawn_blocking(work).await.expect("a request's work panicked")
+/// the request loop. One such search runs at a time, as the libraries'
+/// files it reads stay in memory; one the client stopped waiting for
+/// before its turn is not started.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<Option<T>> + Send + 'static) -> Result<Option<T>> {
+    static ONE_AT_A_TIME: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    /// Marks the request given up when its future is dropped.
+    struct GivenUp(Arc<AtomicBool>);
+    impl Drop for GivenUp {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    let given_up = Arc::new(AtomicBool::new(false));
+    let _guard = GivenUp(Arc::clone(&given_up));
+    let Ok(permit) = ONE_AT_A_TIME.acquire().await else {
+        return Ok(None);
+    };
+    let answer = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        if given_up.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        work()
+    })
+    .await;
+    answer.expect("a request's work panicked")
 }

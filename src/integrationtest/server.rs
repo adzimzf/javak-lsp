@@ -692,7 +692,7 @@ fn in_memory(workspace: PathBuf) -> (Reader, Writer, Url, Host) {
     let (server_reader, server_writer) = tokio::io::split(server_side);
     let root = directory_url(&workspace);
     let (service, socket) = crate::backend::service::service(Arc::new(pinned_indexer(workspace)));
-    let server = tokio::spawn(Server::new(server_reader, server_writer, socket).serve(service));
+    let server = tokio::spawn(Server::new(server_reader, server_writer, socket).concurrency_level(64).serve(service));
     let (reader, writer) = tokio::io::split(client_side);
     (Box::new(reader), Box::new(writer), root, Host(server))
 }
