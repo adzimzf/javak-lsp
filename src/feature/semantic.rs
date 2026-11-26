@@ -2795,8 +2795,85 @@ pub fn javadoc_markdown(comment: &str) -> String {
     markdown.trim().to_owned()
 }
 
-/// The few HTML tags javadoc is written with, as markdown.
+/// The few HTML tags javadoc is written with, as markdown. A `<pre>`
+/// keeps its lines, fenced, and a `<blockquote>` is quoted with `> `, as
+/// jdtls's converter writes them: a fence is never on a line of prose.
 fn html_to_markdown(text: &str) -> String {
+    const BLOCK_TAGS: [&str; 4] = ["<pre>", "</pre>", "<blockquote>", "</blockquote>"];
+    let mut blocks: Vec<(bool, String)> = Vec::new();
+    let mut in_pre = false;
+    let mut quoted = 0usize;
+    let mut rest = text;
+    loop {
+        let next = BLOCK_TAGS
+            .iter()
+            .filter_map(|tag| rest.find(tag).map(|at| (at, *tag)))
+            .min();
+        let (segment, tag) = match next {
+            Some((at, tag)) => (&rest[..at], Some(tag)),
+            None => (rest, None),
+        };
+        if in_pre {
+            let code = preformatted(segment);
+            if !code.is_empty() {
+                blocks.push((quoted > 0, format!("```\n{code}\n```")));
+            }
+        } else {
+            for paragraph in inline_html_to_markdown(segment) {
+                blocks.push((quoted > 0, paragraph));
+            }
+        }
+        let Some(tag) = tag else { break };
+        match tag {
+            "<pre>" => in_pre = true,
+            "</pre>" => in_pre = false,
+            "<blockquote>" => quoted += 1,
+            _ => quoted = quoted.saturating_sub(1),
+        }
+        rest = &rest[segment.len() + tag.len()..];
+    }
+    blocks
+        .into_iter()
+        .map(|(quoted, block)| {
+            if quoted {
+                block.lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n")
+            } else {
+                block
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// The lines of a `<pre>` block, without the blank lines around them or
+/// the indentation they all share.
+fn preformatted(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    let first = lines.iter().position(|line| !line.trim().is_empty());
+    let last = lines.iter().rposition(|line| !line.trim().is_empty());
+    let (Some(first), Some(last)) = (first, last) else {
+        return String::new();
+    };
+    let lines = &lines[first..=last];
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|line| decode_entities(line.get(indent..).unwrap_or_default()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn decode_entities(text: &str) -> String {
+    text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+/// Prose with its inline HTML as markdown, one string a paragraph.
+fn inline_html_to_markdown(text: &str) -> Vec<String> {
     let mut out = text.to_owned();
     for (tag, replacement) in [
         ("<p>", "\n\n"),
@@ -2818,27 +2895,45 @@ fn html_to_markdown(text: &str) -> String {
         ("</ul>", "\n"),
         ("<li>", "\n* "),
         ("</li>", ""),
-        ("<pre>", "\n```\n"),
-        ("</pre>", "\n```\n"),
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&amp;", "&"),
     ] {
         out = out.replace(tag, replacement);
     }
-    let mut paragraphs: Vec<String> = Vec::new();
-    for paragraph in out.split("\n\n") {
-        let joined = paragraph
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !joined.is_empty() {
-            paragraphs.push(joined);
-        }
+    let out = decode_entities(&out);
+    out.split("\n\n")
+        .map(|paragraph| {
+            paragraph
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|joined| !joined.is_empty())
+        .collect()
+}
+
+#[cfg(test)]
+mod html_to_markdown_tests {
+    use super::html_to_markdown;
+
+    #[test]
+    fn a_quoted_pre_block_keeps_its_lines_behind_the_quote() {
+        let javadoc = "is equivalent to:\n<blockquote><pre>\n    char data[] = {'a', 'b'};\n    \
+                       String str = new String(data);\n</pre></blockquote><p>\nHere are more.";
+        assert_eq!(
+            html_to_markdown(javadoc),
+            "is equivalent to:\n\n> ```\n> char data[] = {'a', 'b'};\n> \
+             String str = new String(data);\n> ```\n\nHere are more."
+        );
     }
-    paragraphs.join("\n\n")
+
+    #[test]
+    fn a_pre_block_is_fenced_on_lines_of_its_own() {
+        assert_eq!(
+            html_to_markdown("Use it so: <pre>\n  List&lt;String&gt; names;\n</pre> and done."),
+            "Use it so:\n\n```\nList<String> names;\n```\n\nand done."
+        );
+    }
 }
 
 /// `{@code x}` and `{@literal x}` as code, `{@link Type#member label}` as
