@@ -609,6 +609,7 @@ impl LanguageServer for Backend {
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
                     resolve_provider: Some(true),
                 }),
@@ -1428,6 +1429,52 @@ impl LanguageServer for Backend {
             }),
             ..lens
         })
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let actions = crate::feature::code_action::actions(&snapshot, file, cursor(params.range.start));
+        Ok(Some(
+            actions
+                .into_iter()
+                .map(|action| {
+                    let changes = action
+                        .edits
+                        .into_iter()
+                        .map(|(uri, edits)| {
+                            let edits = edits
+                                .into_iter()
+                                .map(|edit| TextEdit {
+                                    range: Range {
+                                        start: lsp_position(edit.start),
+                                        end: lsp_position(edit.end),
+                                    },
+                                    new_text: edit.text,
+                                })
+                                .collect();
+                            (uri, edits)
+                        })
+                        .collect();
+                    CodeActionOrCommand::CodeAction(CodeAction {
+                        title: action.title,
+                        kind: Some(CodeActionKind::from(action.kind.to_owned())),
+                        edit: action.disabled.is_none().then(|| WorkspaceEdit {
+                            changes: Some(changes),
+                            ..WorkspaceEdit::default()
+                        }),
+                        disabled: action.disabled.map(|reason| CodeActionDisabled { reason: reason.to_owned() }),
+                        ..CodeAction::default()
+                    })
+                })
+                .collect(),
+        ))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {

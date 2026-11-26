@@ -97,6 +97,30 @@ pub struct FileView {
     pub library: bool,
 }
 
+impl FileView {
+    /// The text between two places of the file.
+    pub fn text_between(&self, start: Position, end: Position) -> String {
+        let offset = |at: Position| -> usize {
+            let mut line = 0;
+            let mut column = 0;
+            for (index, character) in self.text.char_indices() {
+                if line == at.line && column >= at.column || line > at.line {
+                    return index;
+                }
+                if character == '\n' {
+                    line += 1;
+                    column = 0;
+                } else {
+                    column += character.len_utf16() as u32;
+                }
+            }
+            self.text.len()
+        };
+        let (start, end) = (offset(start), offset(end));
+        self.text.get(start..end.max(start)).unwrap_or_default().to_owned()
+    }
+}
+
 /// A type as it is written: a name, its arguments and its dimensions.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Type {

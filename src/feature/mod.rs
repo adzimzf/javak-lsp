@@ -8,6 +8,7 @@
 pub mod completion;
 pub mod format;
 pub mod call_hierarchy;
+pub mod code_action;
 pub mod highlight;
 pub mod inlay;
 pub mod java;
