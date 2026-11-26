@@ -1278,8 +1278,19 @@ impl Snapshot {
             .qualifier
             .as_ref()
             .and_then(|qualifier| self.type_named(&format!("{qualifier}.{}", written.name), from));
+        // A name qualified by a package (`org.codehaus.jettison.json.JSONArray`)
+        // is that package's type or none: not another type of its simple
+        // name (fastjson's JSONArray) when the package is not on the
+        // classpath. One qualified by a type (`Map.Entry`) may be a member
+        // the type inherits, found by its simple name.
+        let by_package = written
+            .qualifier
+            .as_deref()
+            .and_then(|qualifier| qualifier.chars().next())
+            .is_some_and(char::is_lowercase);
         let mut declaration = match qualified {
             Some(declaration) => declaration,
+            None if by_package => return None,
             None => self.type_named(&written.name, from)?,
         };
         declaration.bindings = bound(declaration.node, &written.arguments);
