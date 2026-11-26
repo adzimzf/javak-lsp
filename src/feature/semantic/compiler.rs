@@ -555,10 +555,10 @@ fn unused_imports(file: &FileView, has_errors: bool) -> Vec<Report> {
             && !mentioned.contains(import.last_segment())
             && (import.is_static || import.qualifier() != package);
         if repeated || unused {
-            reports.push(unnecessary(
-                name.start,
-                format!("The import {} is never used", import.name),
-            ));
+            // On the whole imported name, as Eclipse marks it.
+            let mut report = unnecessary(name.start, format!("The import {} is never used", import.name));
+            report.finding.end = Some(name.end);
+            reports.push(report);
         }
     }
     reports
