@@ -276,8 +276,9 @@ impl Session {
                 message["params"]["message"].as_str().unwrap_or_default()
             );
             if let Some((_, after)) = markers.iter().find(|(marker, _)| text.contains(marker)) {
-                let after = quiet.map_or(*after, |(current, _)| current.min(*after));
-                quiet = Some((after, Instant::now() + after));
+                // The latest marker says how long to wait: a server that
+                // says it has more to do ("decompiling…") is waited for.
+                quiet = Some((*after, Instant::now() + *after));
             } else if let Some((after, _)) = quiet {
                 // Still talking: the quiet starts again.
                 quiet = Some((after, Instant::now() + after));

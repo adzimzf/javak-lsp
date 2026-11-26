@@ -773,12 +773,16 @@ pub(crate) fn sync(root: &Path, force: bool, options: SyncOptions) -> SyncOutcom
         BuildToolFailure::Failed(message) => message,
     });
     let _ = std::fs::remove_file(&output_file);
-    let mut resolved = match resolved {
+    let resolved = match resolved {
         Ok(resolved) => resolved,
         Err(message) => return SyncOutcome::Failed(message),
     };
+    // Decompiling waits for `decompile_saved`, after the sources jars are
+    // in use; a decompiler Gradle resolved in this run is kept for it.
     if options.decompile {
-        decompile_libraries_without_sources(root, &tool, &mut resolved);
+        if let Some(resolved_decompiler) = resolved.decompiler.as_deref() {
+            decompile::remember_decompiler(resolved_decompiler);
+        }
     }
     let manifest = DependencyManifest {
         format: MANIFEST_FORMAT,
@@ -801,6 +805,43 @@ pub(crate) fn sync(root: &Path, force: bool, options: SyncOptions) -> SyncOutcom
             .filter(|dependency| dependency.decompiled.is_some())
             .count(),
     }
+}
+
+/// Whether some library of the saved manifest has classes no sources jar
+/// holds and that are not decompiled yet.
+pub(crate) fn decompile_pending(root: &Path, options: SyncOptions) -> bool {
+    options.decompile
+        && load_manifest(root).is_some_and(|manifest| {
+            manifest.dependencies.iter().any(|dependency| {
+                !dependency.decompiled.as_ref().is_some_and(|path| path.is_file())
+                    && decompile::missing_sources(dependency).is_some()
+            })
+        })
+}
+
+/// Decompiles what [`decompile_pending`] finds and saves the manifest with
+/// it. A sync saves the manifest first, so the sources jars are read while
+/// this runs: decompiling a few libraries takes minutes the first time.
+/// Returns how many libraries have decompiled sources now.
+pub(crate) fn decompile_saved(root: &Path, options: SyncOptions) -> Option<usize> {
+    if !decompile_pending(root, options) {
+        return None;
+    }
+    let mut manifest = load_manifest(root)?;
+    let tool = BuildTool::detect(root)?;
+    let mut resolved = Resolved {
+        dependencies: std::mem::take(&mut manifest.dependencies),
+        ..Resolved::default()
+    };
+    decompile_libraries_without_sources(root, &tool, &mut resolved);
+    manifest.dependencies = resolved.dependencies;
+    let decompiled = manifest
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.decompiled.is_some())
+        .count();
+    save_manifest(root, &manifest).ok()?;
+    Some(decompiled)
 }
 
 /// Decompile the dependencies that have no sources jar (see [`decompile`]).

@@ -81,10 +81,15 @@ pub(super) const JDTLS_READY: &[(&str, Duration)] = &[("ServiceReady", Duration:
 /// javak-lsp logs the end of its dependency sync. A project whose sync is
 /// up to date says only that its libraries are indexed; a longer quiet
 /// after that leaves room for a sync that is still coming.
+///
+/// Libraries without (all their) sources are decompiled after the sync:
+/// the first time, that takes minutes and says nothing until it is done.
 pub(super) const JAVAK_READY: &[(&str, Duration)] = &[
     ("dependencies synced", Duration::from_secs(3)),
     ("dependency sync failed", Duration::from_secs(3)),
     ("library indexing done", Duration::from_secs(30)),
+    ("decompiling the libraries", Duration::from_secs(15 * 60)),
+    ("libraries decompiled", Duration::from_secs(3)),
 ];
 
 pub(super) async fn record(
