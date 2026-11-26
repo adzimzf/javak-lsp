@@ -846,7 +846,12 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
         // named where its class file does not say which source file it
         // comes from (compiled without `SourceFile`, as bcprov and xerces
         // are): it is in its top-level class's file.
-        let name = name.split('$').next().unwrap_or(name);
+        // Only a class file is named so; a class may begin its own name
+        // with `$` (gson's `$Gson$Types`).
+        let name = match (file.ends_with(".class"), name.get(1..).and_then(|rest| rest.find('$'))) {
+            (true, Some(at)) => &name[..at + 1],
+            _ => name,
+        };
         return Some(format!(
             "{LIBRARY}/{container}/{}/{name}.java",
             package.replace('.', "/")
