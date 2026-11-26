@@ -839,6 +839,10 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
         // jdtls names the class file (`Array.class`) or, since 1.5x, the
         // source file it would show (`Array.java`, the top-level class's
         // file for a nested one).
+        // A Kotlin file is named with its own extension.
+        if let Some(name) = file.strip_suffix(".kt") {
+            return Some(format!("{LIBRARY}/{container}/{}/{name}.kt", package.replace('.', "/")));
+        }
         let name = file
             .strip_suffix(".class")
             .or_else(|| file.strip_suffix(".java"))?;
