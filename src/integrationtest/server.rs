@@ -606,7 +606,10 @@ impl Session {
             }],
             // jdtls answers signature help only when it is switched on.
             "initializationOptions": {
-                "settings": {"java": {"signatureHelp": {"enabled": true}}},
+                "settings": {"java": {
+                    "signatureHelp": {"enabled": true},
+                    "configuration": java_runtimes(),
+                }},
                 // Without it jdtls answers nothing for a declaration in the
                 // JDK or a library, which an editor opens through `jdt://`.
                 "extendedClientCapabilities": {"classFileContentsSupport": true},
@@ -839,6 +842,11 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
         let name = file
             .strip_suffix(".class")
             .or_else(|| file.strip_suffix(".java"))?;
+        // A nested class's own class file (`Flags$StringJoiner.class`),
+        // named where its class file does not say which source file it
+        // comes from (compiled without `SourceFile`, as bcprov and xerces
+        // are): it is in its top-level class's file.
+        let name = name.split('$').next().unwrap_or(name);
         return Some(format!(
             "{LIBRARY}/{container}/{}/{name}.java",
             package.replace('.', "/")
@@ -848,6 +856,36 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
     let (_, extracted) = path.split_once("/sources/")?;
     let (_, inside) = extracted.split_once('/')?;
     Some(format!("{LIBRARY}/{inside}"))
+}
+
+/// jdtls's JDKs: only `JAVA_HOME`'s, the one javak-lsp reads too, rather
+/// than every JDK it can find. jdtls looks for the installed JDKs at start
+/// and gives a Java 8 project the oldest that runs it (a JDK 21 beside
+/// the JDK 25 both are started with): the two would answer from different
+/// JDKs. Without `JAVA_HOME`, jdtls chooses as it does.
+fn java_runtimes() -> Value {
+    let Some(home) = std::env::var_os("JAVA_HOME").map(std::path::PathBuf::from) else {
+        return json!({});
+    };
+    let release = std::fs::read_to_string(home.join("release")).unwrap_or_default();
+    let version = release
+        .lines()
+        .find_map(|line| line.strip_prefix("JAVA_VERSION="))
+        .map(|version| version.trim_matches('"').to_owned())
+        .unwrap_or_default();
+    // `1.8.0_412` is JavaSE-1.8, `25.0.1` JavaSE-25.
+    let major = if let Some(rest) = version.strip_prefix("1.") {
+        format!("1.{}", rest.split(['.', '_']).next().unwrap_or_default())
+    } else {
+        version.split('.').next().unwrap_or_default().to_owned()
+    };
+    if major.is_empty() {
+        return json!({});
+    }
+    json!({
+        "detectJdksAtStart": false,
+        "runtimes": [{"name": format!("JavaSE-{major}"), "path": home, "default": true}],
+    })
 }
 
 /// How [`library_place`] starts, so a place in a library is told apart.

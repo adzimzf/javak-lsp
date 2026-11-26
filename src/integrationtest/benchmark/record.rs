@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::prepare::ServerCommand;
 use super::probe::{Method, Probe};
 use super::render::View;
-use crate::integrationtest::server::{failure, OnError, Session};
+use crate::integrationtest::server::{failure, OnError, Session, FAILED};
 
 /// How long one request may take on a real project, unless
 /// `JDTLS_COMPAT_PATIENCE` says otherwise (seconds).
@@ -193,16 +193,13 @@ pub(super) async fn record(
                 session.change_document(file, version, &text).await;
             }
             let took = asked.elapsed();
-            let timed_out = answer.is_null() && took >= patience();
             eprintln!(
                 "      [{}] {}/{count} {:.1}s {} → {}",
                 server.name,
                 number + 1,
                 took.as_secs_f64(),
                 probe.id,
-                if timed_out {
-                    format!("no answer within {}s", patience().as_secs())
-                } else if failed.is_some() {
+                if failed.is_some() {
                     lines.join(" ")
                 } else {
                     preview(&lines)
@@ -275,10 +272,18 @@ async fn ask(session: &mut Session, probe: &Probe, text: &str) -> Value {
     }
 }
 
+/// The server's answer to one request. No answer within [`patience`] is
+/// no answer at all, recorded as a failure like an internal error: a
+/// question jdtls did not answer has nothing to compare with.
 async fn request(session: &mut Session, method: &str, params: Value) -> Value {
-    session
+    let asked = Instant::now();
+    let answer = session
         .request_until(method, params, OnError::AnswerNothingUnlessItFailed, |_| true)
-        .await
+        .await;
+    if answer.is_null() && asked.elapsed() >= patience() {
+        return json!({ FAILED: format!("no answer within {}s", patience().as_secs()) });
+    }
+    answer
 }
 
 fn params(session: &Session, probe: &Probe, text: &str) -> Value {

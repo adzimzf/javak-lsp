@@ -26,8 +26,8 @@ pub(super) struct RepoReport {
     /// Per request: how many answers agree, of how many asked.
     pub(super) by_method: BTreeMap<String, (usize, usize)>,
     pub(super) differences: Vec<Difference>,
-    /// The questions jdtls failed on (an internal error, not an answer),
-    /// with what it said: left out of `total` and of the counts.
+    /// The questions jdtls failed on (an internal error, or no answer in
+    /// time), with what it said: left out of `total` and of the counts.
     pub(super) jdtls_failed: Vec<(String, String)>,
     pub(super) jdtls: Timing,
     pub(super) javak: Timing,
