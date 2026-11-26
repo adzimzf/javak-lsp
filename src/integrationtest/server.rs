@@ -17,7 +17,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio::sync::mpsc;
 use tokio::time::{timeout_at, Instant};
 use tower_lsp::lsp_types::Url;
-use tower_lsp::{LspService, Server};
+use tower_lsp::Server;
 
 use super::fixture::{Fixture, FixtureFile};
 use crate::indexer::library::Libraries;
@@ -691,10 +691,8 @@ fn in_memory(workspace: PathBuf) -> (Reader, Writer, Url, Host) {
     let (client_side, server_side) = tokio::io::duplex(PIPE_CAPACITY);
     let (server_reader, server_writer) = tokio::io::split(server_side);
     let root = directory_url(&workspace);
-    let (service, socket) = LspService::new(move |client| {
-        crate::backend_over(Arc::new(pinned_indexer(workspace.clone())), client)
-    });
-    let server = tokio::spawn(Server::new(server_reader, server_writer, socket).serve(service));
+    let (service, socket) = crate::backend::service::service(Arc::new(pinned_indexer(workspace)));
+    let server = tokio::spawn(Server::new(server_reader, server_writer, socket).concurrency_level(64).serve(service));
     let (reader, writer) = tokio::io::split(client_side);
     (Box::new(reader), Box::new(writer), root, Host(server))
 }
@@ -803,7 +801,12 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
         let class = contents.split('?').next()?;
         let (container, rest) = class.split_once('/')?;
         let (package, file) = rest.rsplit_once('/')?;
-        let name = file.strip_suffix(".class")?;
+        // jdtls names the class file (`Array.class`) or, since 1.5x, the
+        // source file it would show (`Array.java`, the top-level class's
+        // file for a nested one).
+        let name = file
+            .strip_suffix(".class")
+            .or_else(|| file.strip_suffix(".java"))?;
         return Some(format!(
             "{LIBRARY}/{container}/{}/{name}.java",
             package.replace('.', "/")

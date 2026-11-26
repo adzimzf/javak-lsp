@@ -13,6 +13,19 @@ pub struct Help {
     pub parameters: Vec<String>,
     /// The parameter being typed, where the cursor is at one.
     pub active: Option<usize>,
+    /// Every overload the call could mean, in the order jdtls lists them,
+    /// the chosen one among them.
+    pub overloads: Vec<Overload>,
+    /// Which of `overloads` is the chosen one.
+    pub active_overload: usize,
+}
+
+/// One signature of the overloads offered.
+pub struct Overload {
+    pub name: String,
+    pub parameters: Vec<String>,
+    /// The return type as written; `None` for a constructor.
+    pub returns: Option<String>,
 }
 
 /// The call the cursor is in, or `None` where it is in none.
@@ -24,10 +37,13 @@ pub fn help_at(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<Hel
             let chosen = chosen(snapshot, file, &candidates, call, index)?;
             let parameters = substituted_parameters(snapshot, chosen);
             let active = active_parameter(index, &parameters, chosen.node);
+            let (overloads, active_overload) = overloads(snapshot, &candidates, chosen);
             Some(Help {
                 name: called_name(chosen),
                 parameters,
                 active,
+                overloads,
+                active_overload,
             })
         }
         None => {
@@ -36,10 +52,13 @@ pub fn help_at(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<Hel
             let call = on_a_call_name(&path, at)?;
             let candidates = candidates_of(snapshot, file, call, at)?;
             let chosen = chosen(snapshot, file, &candidates, call, 0)?;
+            let (overloads, active_overload) = overloads(snapshot, &candidates, chosen);
             Some(Help {
                 name: called_name(chosen),
                 parameters: substituted_parameters(snapshot, chosen),
                 active: None,
+                overloads,
+                active_overload,
             })
         }
     }
@@ -272,7 +291,17 @@ fn chosen<'a>(
                 .count()
         })
         .unwrap_or(0);
-    let wanted = written.max(index + 1);
+    // An empty argument list means the overload without parameters, where
+    // there is one, as it does to jdtls.
+    let wanted = if written == 0
+        && candidates
+            .iter()
+            .any(|candidate| parameters_of(candidate.node).is_empty() && candidate.node.kind == "method_declaration")
+    {
+        0
+    } else {
+        written.max(index + 1)
+    };
     let with_room: Vec<&Found<'a>> = candidates
         .iter()
         .filter(|candidate| {
@@ -342,6 +371,44 @@ fn is_varargs(declaration: &Syn) -> bool {
     parameters_of(declaration)
         .last()
         .is_some_and(|parameter| parameter.kind == "spread_parameter")
+}
+
+/// The overloads of a call as jdtls lists them, and where the chosen one
+/// is among them. A method overridden lower in the hierarchy is listed
+/// once, as the nearest type declares it. jdtls lists the fewest
+/// parameters first, and those of one count last declared first.
+fn overloads(snapshot: &Snapshot, candidates: &[Found<'_>], chosen: &Found<'_>) -> (Vec<Overload>, usize) {
+    let mut kept: Vec<(&Found<'_>, Vec<String>)> = Vec::new();
+    for candidate in candidates {
+        // A field of the same name is no overload.
+        let is_field = matches!(
+            candidate.node.kind.as_str(),
+            "field_declaration" | "constant_declaration" | "variable_declarator" | "enum_constant"
+        );
+        if is_field && !std::ptr::eq(candidate.node, chosen.node) {
+            continue;
+        }
+        let types = snapshot.parameter_types(candidate);
+        if kept.iter().any(|(_, seen)| *seen == types) {
+            continue;
+        }
+        kept.push((candidate, types));
+    }
+    kept.reverse();
+    kept.sort_by_key(|(_, types)| types.len());
+    let active = kept
+        .iter()
+        .position(|(candidate, _)| std::ptr::eq(candidate.node, chosen.node))
+        .unwrap_or(0);
+    let overloads = kept
+        .into_iter()
+        .map(|(candidate, _)| Overload {
+            name: called_name(candidate),
+            parameters: substituted_parameters(snapshot, candidate),
+            returns: snapshot.return_written(candidate),
+        })
+        .collect();
+    (overloads, active)
 }
 
 /// A constructor is named after its class; a method after itself.

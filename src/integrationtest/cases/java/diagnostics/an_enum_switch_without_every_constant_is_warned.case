@@ -1,0 +1,23 @@
+//- /src/main/java/com/demo/State.java
+package com.demo;
+enum State { OPEN, CLOSED, BROKEN }
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+  void run(State state) {
+    switch (state) {
+      case OPEN:
+        break;
+    }
+    switch (state) {
+      case OPEN:
+        break;
+      default:
+        break;
+    }
+  }
+}
+//= expected
+/src/main/java/com/demo/Main.java:5:13  The enum constant BROKEN needs a corresponding case label in this enum switch on State
+/src/main/java/com/demo/Main.java:5:13  The enum constant CLOSED needs a corresponding case label in this enum switch on State

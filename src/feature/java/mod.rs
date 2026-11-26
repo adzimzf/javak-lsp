@@ -22,7 +22,7 @@ impl LanguageFeatures for Java {
         let parameters: Vec<String> = method
             .parameters
             .iter()
-            .map(|parameter| self.parameter(parameter))
+            .map(|parameter| format!("{}{}", parameter.annotations, self.parameter(parameter)))
             .collect();
         let thrown = method
             .thrown
@@ -64,8 +64,24 @@ impl LanguageFeatures for Java {
         true
     }
 
-    fn also_referenced<'a>(&self, _snapshot: &'a Snapshot, _found: &Found<'a>) -> Vec<Found<'a>> {
-        Vec::new()
+    /// A class is referenced where its constructors are called: `new
+    /// Point(…)` names the class, as jdtls counts it.
+    fn also_referenced<'a>(&self, _snapshot: &'a Snapshot, found: &Found<'a>) -> Vec<Found<'a>> {
+        if !matches!(found.node.kind.as_str(), "class_declaration" | "record_declaration" | "enum_declaration") {
+            return Vec::new();
+        }
+        crate::feature::semantic::members_of(found.node)
+            .into_iter()
+            .filter(|(member, _)| {
+                matches!(member.kind.as_str(), "constructor_declaration" | "compact_constructor_declaration")
+            })
+            .map(|(member, name)| Found {
+                file: found.file,
+                node: member,
+                name,
+                bindings: found.bindings.clone(),
+            })
+            .collect()
     }
 
     fn implicit_packages(&self) -> &'static [&'static str] {

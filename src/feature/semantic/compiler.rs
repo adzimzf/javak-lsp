@@ -64,7 +64,7 @@ fn tasks(file: &FileView) -> Vec<Report> {
                 .map_or(line_end, |&(next, _)| next.min(line_end));
             let message = text[start..end].trim_end();
             reports.push(Report {
-                finding: Finding {
+                finding: Finding { end: None,
                     at: offset_from(comment.start, text, start),
                     message: message.to_owned(),
                 },
@@ -161,7 +161,7 @@ pub struct Errors {
 
 fn unnecessary(at: Position, message: String) -> Report {
     Report {
-        finding: Finding { at, message },
+        finding: Finding { end: None, at, message },
         level: Level::Warning,
         unnecessary: true,
     }
@@ -219,7 +219,7 @@ fn types_in_another_file(file: &FileView) -> Vec<Finding> {
         .filter(|node| is_type_declaration(node) && has_modifier(node, "public"))
         .filter_map(|node| node.child("name"))
         .filter(|name| name.text != stem)
-        .map(|name| Finding {
+        .map(|name| Finding { end: None,
             at: name.start,
             message: format!(
                 "The public type {} must be defined in its own file",
@@ -274,7 +274,7 @@ fn duplicate_methods(file: &FileView) -> Vec<Finding> {
             .filter(|declarations| declarations.len() > 1)
         {
             for (name, written) in declarations {
-                findings.push(Finding {
+                findings.push(Finding { end: None,
                     at: name.start,
                     message: format!(
                         "Duplicate method {}({}) in type {owner}",
@@ -347,7 +347,7 @@ fn this_without_instance(file: &FileView) -> (Vec<Finding>, Vec<Finding>) {
         if qualified || explicit_call {
             return;
         }
-        let finding = || Finding {
+        let finding = || Finding { end: None,
             at: node.start,
             message: "Cannot use this in a static context".to_owned(),
         };
@@ -555,10 +555,10 @@ fn unused_imports(file: &FileView, has_errors: bool) -> Vec<Report> {
             && !mentioned.contains(import.last_segment())
             && (import.is_static || import.qualifier() != package);
         if repeated || unused {
-            reports.push(unnecessary(
-                name.start,
-                format!("The import {} is never used", import.name),
-            ));
+            // On the whole imported name, as Eclipse marks it.
+            let mut report = unnecessary(name.start, format!("The import {} is never used", import.name));
+            report.finding.end = Some(name.end);
+            reports.push(report);
         }
     }
     reports

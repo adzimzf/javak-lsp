@@ -8,6 +8,7 @@
 pub mod java;
 pub mod kotlin;
 pub mod library;
+pub mod words;
 pub mod project;
 
 use std::collections::HashSet;
@@ -543,12 +544,36 @@ impl Indexer {
         let mut found = Vec::new();
         for (uri, language, text) in self.workspace_documents() {
             let outline = syntax(language).outline(&text);
-            for entry in outline {
-                let is_type = matches!(entry.kind, Kind::Class | Kind::Interface | Kind::Enum);
-                if !is_type || !query::matches(query, &entry.name) {
+            let is_type = |entry: &crate::parser::Outline| {
+                matches!(entry.kind, Kind::Class | Kind::Interface | Kind::Enum)
+            };
+            let package = (language == Language::Java)
+                .then(|| syntax(language).package(&text))
+                .flatten();
+            for entry in &outline {
+                if !is_type(entry) || !query::matches(query, &entry.name) {
                     continue;
                 }
-                found.push(located(uri.clone(), &entry));
+                let mut symbol = located(uri.clone(), entry);
+                // jdtls names where a type is: its package, and the types
+                // it is nested in (`org.demo.Outer`).
+                if language == Language::Java {
+                    let mut outer: Vec<&crate::parser::Outline> = outline
+                        .iter()
+                        .filter(|other| {
+                            is_type(other) && other.start <= entry.start && entry.end <= other.end
+                                && (other.start, other.end) != (entry.start, entry.end)
+                        })
+                        .collect();
+                    outer.sort_by_key(|other| other.start);
+                    let names = package
+                        .iter()
+                        .cloned()
+                        .chain(outer.iter().map(|other| other.name.clone()))
+                        .collect::<Vec<_>>();
+                    symbol.container_name = Some(names.join("."));
+                }
+                found.push(symbol);
             }
         }
         found

@@ -20,10 +20,186 @@ use crate::feature::semantic::{
 /// The name the file is read with in place of what is being typed.
 const PROBE: &str = "javakProbe";
 
+#[derive(Clone, Debug, Default)]
 pub struct Offer {
     pub name: String,
     /// What a client sorts by: the server's order, not the alphabet.
     pub rank: String,
+    /// What the name is, for the client's icon and jdtls's order.
+    pub kind: OfferKind,
+    /// Each declaration the name offers, an overload each: jdtls offers
+    /// them one by one. Empty for a keyword, a package or a local.
+    pub declarations: Vec<Proposed>,
+    /// A member of the receiver before the `.` (`text.|`), which jdtls
+    /// ranks by relevance alone.
+    pub member: bool,
+}
+
+/// One declaration a name offers.
+#[derive(Clone, Debug, Default)]
+pub struct Proposed {
+    /// `(String text, int count)` of a method, as written.
+    pub parameters: Option<Vec<String>>,
+    /// The type a method returns or a field holds.
+    pub returns: Option<String>,
+    /// Whether the receiver's own type declares it, not a supertype.
+    pub own: bool,
+    pub is_static: bool,
+    pub deprecated: bool,
+    /// Where it is in its type, for jdtls's order of equal proposals.
+    pub index: usize,
+    /// What JDT adds to its relevance for where it is declared and how it
+    /// is reached: its receiver's own type, an instance member through an
+    /// instance.
+    pub relevance: i32,
+}
+
+/// JDT's relevance points (`RelevanceConstants`) a completion weighs.
+mod relevance {
+    /// The name is spelled with the prefix's case.
+    pub const CASE: i32 = 10;
+    /// The name is the prefix.
+    pub const EXACT_NAME: i32 = 4;
+    /// An instance member through an instance.
+    pub const NON_STATIC: i32 = 11;
+    /// Of exactly the type the place wants (`int x = Units.|`).
+    pub const EXACT_EXPECTED_TYPE: i32 = 30;
+}
+
+/// How many proposals jdtls answers at most
+/// (`java.completion.maxResults`).
+pub const MAX_PROPOSALS: usize = 50;
+
+/// One completion item, as jdtls offers it: an overload each.
+#[derive(Clone, Debug)]
+pub struct Proposal {
+    pub name: String,
+    /// `append(String str) : StringBuilder`, `length : int`, `class`.
+    pub label: String,
+    pub kind: OfferKind,
+    /// What a client sorts by: the server's order.
+    pub sort: String,
+}
+
+/// The offers as jdtls's proposals: each overload of a name on its own,
+/// a receiver's members in jdtls's order — by relevance, then kind, then
+/// name (a longer name before its prefix, as JDT compares), then fewer
+/// parameters, then the last declared first — the other offers in their
+/// own order; the first [`MAX_PROPOSALS`] of them, and whether some were
+/// left out.
+pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
+    struct Ranked {
+        proposal: Proposal,
+        member: bool,
+        relevance: i32,
+        parameters: usize,
+        index: usize,
+        order: usize,
+    }
+    let mut ranked = Vec::new();
+    for (order, offer) in offers.into_iter().enumerate() {
+        let mut relevance = 0;
+        if !prefix.is_empty() && offer.name.starts_with(prefix) {
+            relevance += relevance::CASE;
+        }
+        if offer.name == prefix {
+            relevance += relevance::EXACT_NAME;
+        }
+        let declarations = if offer.declarations.is_empty() {
+            vec![Proposed::default()]
+        } else {
+            offer.declarations.clone()
+        };
+        for proposed in declarations {
+            let label = match (&proposed.parameters, &proposed.returns) {
+                (Some(parameters), returns) => format!(
+                    "{}({}){}",
+                    offer.name,
+                    parameters.join(", "),
+                    returns.as_ref().map(|returns| format!(" : {returns}")).unwrap_or_default()
+                ),
+                (None, Some(returns)) => format!("{} : {returns}", offer.name),
+                (None, None) => offer.name.clone(),
+            };
+            ranked.push(Ranked {
+                proposal: Proposal {
+                    name: offer.name.clone(),
+                    label,
+                    kind: offer.kind,
+                    sort: offer.rank.clone(),
+                },
+                member: offer.member,
+                relevance: relevance + proposed.relevance,
+                parameters: proposed.parameters.as_ref().map_or(0, Vec::len),
+                index: proposed.index,
+                order,
+            });
+        }
+    }
+    let members = !ranked.is_empty() && ranked.iter().all(|ranked| ranked.member);
+    if members {
+        ranked.sort_by(|left, right| {
+            right
+                .relevance
+                .cmp(&left.relevance)
+                .then(left.proposal.kind.cmp(&right.proposal.kind))
+                .then_with(|| jdt_name_order(&left.proposal.name, &right.proposal.name))
+                .then(left.parameters.cmp(&right.parameters))
+                .then(right.index.cmp(&left.index))
+        });
+    } else {
+        ranked.sort_by(|left, right| {
+            left.proposal
+                .sort
+                .cmp(&right.proposal.sort)
+                .then(left.order.cmp(&right.order))
+                .then(left.parameters.cmp(&right.parameters))
+                .then(right.index.cmp(&left.index))
+        });
+    }
+    let incomplete = ranked.len() > MAX_PROPOSALS;
+    let proposals = ranked
+        .into_iter()
+        .take(MAX_PROPOSALS)
+        .enumerate()
+        .map(|(position, ranked)| Proposal {
+            // The client keeps the server's order.
+            sort: format!("{position:04}"),
+            ..ranked.proposal
+        })
+        .collect();
+    (proposals, incomplete)
+}
+
+/// How JDT orders two names of equal relevance and kind: character by
+/// character, a name that runs on past the other's end first
+/// (`compareUnsigned` before `compare`).
+fn jdt_name_order(left: &str, right: &str) -> std::cmp::Ordering {
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    for (index, character) in left.iter().enumerate() {
+        let Some(other) = right.get(index) else {
+            return std::cmp::Ordering::Less;
+        };
+        match character.cmp(other) {
+            std::cmp::Ordering::Equal => {}
+            unequal => return unequal,
+        }
+    }
+    right.len().cmp(&left.len())
+}
+
+/// What a name offered is, in the order jdtls ranks kinds that are
+/// equally relevant (JDT's `CompletionProposal` kinds).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OfferKind {
+    Field,
+    Keyword,
+    Local,
+    #[default]
+    Method,
+    Package,
+    Type,
 }
 
 /// What to offer at `at`, in the order to offer it.
@@ -65,6 +241,7 @@ pub fn offers(
                 Offer {
                     name: implied.to_owned(),
                     rank: format!("0{implied}"),
+                    ..Offer::default()
                 },
             );
         }
@@ -123,7 +300,7 @@ fn contextual(
         return offers;
     }
     if let Some(receiver) = receiver_of(path, name) {
-        return members(snapshot, file, receiver, prefix);
+        return members(snapshot, file, receiver, prefix, false, None);
     }
     if enclosing_kind(path, "switch_label").is_some() {
         return switch_constants(snapshot, file, name.start);
@@ -154,6 +331,7 @@ fn contextual(
             .map(|name| Offer {
                 rank: format!("2{name}"),
                 name,
+                ..Offer::default()
             }),
     );
     offers.extend(types_matching_prefix(snapshot, prefix));
@@ -217,6 +395,7 @@ fn keywords(file: &FileView, path: &[&Syn]) -> Vec<Offer> {
         .map(|word| Offer {
             name: (*word).to_owned(),
             rank: format!("9{word}"),
+            ..Offer::default()
         })
         .collect()
 }
@@ -267,13 +446,21 @@ fn is_dotted_name(node: &Syn) -> bool {
 }
 
 /// The members of a receiver's type that are visible here.
-fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -> Vec<Offer> {
+fn members(
+    snapshot: &Snapshot,
+    file: &FileView,
+    receiver: &Syn,
+    prefix: &str,
+    calling: bool,
+    expected: Option<&str>,
+) -> Vec<Offer> {
     // `names.length` of an array, and nothing else an array has.
     if let Some(written) = type_of_receiver(snapshot, file, receiver) {
         if written.dimensions > 0 {
             return vec![Offer {
                 name: "length".to_owned(),
                 rank: "0length".to_owned(),
+                ..Offer::default()
             }];
         }
     }
@@ -284,12 +471,16 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
         .type_named(receiver.text.trim(), file)
         .filter(|_| !is_value);
     if let Some(declaration) = as_a_type {
-        let mut offers = visible(snapshot, file, &declaration, Wanted::Static);
+        let mut offers = visible(snapshot, file, &declaration, Wanted::Static, None, calling, expected);
         // `Suit.class`: a class literal, after the members.
         if file.language == Language::Java {
             offers.push(Offer {
                 name: "class".to_owned(),
                 rank: "9class".to_owned(),
+                kind: OfferKind::Keyword,
+                member: true,
+
+                ..Offer::default()
             });
         }
         return offers;
@@ -305,7 +496,7 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
         .of_type(&written, file)
         .or_else(|| bound_of(snapshot, file, receiver, &written));
     let mut offers = declaration
-        .map(|declaration| visible(snapshot, file, &declaration, Wanted::Instance))
+        .map(|declaration| visible(snapshot, file, &declaration, Wanted::Instance, Some(receiver.start), calling, expected))
         .unwrap_or_default();
     let depth = offers.len();
     for (index, name) in snapshot
@@ -315,7 +506,7 @@ fn members(snapshot: &Snapshot, file: &FileView, receiver: &Syn, prefix: &str) -
     {
         if !offers.iter().any(|offer| offer.name == name) {
             let rank = features(file.language).member_rank(depth + 1, index, &name, "method_declaration");
-            offers.push(Offer { name, rank });
+            offers.push(Offer { name, rank, ..Offer::default() });
         }
     }
     offers
@@ -370,6 +561,7 @@ fn types_in_package(snapshot: &Snapshot, package: &str, prefix: &str) -> Vec<Off
         .map(|name| Offer {
             rank: format!("0{name}"),
             name,
+            ..Offer::default()
         })
         .collect()
 }
@@ -398,15 +590,39 @@ enum Wanted {
 
 /// The members of a type and its supertypes that this file may name,
 /// nearest first and in source order.
+///
+/// `at` is where an instance is written for [`Wanted::Instance`]: in Java,
+/// every value has `Object`'s methods, its protected ones only inside the
+/// value's own type, as jdtls offers them. `calling` keeps methods
+/// only.
 fn visible(
     snapshot: &Snapshot,
     from: &FileView,
     of: &Found<'_>,
     wanted: Wanted,
+    at: Option<Position>,
+    calling: bool,
+    expected: Option<&str>,
 ) -> Vec<Offer> {
-    let mut offers = Vec::new();
-    let mut seen = Vec::new();
-    for (depth, type_of) in snapshot.with_supertypes(of).into_iter().enumerate() {
+    let mut offers: Vec<Offer> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    // The parameter types of each offer's overloads, by offer.
+    let mut signatures: Vec<Vec<Vec<String>>> = Vec::new();
+    let java = from.language == Language::Java && at.is_some();
+    let inside = |declaration: &Found<'_>| {
+        at.is_some_and(|at| {
+            declaration.file.uri == from.uri && declaration.node.start <= at && at <= declaration.node.end
+        })
+    };
+    let mut owners = snapshot.with_supertypes(of);
+    // Every value is an `Object`, written or not.
+    if java
+        && !owners.iter().any(|owner| owner.name.text == "Object")
+        && let Some(object) = snapshot.type_named("Object", from)
+    {
+        owners.push(object);
+    }
+    for (depth, type_of) in owners.into_iter().enumerate() {
         let members = members_of(type_of.node);
         for (index, (member, named)) in members.iter().enumerate() {
             let is_static = member.text.contains("static") || member.kind == "enum_constant";
@@ -414,22 +630,83 @@ fn visible(
             if matches!(member.kind.as_str(), "constructor_declaration" | "compact_constructor_declaration") {
                 continue;
             }
+            let says = |word: &str| {
+                member
+                    .first("modifiers")
+                    .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|written| written == word))
+            };
+            // `Object`'s protected methods (`clone`, `finalize`) are a
+            // value's only inside its own type.
+            let object_of_interface = java && type_of.name.text == "Object" && type_of.file.library;
+            if object_of_interface && says("protected") && !inside(of) {
+                continue;
+            }
             let offered = match wanted {
                 Wanted::Static => is_static,
                 Wanted::Instance => member.kind != "enum_constant",
                 Wanted::Everything => true,
-            };
-            if !offered || !reachable(snapshot, from, &type_of, member) {
+            } && (!calling || member.kind == "method_declaration");
+            let object_method = object_of_interface && !says("private");
+            if !offered || !(object_method || reachable(snapshot, from, &type_of, member)) {
                 continue;
             }
-            if seen.contains(&named.text) {
+            // Each overload is offered, an override once: as the nearest
+            // type declares it.
+            let is_method = member.kind == "method_declaration";
+            let found = Found {
+                file: type_of.file,
+                node: member,
+                name: named,
+                bindings: type_of.bindings.clone(),
+            };
+            let signature = if is_method { snapshot.erased_parameter_types(&found) } else { Vec::new() };
+            let proposed = Proposed {
+                parameters: is_method.then(|| {
+                    crate::feature::semantic::parameters(member, &type_of.bindings)
+                        .iter()
+                        .map(|parameter| features(from.language).parameter(parameter))
+                        .collect()
+                }),
+                returns: snapshot.return_written(&found).or_else(|| {
+                    (!is_method).then(|| snapshot.type_of_declaration(&found).map(|written| written.written())).flatten()
+                }),
+                own: depth == 0,
+                is_static: says("static")
+                    || matches!(member.kind.as_str(), "enum_constant" | "constant_declaration"),
+                deprecated: member
+                    .first("modifiers")
+                    .is_some_and(|modifiers| modifiers.text.contains("@Deprecated")),
+                index,
+                relevance: if wanted == Wanted::Instance && !says("static") && member.kind != "constant_declaration" {
+                    relevance::NON_STATIC
+                } else {
+                    0
+                },
+            };
+            let mut proposed = proposed;
+            if expected.is_some_and(|expected| proposed.returns.as_deref() == Some(expected)) {
+                proposed.relevance += relevance::EXACT_EXPECTED_TYPE;
+            }
+            if let Some(at) = seen.iter().position(|known| *known == named.text) {
+                let offer: &mut Offer = &mut offers[at];
+                let overloaded = is_method
+                    && offer.kind == OfferKind::Method
+                    && !signatures[at].contains(&signature);
+                if overloaded {
+                    signatures[at].push(signature);
+                    offer.declarations.push(proposed);
+                }
                 continue;
             }
             seen.push(named.text.clone());
+            signatures.push(vec![signature]);
             let rank = features(from.language).member_rank(depth, index, &named.text, &member.kind);
             offers.push(Offer {
                 name: named.text.clone(),
                 rank,
+                kind: if is_method { OfferKind::Method } else { OfferKind::Field },
+                declarations: vec![proposed],
+                member: wanted != Wanted::Everything,
             });
         }
     }
@@ -496,6 +773,7 @@ fn switch_constants(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<O
         .map(|(index, (_, named))| Offer {
             name: named.text.clone(),
             rank: format!("0{index:04}"),
+            ..Offer::default()
         })
         .collect()
 }
@@ -521,6 +799,7 @@ fn annotation_elements(snapshot: &Snapshot, file: &FileView, path: &[&Syn]) -> V
         .map(|(index, (_, named))| Offer {
             name: named.text.clone(),
             rank: format!("0{index:04}"),
+            ..Offer::default()
         })
         .collect()
 }
@@ -546,6 +825,7 @@ fn packages(snapshot: &Snapshot, prefix: &str) -> Vec<Offer> {
         .map(|name| Offer {
             rank: format!("1{name}"),
             name,
+            ..Offer::default()
         })
         .collect()
 }
@@ -566,6 +846,7 @@ fn types_matching_prefix(snapshot: &Snapshot, prefix: &str) -> Vec<Offer> {
         .map(|name| Offer {
             rank: format!("5{name}"),
             name,
+            ..Offer::default()
         })
         .collect()
 }
@@ -577,10 +858,11 @@ fn scope(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Offer> {
         offers.push(Offer {
             name,
             rank: format!("0{index:04}"),
+            ..Offer::default()
         });
     }
     if let Some(enclosing) = snapshot.enclosing(file, at) {
-        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything));
+        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything, None, false, None));
     }
     // An inner class reads the members of the classes around it too.
     let outer = path_to(&file.tree, at)
@@ -591,7 +873,7 @@ fn scope(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Offer> {
         .filter_map(|node| snapshot.type_named(&node.child("name")?.text, file))
         .collect::<Vec<_>>();
     for enclosing in outer {
-        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything));
+        offers.extend(visible(snapshot, file, &enclosing, Wanted::Everything, None, false, None));
     }
     offers
 }
@@ -601,7 +883,7 @@ fn enclosing_kind<'a>(path: &[&'a Syn], kind: &str) -> Option<&'a Syn> {
 }
 
 /// The identifier characters written just before the cursor.
-fn typed_prefix(text: &str, at: Position) -> String {
+pub fn typed_prefix(text: &str, at: Position) -> String {
     let Some(line) = text.lines().nth(at.line as usize) else {
         return String::new();
     };

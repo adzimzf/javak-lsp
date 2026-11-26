@@ -31,10 +31,11 @@ const OBJECT_METHODS: &[&str] = &[
 ];
 
 /// The methods a class can call without a receiver, by name.
-type Methods<'a> = HashMap<String, Vec<Found<'a>>>;
+pub(super) type Methods<'a> = HashMap<String, Vec<Found<'a>>>;
 
-/// How deep a class hierarchy is followed to check that all of it is known.
-const HIERARCHY_DEPTH: usize = 8;
+/// How many types of a class hierarchy are followed to check that all of
+/// it is known: the JDK's collections have a dozen and more.
+const HIERARCHY_DEPTH: usize = 64;
 
 impl Snapshot {
     /// The calls of a Java file that no method of their name can take:
@@ -68,7 +69,7 @@ impl Snapshot {
     /// The methods a class and the classes above it declare, by name, for
     /// a class whose whole hierarchy is known. Inside an anonymous class a
     /// name may be the enclosing class's: not followed.
-    fn methods_of_caller<'a>(&'a self, class: &'a Syn, file: &'a FileView) -> Option<Methods<'a>> {
+    pub(super) fn methods_of_caller<'a>(&'a self, class: &'a Syn, file: &'a FileView) -> Option<Methods<'a>> {
         if !is_type_declaration(class) {
             return None;
         }
@@ -151,7 +152,7 @@ impl Snapshot {
         {
             return None;
         }
-        Some(Finding {
+        Some(Finding { end: None,
             at: name.start,
             message: format!(
                 "The method {}({}) in the type {owner} is not applicable for the arguments ({})",
@@ -196,7 +197,7 @@ impl Snapshot {
 
     /// The type of an argument as the compiler writes it in a message, for
     /// the expressions whose type the sources say for certain.
-    fn argument_type_for_message(&self, argument: &Syn, file: &FileView) -> Option<String> {
+    pub(super) fn argument_type_for_message(&self, argument: &Syn, file: &FileView) -> Option<String> {
         let certain = matches!(
             argument.kind.as_str(),
             "identifier"
@@ -261,7 +262,12 @@ fn written_supertypes(declaration: &Syn) -> usize {
                 "superclass" | "super_interfaces" | "extends_interfaces" | "interface_type_list"
             )
         })
-        .flat_map(|list| list.walk())
+        // The types each list names, not the type arguments inside them.
+        .flat_map(|list| {
+            list.children
+                .iter()
+                .flat_map(|child| if child.kind == "type_list" { child.children.iter().collect::<Vec<_>>() } else { vec![child] })
+        })
         .filter(|named| {
             matches!(
                 named.kind.as_str(),

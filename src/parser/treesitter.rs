@@ -205,7 +205,7 @@ pub fn empty_tree() -> Syn {
 /// shown as the source it could not place, first line only.
 fn collect_errors(node: Node, text: &str, findings: &mut Vec<Finding>) {
     if node.is_missing() {
-        findings.push(Finding {
+        findings.push(Finding { end: None,
             at: at(node.start_byte(), text),
             message: format!("missing `{}`", node.kind()),
         });
@@ -214,7 +214,7 @@ fn collect_errors(node: Node, text: &str, findings: &mut Vec<Finding>) {
     if node.is_error() {
         let source = node.utf8_text(text.as_bytes()).unwrap_or_default();
         let first_line = source.lines().next().unwrap_or_default().trim();
-        findings.push(Finding {
+        findings.push(Finding { end: None,
             at: at(node.start_byte(), text),
             message: format!("unexpected `{first_line}`"),
         });

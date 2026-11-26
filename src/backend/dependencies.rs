@@ -321,6 +321,10 @@ async fn index_libraries(
         // Parse the library files the open files name now, rather than on
         // the first request.
         drop(indexer.snapshot());
+        // Read (or build, once per jar version) what words each jar's files
+        // write, which a search for uses in the libraries starts from.
+        let libraries = std::sync::Arc::clone(&indexer.libraries);
+        std::thread::spawn(move || libraries.warm_word_indexes());
         indexed
     })
     .await

@@ -171,7 +171,13 @@ impl View<'_> {
         let range = location
             .get("targetSelectionRange")
             .unwrap_or(&location["range"]);
-        format!("{}:{}", self.place(uri), start(range))
+        let place = self.place(uri);
+        // Each server reads its own copy of a library file (a class file,
+        // a source jar), so only the file is compared, not the line.
+        if place.starts_with(LIBRARY) {
+            return place;
+        }
+        format!("{place}:{}", start(range))
     }
 
     fn locations(&self, answer: &Value) -> Vec<String> {
@@ -181,31 +187,67 @@ impl View<'_> {
         items(answer).map(|location| self.location(location)).collect()
     }
 
+    /// What a rename changes: each line that reads differently once the
+    /// edits are made, as `/path:line text`. Two servers can make the same
+    /// change in different edits (jdtls sends a few wide ones), so the
+    /// result is what is compared, not the edits.
     fn workspace_edit(&self, answer: &Value) -> Vec<String> {
-        let edits = |uri: &Value, edits: &Value| -> Vec<String> {
-            items(edits)
-                .map(|edit| {
-                    format!(
-                        "{}:{} -> {}",
-                        self.place(uri),
-                        range(&edit["range"]),
-                        edit["newText"].as_str().unwrap_or_default()
-                    )
-                })
-                .collect()
-        };
+        let uris: Vec<Value> = answer["changes"]
+            .as_object()
+            .map(|changes| changes.keys().map(|uri| Value::String(uri.clone())).collect())
+            .unwrap_or_default();
+        let mut by_file: Vec<(&Value, Vec<&Value>)> = answer["changes"]
+            .as_object()
+            .map(|changes| {
+                uris.iter()
+                    .zip(changes.values())
+                    .map(|(uri, file_edits)| (uri, items(file_edits).collect()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut lines = Vec::new();
-        if let Some(changes) = answer["changes"].as_object() {
-            for (uri, file_edits) in changes {
-                lines.extend(edits(&Value::String(uri.clone()), file_edits));
-            }
-        }
         for change in items(&answer["documentChanges"]) {
             if change.get("textDocument").is_some() {
-                lines.extend(edits(&change["textDocument"]["uri"], &change["edits"]));
+                by_file.push((&change["textDocument"]["uri"], items(&change["edits"]).collect()));
             } else if let Some(kind) = change["kind"].as_str() {
                 let target = change.get("newUri").unwrap_or(&change["uri"]);
                 lines.push(format!("{kind} {}", self.place(target)));
+            }
+        }
+        for (uri, edits) in by_file {
+            let place = self.place(uri);
+            let text = uri
+                .as_str()
+                .and_then(|uri| tower_lsp::lsp_types::Url::parse(uri).ok())
+                .and_then(|uri| uri.to_file_path().ok())
+                .and_then(|path| std::fs::read_to_string(path).ok());
+            let Some(text) = text else {
+                // A file the harness cannot read: the edits themselves.
+                lines.extend(edits.iter().map(|edit| {
+                    format!(
+                        "{place}:{} -> {}",
+                        range(&edit["range"]),
+                        edit["newText"].as_str().unwrap_or_default()
+                    )
+                }));
+                continue;
+            };
+            let before: Vec<&str> = text.lines().collect();
+            let after = applied(&text, edits.iter().copied());
+            if before.len() == after.len() {
+                for (number, (old, new)) in before.iter().zip(&after).enumerate() {
+                    if *old != new.as_str() {
+                        lines.push(format!("{place}:{} {}", number + 1, new.trim()));
+                    }
+                }
+            } else {
+                let after: Vec<String> = after;
+                let before: Vec<String> = before.iter().map(|line| (*line).to_owned()).collect();
+                lines.extend(
+                    super::report::diff(&before, &after)
+                        .into_iter()
+                        .map(|line| format!("{place} {line}")),
+                );
             }
         }
         lines
@@ -237,11 +279,14 @@ impl View<'_> {
         let legend = self.session.semantic_legend();
         let types = legend["tokenTypes"].as_array().cloned().unwrap_or_default();
         let modifiers = legend["tokenModifiers"].as_array().cloned().unwrap_or_default();
-        let data: Vec<u64> = items(&answer["data"]).filter_map(Value::as_u64).collect();
-        let (mut line, mut character) = (0, 0);
-        let mut lines = Vec::new();
+        // Read as signed: jdtls sends a token out of order now and then (a
+        // type parameter's `extends` after its bound), a negative delta.
+        // Tokens are then compared by place, not by the order sent.
+        let data: Vec<i64> = items(&answer["data"]).filter_map(Value::as_i64).collect();
+        let (mut line, mut character) = (0i64, 0i64);
+        let mut placed = Vec::new();
         for token in data.chunks_exact(5) {
-            if token[0] > 0 {
+            if token[0] != 0 {
                 line += token[0];
                 character = token[1];
             } else {
@@ -258,15 +303,13 @@ impl View<'_> {
                 .filter_map(|(_, modifier)| modifier.as_str())
                 .collect();
             set.sort();
-            lines.push(format!(
-                "{}:{} len {} {kind} {}",
-                line + 1,
-                character + 1,
-                token[2],
-                set.join(",")
+            placed.push((
+                (line, character),
+                format!("{}:{} len {} {kind} {}", line + 1, character + 1, token[2], set.join(",")),
             ));
         }
-        lines
+        placed.sort_by_key(|(at, _)| *at);
+        placed.into_iter().map(|(_, rendered)| rendered).collect()
     }
 }
 
@@ -436,6 +479,11 @@ fn outline(symbol: &Value, depth: usize, lines: &mut Vec<String>) {
 /// The file as it reads after the edits, so two servers that write the
 /// same result in different edits agree.
 fn formatted(text: &str, answer: &Value) -> Vec<String> {
+    applied(text, items(answer))
+}
+
+/// `text` with the LSP text edits made, as lines.
+fn applied<'a>(text: &str, edits: impl Iterator<Item = &'a Value>) -> Vec<String> {
     let offsets = line_offsets(text);
     let offset = |position: &Value| {
         let line = position["line"].as_u64().unwrap_or_default() as usize;
@@ -453,7 +501,7 @@ fn formatted(text: &str, answer: &Value) -> Vec<String> {
         }
         text.len()
     };
-    let mut edits: Vec<(usize, usize, &str)> = items(answer)
+    let mut edits: Vec<(usize, usize, &str)> = edits
         .map(|edit| {
             (
                 offset(&edit["range"]["start"]),

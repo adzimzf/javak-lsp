@@ -499,6 +499,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower-lsp",
+ "tower-service",
  "tree-sitter",
  "tree-sitter-java",
  "tree-sitter-kotlin-ng",

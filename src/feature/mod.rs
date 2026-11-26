@@ -8,13 +8,17 @@
 pub mod completion;
 pub mod format;
 pub mod call_hierarchy;
+pub mod code_action;
 pub mod highlight;
+pub mod inlay;
 pub mod java;
 pub mod kotlin;
 pub mod outline;
 pub mod query;
 pub mod semantic;
+pub mod selection;
 pub mod signature;
+pub mod type_hierarchy;
 
 use crate::language::Language;
 use crate::parser::Syn;
@@ -28,6 +32,9 @@ pub struct Parameter {
     pub name: String,
     /// Whether it takes the rest of the arguments (`String...`, `vararg`).
     pub spread: bool,
+    /// The annotations written on it, each followed by a space
+    /// (`@Nullable `), which jdtls shows on hover.
+    pub annotations: String,
 }
 
 /// What a method's signature is made of.

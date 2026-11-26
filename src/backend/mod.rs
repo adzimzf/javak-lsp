@@ -4,6 +4,7 @@
 //! `kotlin`; dependency sync runs from [`dependencies`].
 
 mod dependencies;
+pub mod service;
 pub mod java;
 pub mod kotlin;
 
@@ -65,6 +66,92 @@ pub struct Backend {
 }
 
 impl Backend {
+    fn prepared_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let at = params.text_document_position_params;
+        if self.indexer.language(&at.text_document.uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&at.text_document.uri) else {
+            return Ok(None);
+        };
+        let item = crate::feature::type_hierarchy::item_at(&snapshot, file, cursor(at.position));
+        Ok(item.map(|item| vec![type_item(&snapshot, &item, None)]))
+    }
+
+    fn type_hierarchy_related(indexer: &Indexer, item: &TypeHierarchyItem, up: bool) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        use crate::feature::type_hierarchy as hierarchy;
+        let snapshot = indexer.snapshot();
+        let place = |key: &str| -> Option<(Url, Position)> {
+            let data = item.data.as_ref()?.get(key)?;
+            let uri = Url::parse(data.get("uri")?.as_str()?).ok()?;
+            let at = Position {
+                line: data.get("line")?.as_u64()? as u32,
+                column: data.get("character")?.as_u64()? as u32,
+            };
+            Some((uri, at))
+        };
+        let Some((uri, at)) = place("type") else {
+            return Ok(None);
+        };
+        let Some(of) = snapshot.declaration_at(&uri, at) else {
+            return Ok(None);
+        };
+        // The method asked about first, which every expansion matches.
+        let target = place("method").and_then(|(uri, at)| snapshot.declaration_at(&uri, at));
+        let method = target.as_ref().and_then(|target| {
+            if (&target.file.uri, target.selection()) == (&of.file.uri, of.selection()) {
+                return Some(target.clone());
+            }
+            None
+        });
+        let of = match &method {
+            Some(method) => hierarchy::owner(method).unwrap_or(of),
+            None => of,
+        };
+        let asked = hierarchy::Item {
+            of,
+            method: method.or_else(|| target.clone()),
+            without_method: false,
+        };
+        let related = if up {
+            hierarchy::supertypes(&snapshot, &asked)
+        } else {
+            hierarchy::subtypes(&snapshot, &asked)
+        };
+        Ok(Some(
+            related
+                .iter()
+                .map(|related| type_item(&snapshot, related, target.as_ref()))
+                .collect(),
+        ))
+    }
+
+    /// What jdtls names the place a declaration is in: the project, or for
+    /// a library source the module or jar it was extracted from.
+    fn source_label(&self, file: &crate::feature::semantic::FileView) -> String {
+        if file.library {
+            let path = file.uri.path();
+            if let Some((_, extracted)) = path.split_once("/sources/") {
+                let mut parts = extracted.split('/');
+                let archive = parts.next().unwrap_or_default();
+                if let Some(module) = parts.next().filter(|module| module.contains('.')) {
+                    return format!("module: {module}");
+                }
+                return archive.to_owned();
+            }
+        }
+        self.indexer
+            .workspace_root
+            .get()
+            .and_then(|root| root.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
     /// The edits that format a Java file, or the lines `range` touches.
     /// Other files are not formatted.
     fn formatted(
@@ -127,12 +214,27 @@ impl Backend {
                 wrong_package: !diagnostics.is_empty(),
             };
             reports = compiler::reports(file, on_source_root, elsewhere);
+            if on_source_root {
+                reports.extend(snapshot.type_reports(file));
+            }
+            // Eclipse weighs `@SuppressWarnings` only in a file without errors.
+            let has_errors = !findings.is_empty() || reports.iter().any(|report| report.level == compiler::Level::Error);
+            if has_errors {
+                reports.retain(|report| !report.finding.message.starts_with("At least one of the problems in category"));
+            }
         }
         findings.sort_by_key(|finding| finding.at);
         diagnostics.extend(
             findings
                 .into_iter()
-                .map(|finding| reported(finding.at, finding.message)),
+                .map(|finding| {
+                    let end = finding.end;
+                    let mut diagnostic = reported(finding.at, finding.message);
+                    if let Some(end) = end {
+                        diagnostic.range.end = lsp_position(end);
+                    }
+                    diagnostic
+                }),
         );
         diagnostics.extend(reports.into_iter().map(reported_by_compiler));
         diagnostics
@@ -168,6 +270,97 @@ fn is_constructor(found: &crate::feature::semantic::Found<'_>) -> bool {
 /// the start of the import's qualified name (`org.jsoup.parser.Parser`),
 /// a constructor called by `new Reader(in)` at its `new`, and the variable
 /// of an enhanced `for` is not listed at its own declaration.
+/// A type hierarchy item as jdtls makes one: the type's name and kind, at
+/// the method shown where there is one; `null` for a type without the
+/// method asked about. Its data says where the type (or method) and the
+/// method first asked about are.
+fn type_item(
+    snapshot: &Snapshot,
+    item: &crate::feature::type_hierarchy::Item<'_>,
+    target: Option<&Found<'_>>,
+) -> TypeHierarchyItem {
+    let shown = item.shown();
+    let (name, detail) = crate::feature::type_hierarchy::name_and_detail(snapshot, &item.of);
+    let kind = if item.without_method {
+        SymbolKind::NULL
+    } else {
+        match item.of.node.kind.as_str() {
+            "interface_declaration" | "annotation_type_declaration" => SymbolKind::INTERFACE,
+            "enum_declaration" => SymbolKind::ENUM,
+            _ => SymbolKind::CLASS,
+        }
+    };
+    let place = |found: &Found<'_>| {
+        serde_json::json!({
+            "uri": found.file.uri,
+            "line": found.selection().line,
+            "character": found.selection().column,
+        })
+    };
+    let target = target.or(item.method.as_ref());
+    let name_end = Position {
+        line: shown.name.start.line,
+        column: shown.name.start.column + shown.name.text.split('<').next().unwrap_or_default().trim().encode_utf16().count() as u32,
+    };
+    TypeHierarchyItem {
+        name,
+        kind,
+        tags: None,
+        detail: Some(detail),
+        uri: shown.file.uri.clone(),
+        range: span_range((shown.node.start, shown.node.end)),
+        selection_range: span_range((shown.name.start, name_end)),
+        data: Some(serde_json::json!({
+            "type": place(shown),
+            "method": target.map(place),
+        })),
+    }
+}
+
+/// The names jdtls puts a code lens on: each type, nested ones too, and
+/// each method, constructor or annotation element a type declares — not
+/// what is declared inside a method.
+fn lens_names<'a>(node: &'a crate::parser::Syn, names: &mut Vec<&'a crate::parser::Syn>) {
+    for child in &node.children {
+        let is_type = crate::feature::semantic::is_type_declaration(child);
+        let is_member = matches!(
+            child.kind.as_str(),
+            "method_declaration"
+                | "constructor_declaration"
+                | "compact_constructor_declaration"
+                | "annotation_type_element_declaration"
+        );
+        if (is_type || is_member)
+            && let Some(name) = child.child("name")
+        {
+            names.push(name);
+        }
+        // Into a type's body, never into a member's.
+        let container = matches!(
+            child.kind.as_str(),
+            "class_body" | "interface_body" | "enum_body" | "enum_body_declarations" | "annotation_type_body"
+        ) || is_type;
+        if container {
+            lens_names(child, names);
+        }
+    }
+}
+
+/// Whether the name at `at` is called as `super.name(…)`.
+fn is_super_call(snapshot: &crate::feature::semantic::Snapshot, uri: &Url, at: Position) -> bool {
+    let Some(file) = snapshot.file(uri) else {
+        return false;
+    };
+    crate::feature::semantic::path_to(&file.tree, at)
+        .iter()
+        .rev()
+        .find(|node| node.kind == "method_invocation")
+        .is_some_and(|call| {
+            call.child("name").is_some_and(|name| name.start == at)
+                && call.child("object").is_some_and(|object| object.kind == "super")
+        })
+}
+
 fn as_jdtls_reports<'a>(
     snapshot: &'a crate::feature::semantic::Snapshot,
     found: &crate::feature::semantic::Found<'_>,
@@ -175,6 +368,7 @@ fn as_jdtls_reports<'a>(
 ) -> Vec<(&'a Url, Position)> {
     let declared_by_for = found.node.kind == "enhanced_for_statement";
     let constructor = is_constructor(found);
+    let is_type = crate::feature::semantic::is_type_declaration(found.node);
     uses.into_iter()
         .filter(|(uri, at)| {
             !(declared_by_for && **uri == found.file.uri && *at == found.selection())
@@ -197,7 +391,27 @@ fn as_jdtls_reports<'a>(
                     matches!(child.kind.as_str(), "scoped_identifier" | "identifier")
                 })
             });
-            (uri, name.map_or(at, |name| name.start))
+            if let Some(name) = name {
+                return (uri, name.start);
+            }
+            // A type named with its qualifier (`org.demo.Shape`,
+            // `Outer.Inner`) is reported from where the qualifier starts.
+            if is_type {
+                let qualified = path.iter().rev().find(|node| {
+                    matches!(
+                        node.kind.as_str(),
+                        "scoped_type_identifier" | "scoped_identifier" | "field_access"
+                    ) && node.children.last().is_some_and(|last| last.start == at)
+                        && node
+                            .text
+                            .chars()
+                            .all(|character| character.is_alphanumeric() || matches!(character, '_' | '$' | '.') || character.is_whitespace())
+                });
+                if let Some(qualified) = qualified {
+                    return (uri, qualified.start);
+                }
+            }
+            (uri, at)
         })
         .collect()
 }
@@ -277,11 +491,16 @@ fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
         compiler::Level::Warning => DiagnosticSeverity::WARNING,
         compiler::Level::Information => DiagnosticSeverity::INFORMATION,
     };
-    Diagnostic {
+    let end = report.finding.end;
+    let mut diagnostic = Diagnostic {
         severity: Some(severity),
         tags: report.unnecessary.then(|| vec![DiagnosticTag::UNNECESSARY]),
         ..reported(report.finding.at, report.finding.message)
+    };
+    if let Some(end) = end {
+        diagnostic.range.end = lsp_position(end);
     }
+    diagnostic
 }
 
 fn lsp_position(at: Position) -> tower_lsp::lsp_types::Position {
@@ -409,6 +628,29 @@ impl LanguageServer for Backend {
                     ..CompletionOptions::default()
                 }),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(true),
+                }),
+                inlay_hint_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        legend: SemanticTokensLegend {
+                            token_types: crate::feature::semantic::TOKEN_TYPES
+                                .iter()
+                                .map(|name| SemanticTokenType::new(name))
+                                .collect(),
+                            token_modifiers: crate::feature::semantic::TOKEN_MODIFIERS
+                                .iter()
+                                .map(|name| SemanticTokenModifier::new(name))
+                                .collect(),
+                        },
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                        range: Some(false),
+                        ..SemanticTokensOptions::default()
+                    },
+                )),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
@@ -617,6 +859,36 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
+        if language == Language::Java {
+            match found.node.kind.as_str() {
+                // jdtls goes to the type of a variable, not of what a
+                // method returns; a constructor's is its class.
+                "method_declaration" => return Ok(None),
+                "constructor_declaration" | "compact_constructor_declaration" => {
+                    let path = crate::feature::semantic::path_to(&found.file.tree, found.node.start);
+                    let Some(class) = path
+                        .iter()
+                        .rev()
+                        .find(|node| !std::ptr::eq(**node, found.node) && crate::feature::semantic::is_type_declaration(node))
+                        .and_then(|class| class.child("name"))
+                    else {
+                        return Ok(None);
+                    };
+                    return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
+                        uri: found.file.uri.clone(),
+                        range: at_name(class.start),
+                    })));
+                }
+                // A type variable is a type: its own declaration.
+                "type_parameter" => {
+                    return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
+                        uri: found.file.uri.clone(),
+                        range: at_name(found.selection()),
+                    })));
+                }
+                _ => {}
+            }
+        }
         let Some(written) = snapshot.type_of_declaration(&found) else {
             return Ok(None);
         };
@@ -632,18 +904,33 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let at = params.text_document_position_params;
         let snapshot = self.indexer.snapshot();
-        let found = snapshot.declaration_at(&at.text_document.uri, cursor(at.position));
-        let Some(found) = found else {
+        let Some(hover) = snapshot.hover_at(&at.text_document.uri, cursor(at.position)) else {
             return Ok(None);
         };
-        let Some(signature) = snapshot.signature_of(&found) else {
-            return Ok(None);
-        };
+        let signature = MarkedString::LanguageString(LanguageString {
+            language: protocol(hover.found.file.language).language_id().to_owned(),
+            value: hover.signature,
+        });
+        if hover.found.file.language != Language::Java {
+            return Ok(Some(Hover {
+                contents: HoverContents::Scalar(signature),
+                range: None,
+            }));
+        }
+        // jdtls follows the signature with the javadoc and with where the
+        // declaration is: `Source: *[project](file#line)*`.
+        let mut parts = vec![signature];
+        if let Some(documentation) = hover.documentation {
+            parts.push(MarkedString::String(documentation));
+        }
+        parts.push(MarkedString::String(format!(
+            "Source: *[{}]({}#{})*",
+            self.source_label(hover.found.file),
+            hover.found.file.uri,
+            hover.found.name.start.line + 1
+        )));
         Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::LanguageString(LanguageString {
-                language: protocol(found.file.language).language_id().to_owned(),
-                value: signature,
-            })),
+            contents: HoverContents::Array(parts),
             range: None,
         }))
     }
@@ -652,48 +939,17 @@ impl LanguageServer for Backend {
         &self,
         params: request::GotoImplementationParams,
     ) -> Result<Option<request::GotoImplementationResponse>> {
-        let at = params.text_document_position_params;
-        let snapshot = self.indexer.snapshot();
-        let places: Vec<Location> = snapshot
-            .implementations_at(&at.text_document.uri, cursor(at.position))
-            .into_iter()
-            .map(|found| Location {
-                uri: found.file.uri.clone(),
-                range: at_name(found.selection()),
-            })
-            .collect();
-        Ok(Some(request::GotoImplementationResponse::Array(places)))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || goto_implementation_now(&indexer, params)).await
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let at = params.text_document_position;
-        let snapshot = self.indexer.snapshot();
-        let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position))
-        else {
-            return Ok(None);
-        };
-        let mut uses = snapshot.uses_of(&found);
-        for also in features(found.file.language).also_referenced(&snapshot, &found) {
-            uses.extend(snapshot.uses_of(&also));
-        }
-        if found.file.language == Language::Java {
-            // `this(in)` and `super(in)` call a constructor without naming it.
-            if is_constructor(&found) {
-                let calls = call_hierarchy::call_sites(&snapshot, &found);
-                uses.extend(calls.into_iter().map(|(file, start, _)| (&file.uri, start)));
-            }
-            uses = as_jdtls_reports(&snapshot, &found, uses);
-        }
-        uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
-        uses.dedup();
-        let places = uses
-            .into_iter()
-            .map(|(uri, at)| Location {
-                uri: uri.clone(),
-                range: at_name(at),
-            })
-            .collect();
-        Ok(Some(places))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || references_now(&indexer, params)).await
     }
 
     async fn document_highlight(
@@ -758,6 +1014,22 @@ impl LanguageServer for Backend {
             .into_iter()
             .filter_map(|at| highlight::shown(file, at, names_a_type))
             .collect();
+        // A javadoc naming it (`{@link #area()}`) is read there.
+        let length = found.name.text.encode_utf16().count() as u32;
+        places.extend(
+            snapshot
+                .javadoc_uses_of(&found)
+                .into_iter()
+                .filter(|(in_file, _)| **in_file == uri)
+                .map(|(_, at)| highlight::Highlight {
+                    start: at,
+                    end: Position {
+                        line: at.line,
+                        column: at.column + length,
+                    },
+                    write: false,
+                }),
+        );
         places.sort();
         places.dedup();
         Ok(Some(places.into_iter().map(highlighted).collect()))
@@ -774,10 +1046,17 @@ impl LanguageServer for Backend {
         if found.file.library {
             return Ok(None);
         }
+        let tied = snapshot.tied_to(&found);
+        // A method overriding a library's cannot be renamed alone, and the
+        // library's is not the workspace's to rename: jdtls refuses.
+        if found.file.language == Language::Java && tied.iter().any(|tied| tied.file.library) {
+            return Ok(None);
+        }
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut places: Vec<(&Url, Position)> = Vec::new();
-        for tied in snapshot.tied_to(&found) {
+        for tied in tied {
             places.extend(snapshot.uses_of(&tied));
+            places.extend(snapshot.javadoc_uses_of(&tied));
         }
         places.extend(snapshot.javadoc_tags_of(&found));
         places.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
@@ -810,23 +1089,49 @@ impl LanguageServer for Backend {
         let Some(help) = crate::feature::signature::help_at(&snapshot, file, cursor(at.position)) else {
             return Ok(None);
         };
-        let label = format!("{}({})", help.name, help.parameters.join(", "));
-        let parameters = help
-            .parameters
+        let information = |parameters: &[String]| -> Vec<ParameterInformation> {
+            parameters
+                .iter()
+                .map(|written| ParameterInformation {
+                    label: ParameterLabel::Simple(written.clone()),
+                    documentation: None,
+                })
+                .collect()
+        };
+        if file.language != Language::Java {
+            let label = format!("{}({})", help.name, help.parameters.join(", "));
+            return Ok(Some(SignatureHelp {
+                signatures: vec![SignatureInformation {
+                    label,
+                    documentation: None,
+                    parameters: Some(information(&help.parameters)),
+                    active_parameter: help.active.map(|at| at as u32),
+                }],
+                active_signature: Some(0),
+                active_parameter: help.active.map(|at| at as u32),
+            }));
+        }
+        // jdtls offers every overload, `name(String text) : void`.
+        let signatures = help
+            .overloads
             .iter()
-            .map(|written| ParameterInformation {
-                label: ParameterLabel::Simple(written.clone()),
-                documentation: None,
+            .map(|overload| {
+                let returns = overload
+                    .returns
+                    .as_ref()
+                    .map(|returns| format!(" : {returns}"))
+                    .unwrap_or_default();
+                SignatureInformation {
+                    label: format!("{}({}){returns}", overload.name, overload.parameters.join(", ")),
+                    documentation: None,
+                    parameters: Some(information(&overload.parameters)),
+                    active_parameter: None,
+                }
             })
             .collect();
         Ok(Some(SignatureHelp {
-            signatures: vec![SignatureInformation {
-                label,
-                documentation: None,
-                parameters: Some(parameters),
-                active_parameter: help.active.map(|at| at as u32),
-            }],
-            active_signature: Some(0),
+            signatures,
+            active_signature: Some(help.active_overload as u32),
             active_parameter: help.active.map(|at| at as u32),
         }))
     }
@@ -844,6 +1149,35 @@ impl LanguageServer for Backend {
             cursor(at.position),
             implied.as_deref(),
         );
+        if file.language == Language::Java {
+            // As jdtls offers them: an item per overload, ranked, at most
+            // fifty, the list then incomplete.
+            let prefix = crate::feature::completion::typed_prefix(&file.text, cursor(at.position));
+            let (proposals, incomplete) = crate::feature::completion::proposals(offers, &prefix);
+            use crate::feature::completion::OfferKind;
+            let items = proposals
+                .into_iter()
+                .map(|proposal| CompletionItem {
+                    label: proposal.label,
+                    filter_text: Some(proposal.name.clone()),
+                    insert_text: Some(proposal.name),
+                    kind: Some(match proposal.kind {
+                        OfferKind::Field => CompletionItemKind::FIELD,
+                        OfferKind::Keyword => CompletionItemKind::KEYWORD,
+                        OfferKind::Local => CompletionItemKind::VARIABLE,
+                        OfferKind::Method => CompletionItemKind::METHOD,
+                        OfferKind::Package => CompletionItemKind::MODULE,
+                        OfferKind::Type => CompletionItemKind::CLASS,
+                    }),
+                    sort_text: Some(proposal.sort),
+                    ..CompletionItem::default()
+                })
+                .collect();
+            return Ok(Some(CompletionResponse::List(CompletionList {
+                is_incomplete: incomplete,
+                items,
+            })));
+        }
         Ok(Some(CompletionResponse::Array(
             offers
                 .into_iter()
@@ -876,6 +1210,18 @@ impl LanguageServer for Backend {
         if !is_the_workspaces {
             return Ok(None);
         }
+        // A name the workspace declares can still mean a library's
+        // declaration here (`super.read(…)`), which jdtls does not rename.
+        // (One overriding a library's method is refused by the rename.)
+        if language == Language::Java
+            && self
+                .indexer
+                .snapshot()
+                .declaration_at(&uri, at)
+                .is_some_and(|found| found.file.library)
+        {
+            return Ok(None);
+        }
         Ok(Some(PrepareRenameResponse::Range(Range {
             start: lsp_position(name.start),
             end: lsp_position(name.end),
@@ -886,7 +1232,10 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
-        Ok(Some(self.indexer.types_matching(&params.query)))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || symbol_now(&indexer, params)).await
     }
 
     async fn prepare_call_hierarchy(
@@ -907,37 +1256,20 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
-        let snapshot = self.indexer.snapshot();
-        let Some(of) = item_of(&snapshot, &params.item) else {
-            return Ok(None);
-        };
-        let calls = call_hierarchy::incoming(&snapshot, &of)
-            .into_iter()
-            .map(|calls| CallHierarchyIncomingCall {
-                // As jdtls does: the caller is shown at its first call.
-                from: call_item(&snapshot, &calls.member, calls.at.first().copied()),
-                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
-            })
-            .collect();
-        Ok(Some(calls))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || incoming_calls_now(&indexer, params)).await
     }
 
     async fn outgoing_calls(
         &self,
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
-        let snapshot = self.indexer.snapshot();
-        let Some(of) = item_of(&snapshot, &params.item) else {
-            return Ok(None);
-        };
-        let calls = call_hierarchy::outgoing(&snapshot, &of)
-            .into_iter()
-            .map(|calls| CallHierarchyOutgoingCall {
-                to: call_item(&snapshot, &calls.member, None),
-                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
-            })
-            .collect();
-        Ok(Some(calls))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || outgoing_calls_now(&indexer, params)).await
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
@@ -948,6 +1280,230 @@ impl LanguageServer for Backend {
         let language = self.indexer.language(&uri).unwrap_or(Language::Java);
         let folds = self.indexer.syntax(language).folds(&text);
         Ok(Some(folds.into_iter().map(folding_range).collect()))
+    }
+
+    /// As jdtls's references code lens: one at the name of each type and
+    /// of each method or constructor a type declares, counted on resolve.
+    async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let mut names = Vec::new();
+        lens_names(&file.tree, &mut names);
+        let lenses = names
+            .into_iter()
+            .map(|name| CodeLens {
+                range: span_range((name.start, name.end)),
+                command: None,
+                data: Some(serde_json::json!([uri, lsp_position(name.start), "references"])),
+            })
+            .collect();
+        Ok(Some(lenses))
+    }
+
+    async fn code_lens_resolve(&self, lens: CodeLens) -> Result<CodeLens> {
+        let Some(uri) = lens
+            .data
+            .as_ref()
+            .and_then(|data| data.get(0))
+            .and_then(Value::as_str)
+            .and_then(|uri| Url::parse(uri).ok())
+        else {
+            return Ok(lens);
+        };
+        let position = lens.range.start;
+        let places = self
+            .references(ReferenceParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: ReferenceContext {
+                    include_declaration: false,
+                },
+            })
+            .await?
+            .unwrap_or_default();
+        let title = if places.len() == 1 {
+            "1 reference".to_owned()
+        } else {
+            format!("{} references", places.len())
+        };
+        Ok(CodeLens {
+            command: Some(Command {
+                title,
+                command: "java.show.references".to_owned(),
+                arguments: Some(vec![
+                    serde_json::json!(uri),
+                    serde_json::json!(position),
+                    serde_json::json!(places),
+                ]),
+            }),
+            ..lens
+        })
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let actions = crate::feature::code_action::actions(&snapshot, file, cursor(params.range.start));
+        Ok(Some(
+            actions
+                .into_iter()
+                .map(|action| {
+                    let changes = action
+                        .edits
+                        .into_iter()
+                        .map(|(uri, edits)| {
+                            let edits = edits
+                                .into_iter()
+                                .map(|edit| TextEdit {
+                                    range: Range {
+                                        start: lsp_position(edit.start),
+                                        end: lsp_position(edit.end),
+                                    },
+                                    new_text: edit.text,
+                                })
+                                .collect();
+                            (uri, edits)
+                        })
+                        .collect();
+                    CodeActionOrCommand::CodeAction(CodeAction {
+                        title: action.title,
+                        kind: Some(CodeActionKind::from(action.kind.to_owned())),
+                        edit: action.disabled.is_none().then(|| WorkspaceEdit {
+                            changes: Some(changes),
+                            ..WorkspaceEdit::default()
+                        }),
+                        disabled: action.disabled.map(|reason| CodeActionDisabled { reason: reason.to_owned() }),
+                        ..CodeAction::default()
+                    })
+                })
+                .collect(),
+        ))
+    }
+
+    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let mut data = Vec::new();
+        let (mut line, mut column) = (0, 0);
+        for token in snapshot.semantic_tokens(file) {
+            let delta_line = token.at.line - line;
+            let delta_start = if delta_line == 0 { token.at.column - column } else { token.at.column };
+            data.push(SemanticToken {
+                delta_line,
+                delta_start,
+                length: token.length,
+                token_type: token.kind,
+                token_modifiers_bitset: token.modifiers,
+            });
+            (line, column) = (token.at.line, token.at.column);
+        }
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens { result_id: None, data })))
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let hints = crate::feature::inlay::hints(
+            &snapshot,
+            file,
+            cursor(params.range.start),
+            cursor(params.range.end),
+        )
+        .into_iter()
+        .map(|hint| InlayHint {
+            position: lsp_position(hint.at),
+            label: InlayHintLabel::String(hint.label),
+            kind: None,
+            text_edits: None,
+            tooltip: None,
+            padding_left: None,
+            padding_right: Some(true),
+            data: None,
+        })
+        .collect();
+        Ok(Some(hints))
+    }
+
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        self.prepared_type_hierarchy(params)
+    }
+
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || Backend::type_hierarchy_related(&indexer, &params.item, true)).await
+    }
+
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || Backend::type_hierarchy_related(&indexer, &params.item, false)).await
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let answers = params
+            .positions
+            .into_iter()
+            .filter_map(|position| {
+                let spans = crate::feature::selection::ranges(&file.tree, &file.text, cursor(position));
+                spans.into_iter().rev().fold(None, |parent, (start, end)| {
+                    Some(SelectionRange {
+                        range: Range {
+                            start: lsp_position(start),
+                            end: lsp_position(end),
+                        },
+                        parent: parent.map(Box::new),
+                    })
+                })
+            })
+            .collect();
+        Ok(Some(answers))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
@@ -1104,4 +1660,186 @@ fn symbol_kind(kind: Kind) -> SymbolKind {
         Kind::Function => SymbolKind::FUNCTION,
         Kind::Object => SymbolKind::OBJECT,
     }
+}
+
+fn references_now(indexer: &Indexer, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let at = params.text_document_position;
+        let snapshot = indexer.snapshot();
+        let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position))
+        else {
+            return Ok(None);
+        };
+        let java = found.file.language == Language::Java;
+        // jdtls searches the libraries' sources too: the JDK calls a method
+        // of the JDK.
+        let everywhere = |of: &Found<'_>| {
+            let mut uses = snapshot.uses_of(of);
+            if java {
+                uses.extend(snapshot.library_uses_of(of));
+            }
+            uses
+        };
+        let mut uses = snapshot.uses_of(&found);
+        let also = features(found.file.language).also_referenced(&snapshot, &found);
+        let related = if java && found.node.kind == "method_declaration" {
+            snapshot.dispatching_to(&found)
+        } else {
+            Vec::new()
+        };
+        // A call of a method it overrides or is overridden by may run it:
+        // jdtls lists those calls too — but not `super.m()`, which runs the
+        // one it names.
+        for related in &related {
+            let declared = (&related.file.uri, related.selection());
+            uses.extend(snapshot.uses_of(related).into_iter().filter(|(uri, at)| {
+                (*uri, *at) != declared && !is_super_call(&snapshot, uri, *at)
+            }));
+        }
+        if java {
+            let mut family: Vec<&Found<'_>> = vec![&found];
+            family.extend(related.iter());
+            for (uri, at, index) in snapshot.library_uses_of_any(&family) {
+                let declared = (&family[index].file.uri, family[index].selection());
+                if index == 0 || ((uri, at) != declared && !is_super_call(&snapshot, uri, at)) {
+                    uses.push((uri, at));
+                }
+            }
+        }
+        for also in also {
+            // In Java their uses, not where they are declared.
+            let declared = (&also.file.uri, also.selection());
+            uses.extend(
+                everywhere(&also)
+                    .into_iter()
+                    .filter(|(uri, at)| !java || (*uri, *at) != declared),
+            );
+        }
+        if found.file.language == Language::Java {
+            // `this(in)` and `super(in)` call a constructor without naming it.
+            if is_constructor(&found) {
+                let calls = call_hierarchy::call_sites(&snapshot, &found);
+                uses.extend(calls.into_iter().map(|(file, start, _)| (&file.uri, start)));
+            }
+            uses = as_jdtls_reports(&snapshot, &found, uses);
+            uses.extend(snapshot.javadoc_uses_of(&found));
+        }
+        uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
+        uses.dedup();
+        let places = uses
+            .into_iter()
+            .map(|(uri, at)| {
+                snapshot.extract_if_searched(uri);
+                Location {
+                    uri: uri.clone(),
+                    range: at_name(at),
+                }
+            })
+            .collect();
+        Ok(Some(places))
+    }
+
+fn goto_implementation_now(indexer: &Indexer, params: request::GotoImplementationParams) -> Result<Option<request::GotoImplementationResponse>> {
+        let at = params.text_document_position_params;
+        let snapshot = indexer.snapshot();
+        let places: Vec<Location> = snapshot
+            .implementations_at(&at.text_document.uri, cursor(at.position))
+            .into_iter()
+            .map(|found| Location {
+                uri: found.file.uri.clone(),
+                range: at_name(found.selection()),
+            })
+            .collect();
+        Ok(Some(request::GotoImplementationResponse::Array(places)))
+    }
+
+fn incoming_calls_now(indexer: &Indexer, params: CallHierarchyIncomingCallsParams) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let snapshot = indexer.snapshot();
+        let Some(of) = item_of(&snapshot, &params.item) else {
+            return Ok(None);
+        };
+        let calls = call_hierarchy::incoming(&snapshot, &of)
+            .into_iter()
+            .map(|calls| CallHierarchyIncomingCall {
+                // As jdtls does: the caller is shown at its first call.
+                from: {
+                    snapshot.extract_if_searched(&calls.member.file.uri);
+                    call_item(&snapshot, &calls.member, calls.at.first().copied())
+                },
+                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
+            })
+            .collect();
+        Ok(Some(calls))
+    }
+
+fn symbol_now(indexer: &Indexer, params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+        let mut symbols = indexer.types_matching(&params.query);
+        // jdtls lists the libraries' types too.
+        #[allow(deprecated)]
+        symbols.extend(indexer.libraries.types_matching(&params.query).into_iter().map(|declared| {
+            use crate::indexer::words::TypeKind;
+            let start = tower_lsp::lsp_types::Position {
+                line: declared.line,
+                character: declared.column,
+            };
+            SymbolInformation {
+                name: declared.name,
+                kind: match declared.kind {
+                    TypeKind::Interface | TypeKind::Annotation => SymbolKind::INTERFACE,
+                    TypeKind::Enum => SymbolKind::ENUM,
+                    TypeKind::Class | TypeKind::Record => SymbolKind::CLASS,
+                },
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: declared.uri,
+                    range: Range { start, end: start },
+                },
+                container_name: Some(declared.container),
+            }
+        }));
+        Ok(Some(symbols))
+    }
+
+fn outgoing_calls_now(indexer: &Indexer, params: CallHierarchyOutgoingCallsParams) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let snapshot = indexer.snapshot();
+        let Some(of) = item_of(&snapshot, &params.item) else {
+            return Ok(None);
+        };
+        let calls = call_hierarchy::outgoing(&snapshot, &of)
+            .into_iter()
+            .map(|calls| CallHierarchyOutgoingCall {
+                to: call_item(&snapshot, &calls.member, None),
+                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
+            })
+            .collect();
+        Ok(Some(calls))
+    }
+
+/// Runs `work` on a thread of its own and waits for it without holding up
+/// the request loop. One such search runs at a time, as the libraries'
+/// files it reads stay in memory; one the client stopped waiting for
+/// before its turn is not started.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<Option<T>> + Send + 'static) -> Result<Option<T>> {
+    static ONE_AT_A_TIME: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+    /// Marks the request given up when its future is dropped.
+    struct GivenUp(Arc<AtomicBool>);
+    impl Drop for GivenUp {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+    let given_up = Arc::new(AtomicBool::new(false));
+    let _guard = GivenUp(Arc::clone(&given_up));
+    let Ok(permit) = ONE_AT_A_TIME.acquire().await else {
+        return Ok(None);
+    };
+    let answer = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        if given_up.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        work()
+    })
+    .await;
+    answer.expect("a request's work panicked")
 }
