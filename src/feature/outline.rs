@@ -65,7 +65,13 @@ fn members(container: &Syn, header: Option<&Syn>) -> Vec<Symbol> {
     let mut symbols = Vec::new();
     let mut previous_end: Option<Position> = None;
     let mut leading: Vec<&Syn> = Vec::new();
-    for child in &container.children {
+    // jdtls lists the fields Lombok generates (`@Slf4j`'s `log`), not its
+    // methods or constructors.
+    let listed = container
+        .children
+        .iter()
+        .filter(|child| !child.is_generated() || child.kind == "field_declaration");
+    for child in listed {
         if is_comment(child) {
             // A comment on the line the previous declaration or token ends
             // on is that one's, not the next declaration's — when it is the

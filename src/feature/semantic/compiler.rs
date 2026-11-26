@@ -176,7 +176,7 @@ fn each_with_ancestors<'a>(
 ) {
     visit(node, ancestors);
     ancestors.push(node);
-    for child in &node.children {
+    for child in node.children.iter().filter(|child| !child.is_generated()) {
         each_with_ancestors(child, ancestors, visit);
     }
     ancestors.pop();
@@ -439,9 +439,17 @@ fn constant(condition: &Syn) -> Option<bool> {
 /// statements. A file that names Lombok, or a field or type that
 /// suppresses warnings, is left alone: either may read them unseen.
 fn unread_fields(file: &FileView) -> Vec<Report> {
-    if file.text.contains("lombok") {
+    // What Lombok generates reads fields too (a getter, `toString`, the
+    // null check of a `@NonNull` one): those reads are known only for the
+    // annotations the tree has the members of.
+    if file.text.contains("lombok") && !crate::parser::java::lombok::understood(&file.tree) {
         return Vec::new();
     }
+    let read_by_lombok: Vec<Position> = crate::parser::java::lombok::uses(&file.tree)
+        .into_iter()
+        .filter(|used| used.access == crate::parser::java::lombok::Access::Read)
+        .map(|used| used.field)
+        .collect();
     let mut read: HashSet<&str> = HashSet::new();
     let mut declared: Vec<(&Syn, String)> = Vec::new();
     each_with_ancestors(&file.tree, &mut Vec::new(), &mut |node, ancestors| {
@@ -477,7 +485,7 @@ fn unread_fields(file: &FileView) -> Vec<Report> {
     });
     declared
         .into_iter()
-        .filter(|(name, _)| !read.contains(name.text.as_str()))
+        .filter(|(name, _)| !read.contains(name.text.as_str()) && !read_by_lombok.contains(&name.start))
         .map(|(name, owner)| {
             unnecessary(
                 name.start,

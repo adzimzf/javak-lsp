@@ -321,7 +321,8 @@ fn type_item(
 /// each method, constructor or annotation element a type declares — not
 /// what is declared inside a method.
 fn lens_names<'a>(node: &'a crate::parser::Syn, names: &mut Vec<&'a crate::parser::Syn>) {
-    for child in &node.children {
+    // What Lombok generates has no lens, as in jdtls.
+    for child in node.children.iter().filter(|child| !child.is_generated()) {
         let is_type = crate::feature::semantic::is_type_declaration(child);
         let is_member = matches!(
             child.kind.as_str(),
@@ -1030,6 +1031,7 @@ impl LanguageServer for Backend {
                     write: false,
                 }),
         );
+        places.extend(highlight::generated(&snapshot, file, &found, names_a_type));
         places.sort();
         places.dedup();
         Ok(Some(places.into_iter().map(highlighted).collect()))

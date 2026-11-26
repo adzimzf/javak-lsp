@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::prepare::ServerCommand;
 use super::probe::{Method, Probe};
 use super::render::View;
-use crate::integrationtest::server::{OnError, Session};
+use crate::integrationtest::server::{failure, OnError, Session, FAILED};
 
 /// How long one request may take on a real project, unless
 /// `JDTLS_COMPAT_PATIENCE` says otherwise (seconds).
@@ -47,6 +47,10 @@ pub(super) struct Answer {
     pub(super) probe: Probe,
     pub(super) lines: Vec<String>,
     pub(super) millis: u64,
+    /// What the server said where it failed with an internal error
+    /// instead of answering: such a question of jdtls's is not compared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) failed: Option<String>,
 }
 
 impl Recording {
@@ -77,10 +81,15 @@ pub(super) const JDTLS_READY: &[(&str, Duration)] = &[("ServiceReady", Duration:
 /// javak-lsp logs the end of its dependency sync. A project whose sync is
 /// up to date says only that its libraries are indexed; a longer quiet
 /// after that leaves room for a sync that is still coming.
+///
+/// Libraries without (all their) sources are decompiled after the sync:
+/// the first time, that takes minutes and says nothing until it is done.
 pub(super) const JAVAK_READY: &[(&str, Duration)] = &[
     ("dependencies synced", Duration::from_secs(3)),
     ("dependency sync failed", Duration::from_secs(3)),
     ("library indexing done", Duration::from_secs(30)),
+    ("decompiling the libraries", Duration::from_secs(15 * 60)),
+    ("libraries decompiled", Duration::from_secs(3)),
 ];
 
 pub(super) async fn record(
@@ -112,6 +121,19 @@ pub(super) async fn record(
         .wait_until_ready(
             server.name,
             server.ready_markers,
+            tokio::time::Instant::now() + IMPORT_DEADLINE,
+        )
+        .await;
+    // A search answers from what is indexed so far: jdtls indexes the JDK
+    // and the libraries in the background after it says it is ready, and
+    // a reference search asked meanwhile misses their uses. A workspace
+    // symbol search waits for every index (WAIT_UNTIL_READY_TO_SEARCH), so
+    // one is asked first and every question is answered from the whole
+    // index, the same way each run. Its time counts as importing.
+    session
+        .request_by(
+            "workspace/symbol",
+            json!({"query": "Object"}),
             tokio::time::Instant::now() + IMPORT_DEADLINE,
         )
         .await;
@@ -169,26 +191,29 @@ pub(super) async fn record(
                     }
                 }
             };
-            let lines = View {
-                session: &session,
-                text: current,
-                word: &probe.word,
-            }
-            .render(probe.method, &answer);
+            let failed = failure(&answer).map(str::to_owned);
+            let lines = match &failed {
+                Some(said) => vec![format!("(failed: {said})")],
+                None => View {
+                    session: &session,
+                    text: current,
+                    word: &probe.word,
+                }
+                .render(probe.method, &answer),
+            };
             if edited.is_some() {
                 version += 1;
                 session.change_document(file, version, &text).await;
             }
             let took = asked.elapsed();
-            let timed_out = answer.is_null() && took >= patience();
             eprintln!(
                 "      [{}] {}/{count} {:.1}s {} → {}",
                 server.name,
                 number + 1,
                 took.as_secs_f64(),
                 probe.id,
-                if timed_out {
-                    format!("no answer within {}s", patience().as_secs())
+                if failed.is_some() {
+                    lines.join(" ")
                 } else {
                     preview(&lines)
                 }
@@ -197,6 +222,7 @@ pub(super) async fn record(
                 probe: probe.clone(),
                 lines,
                 millis: took.as_millis() as u64,
+                failed,
             });
         }
         session.close_document(file).await;
@@ -259,10 +285,18 @@ async fn ask(session: &mut Session, probe: &Probe, text: &str) -> Value {
     }
 }
 
+/// The server's answer to one request. No answer within [`patience`] is
+/// no answer at all, recorded as a failure like an internal error: a
+/// question jdtls did not answer has nothing to compare with.
 async fn request(session: &mut Session, method: &str, params: Value) -> Value {
-    session
-        .request_until(method, params, OnError::AnswerNothing, |_| true)
-        .await
+    let asked = Instant::now();
+    let answer = session
+        .request_until(method, params, OnError::AnswerNothingUnlessItFailed, |_| true)
+        .await;
+    if answer.is_null() && asked.elapsed() >= patience() {
+        return json!({ FAILED: format!("no answer within {}s", patience().as_secs()) });
+    }
+    answer
 }
 
 fn params(session: &Session, probe: &Probe, text: &str) -> Value {
@@ -320,12 +354,18 @@ async fn hierarchy(
     up: &str,
     down: &str,
 ) -> Value {
+    if failure(prepared).is_some() {
+        return prepared.clone();
+    }
     let Some(item) = prepared.as_array().and_then(|items| items.first()).cloned() else {
         return Value::Null;
     };
     let mut lines = vec![format!("item {}", describe(session, &item))];
     for (direction, end) in [(up, "from"), (down, "to")] {
         let answer = request(session, &format!("{prefix}/{direction}"), json!({"item": item})).await;
+        if failure(&answer).is_some() {
+            return answer;
+        }
         let mut found: Vec<String> = answer
             .as_array()
             .into_iter()

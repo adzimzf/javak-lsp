@@ -57,6 +57,9 @@ pub struct Snapshot {
     /// The library files that write a word, by the word, as searched once
     /// per snapshot ([`Self::library_files_containing`]).
     searched: elsa::sync::FrozenMap<String, Vec<Url>>,
+    /// The uses of a type or field in more library files than a search
+    /// parses, found from their tokens ([`Self::library_uses_by_name`]).
+    named_uses: elsa::sync::FrozenMap<String, Vec<(Url, Position)>>,
     /// Which library file each searched one is, to extract it when an
     /// answer names it.
     searched_files: dashmap::DashMap<Url, LibraryFile>,
@@ -166,6 +169,52 @@ impl Type {
     }
 }
 
+/// Whether some of `places` in a library file is more than an import:
+/// a class file holds no import, so a file whose only use of a name is
+/// importing it (for its javadoc, say) does not use it, to jdtls.
+fn places_beyond_imports(text: &str, places: impl Iterator<Item = Position>) -> bool {
+    let lines: Vec<&str> = text.lines().collect();
+    places.into_iter().any(|at| {
+        lines
+            .get(at.line as usize)
+            .is_none_or(|line| !line.trim_start().starts_with("import "))
+    })
+}
+
+/// Whether a search for uses looks into `file`, as jdtls (Eclipse JDT)
+/// searches: not into classes it has no source of — what a decompiler
+/// wrote, whole jars or the packages a sources jar lacks — where it cannot
+/// place a use (a JDK without `src.zip` has none either), nor into a
+/// package's annotations (`package-info.java`).
+fn searches_uses_in(file: &LibraryFile) -> bool {
+    let jar = file.jar.to_string_lossy();
+    let decompiled = jar.ends_with("-decompiled-sources.jar") || jar.ends_with("-missing-sources.jar");
+    !decompiled && !file.entry.ends_with("package-info.java")
+}
+
+/// Whether `text` has a `case` label naming `constant` (`case RUNTIME:`).
+pub(crate) fn labels_case(text: &str, constant: &str) -> bool {
+    text.match_indices("case").any(|(at, _)| {
+        let is_part = |character: char| character.is_alphanumeric() || character == '_' || character == '$';
+        if text[..at].chars().next_back().is_some_and(is_part) {
+            return false;
+        }
+        let rest = text[at + 4..].trim_start();
+        rest.len() < text.len() - at - 4
+            && rest.starts_with(constant)
+            && !rest[constant.len()..].starts_with(|character: char| character.is_alphanumeric() || character == '_' || character == '$')
+    })
+}
+
+/// Whether `text` writes `word` as a whole word.
+fn writes_word(text: &str, word: &str) -> bool {
+    let is_part = |character: char| character.is_alphanumeric() || character == '_' || character == '$';
+    text.match_indices(word).any(|(at, _)| {
+        !text[..at].chars().next_back().is_some_and(is_part)
+            && !text[at + word.len()..].chars().next().is_some_and(is_part)
+    })
+}
+
 /// The most library files one search reads and parses.
 const LIBRARY_FILES_LIMIT: usize = 500;
 
@@ -205,6 +254,7 @@ impl Snapshot {
             ancestors: elsa::sync::FrozenMap::new(),
             extending: std::sync::OnceLock::new(),
             searched: elsa::sync::FrozenMap::new(),
+            named_uses: elsa::sync::FrozenMap::new(),
             searched_files: dashmap::DashMap::new(),
             method_names: dashmap::DashMap::new(),
         }
@@ -1228,8 +1278,19 @@ impl Snapshot {
             .qualifier
             .as_ref()
             .and_then(|qualifier| self.type_named(&format!("{qualifier}.{}", written.name), from));
+        // A name qualified by a package (`org.codehaus.jettison.json.JSONArray`)
+        // is that package's type or none: not another type of its simple
+        // name (fastjson's JSONArray) when the package is not on the
+        // classpath. One qualified by a type (`Map.Entry`) may be a member
+        // the type inherits, found by its simple name.
+        let by_package = written
+            .qualifier
+            .as_deref()
+            .and_then(|qualifier| qualifier.chars().next())
+            .is_some_and(char::is_lowercase);
         let mut declaration = match qualified {
             Some(declaration) => declaration,
+            None if by_package => return None,
             None => self.type_named(&written.name, from)?,
         };
         declaration.bindings = bound(declaration.node, &written.arguments);
@@ -2308,10 +2369,10 @@ pub fn path_to(tree: &Syn, at: Position) -> Vec<&Syn> {
 /// only failing that the one that ends there — a position at the start of
 /// a name is in the name, not in the `.` in front of it.
 fn next_child<'a>(node: &'a Syn, at: Position) -> Option<&'a Syn> {
-    node.children
-        .iter()
+    let written = || node.children.iter().filter(|child| !child.is_generated());
+    written()
         .find(|child| child.start <= at && at < child.end)
-        .or_else(|| node.children.iter().find(|child| child.covers(at)))
+        .or_else(|| written().find(|child| child.covers(at)))
 }
 
 /// The first expression among a node's children.
@@ -2795,8 +2856,108 @@ pub fn javadoc_markdown(comment: &str) -> String {
     markdown.trim().to_owned()
 }
 
-/// The few HTML tags javadoc is written with, as markdown.
+/// The few HTML tags javadoc is written with, as markdown. A `<pre>`
+/// keeps its lines, fenced, and a `<blockquote>` is quoted with `> `, as
+/// jdtls's converter writes them: a fence is never on a line of prose.
 fn html_to_markdown(text: &str) -> String {
+    let lowered = lowercase_tags(text);
+    let text = lowered.as_str();
+    const BLOCK_TAGS: [&str; 4] = ["<pre>", "</pre>", "<blockquote>", "</blockquote>"];
+    let mut blocks: Vec<(bool, String)> = Vec::new();
+    let mut in_pre = false;
+    let mut quoted = 0usize;
+    let mut rest = text;
+    loop {
+        let next = BLOCK_TAGS
+            .iter()
+            .filter_map(|tag| rest.find(tag).map(|at| (at, *tag)))
+            .min();
+        let (segment, tag) = match next {
+            Some((at, tag)) => (&rest[..at], Some(tag)),
+            None => (rest, None),
+        };
+        if in_pre {
+            let code = preformatted(segment);
+            if !code.is_empty() {
+                blocks.push((quoted > 0, format!("```\n{code}\n```")));
+            }
+        } else {
+            for paragraph in inline_html_to_markdown(segment) {
+                blocks.push((quoted > 0, paragraph));
+            }
+        }
+        let Some(tag) = tag else { break };
+        match tag {
+            "<pre>" => in_pre = true,
+            "</pre>" => in_pre = false,
+            "<blockquote>" => quoted += 1,
+            _ => quoted = quoted.saturating_sub(1),
+        }
+        rest = &rest[segment.len() + tag.len()..];
+    }
+    blocks
+        .into_iter()
+        .map(|(quoted, block)| {
+            if quoted {
+                block.lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n")
+            } else {
+                block
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// `text` with each HTML tag's name in lower case (`<PRE>` is `<pre>`):
+/// HTML does not tell them apart, and older javadoc writes them in capitals.
+fn lowercase_tags(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let slash = usize::from(after.starts_with('/'));
+        let name_length = after[slash..]
+            .find(|character: char| !character.is_ascii_alphanumeric())
+            .unwrap_or(after.len() - slash);
+        out.push('<');
+        out.push_str(&after[..slash]);
+        out.push_str(&after[slash..slash + name_length].to_ascii_lowercase());
+        rest = &after[slash + name_length..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The lines of a `<pre>` block, without the blank lines around them or
+/// the indentation they all share.
+fn preformatted(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    let first = lines.iter().position(|line| !line.trim().is_empty());
+    let last = lines.iter().rposition(|line| !line.trim().is_empty());
+    let (Some(first), Some(last)) = (first, last) else {
+        return String::new();
+    };
+    let lines = &lines[first..=last];
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|line| decode_entities(line.get(indent..).unwrap_or_default()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn decode_entities(text: &str) -> String {
+    text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+/// Prose with its inline HTML as markdown, one string a paragraph.
+fn inline_html_to_markdown(text: &str) -> Vec<String> {
     let mut out = text.to_owned();
     for (tag, replacement) in [
         ("<p>", "\n\n"),
@@ -2818,27 +2979,53 @@ fn html_to_markdown(text: &str) -> String {
         ("</ul>", "\n"),
         ("<li>", "\n* "),
         ("</li>", ""),
-        ("<pre>", "\n```\n"),
-        ("</pre>", "\n```\n"),
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&amp;", "&"),
     ] {
         out = out.replace(tag, replacement);
     }
-    let mut paragraphs: Vec<String> = Vec::new();
-    for paragraph in out.split("\n\n") {
-        let joined = paragraph
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !joined.is_empty() {
-            paragraphs.push(joined);
-        }
+    let out = decode_entities(&out);
+    out.split("\n\n")
+        .map(|paragraph| {
+            paragraph
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .filter(|joined| !joined.is_empty())
+        .collect()
+}
+
+#[cfg(test)]
+mod html_to_markdown_tests {
+    use super::html_to_markdown;
+
+    #[test]
+    fn a_quoted_pre_block_keeps_its_lines_behind_the_quote() {
+        let javadoc = "is equivalent to:\n<blockquote><pre>\n    char data[] = {'a', 'b'};\n    \
+                       String str = new String(data);\n</pre></blockquote><p>\nHere are more.";
+        assert_eq!(
+            html_to_markdown(javadoc),
+            "is equivalent to:\n\n> ```\n> char data[] = {'a', 'b'};\n> \
+             String str = new String(data);\n> ```\n\nHere are more."
+        );
     }
-    paragraphs.join("\n\n")
+
+    #[test]
+    fn a_tag_in_capitals_is_the_same_tag() {
+        assert_eq!(
+            html_to_markdown("Classes use:\n<PRE>\n Object readResolve();\n</PRE><P>\nMore."),
+            "Classes use:\n\n```\nObject readResolve();\n```\n\nMore."
+        );
+    }
+
+    #[test]
+    fn a_pre_block_is_fenced_on_lines_of_its_own() {
+        assert_eq!(
+            html_to_markdown("Use it so: <pre>\n  List&lt;String&gt; names;\n</pre> and done."),
+            "Use it so:\n\n```\nList<String> names;\n```\n\nand done."
+        );
+    }
 }
 
 /// `{@code x}` and `{@literal x}` as code, `{@link Type#member label}` as
@@ -3230,6 +3417,11 @@ impl Snapshot {
     /// once (a method and those it overrides or is overridden by), each
     /// use resolved once, with which of `declarations` it means.
     pub fn library_uses_of_any<'a>(&'a self, declarations: &[&Found<'_>]) -> Vec<(&'a Url, Position, usize)> {
+        if let [declaration] = declarations
+            && let Some(uses) = self.library_uses_by_name(declaration)
+        {
+            return uses.into_iter().map(|(uri, at)| (uri, at, 0)).collect();
+        }
         let mut files: Vec<&FileView> = Vec::new();
         for declaration in declarations {
             for file in self.library_files_for(declaration) {
@@ -3270,7 +3462,164 @@ impl Snapshot {
         });
         places.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         places.dedup();
+        // Sorted by file: each file's places are one run.
+        let declared: Vec<&Url> = declarations.iter().map(|declaration| &declaration.file.uri).collect();
         places
+            .chunk_by(|left, right| left.0 == right.0)
+            .filter(|run| {
+                let uri = run[0].0;
+                declared.contains(&uri)
+                    || self
+                        .file(uri)
+                        .is_none_or(|file| places_beyond_imports(&file.text, run.iter().map(|(_, at, _)| *at)))
+            })
+            .flatten()
+            .copied()
+            .collect()
+    }
+
+    /// What a type, or a field or enum constant of one, is to a search by
+    /// name ([`crate::indexer::words::Named`]): its package, the types it
+    /// is in, and its own name for a member. `None` for anything else, and
+    /// for a private member, which only its own file can use.
+    fn named_target(&self, declaration: &Found<'_>) -> Option<(String, Vec<String>, Option<String>, bool)> {
+        let modifiers = declaration.node.first("modifiers").map(|modifiers| modifiers.text.as_str()).unwrap_or_default();
+        if modifiers.split_whitespace().any(|written| written == "private") {
+            return None;
+        }
+        let package = self.package(declaration.file).unwrap_or_default();
+        let path = path_to(&declaration.file.tree, declaration.name.start);
+        let types: Vec<&Syn> = path.iter().copied().filter(|node| is_type_declaration(node)).collect();
+        let owner: Vec<String> = types
+            .iter()
+            .filter_map(|node| node.child("name").map(|name| name.text.clone()))
+            .collect();
+        if is_type_declaration(declaration.node) {
+            return (!owner.is_empty()).then_some((package, owner, None, false));
+        }
+        let is_field = matches!(
+            declaration.node.kind.as_str(),
+            "variable_declarator" | "field_declaration" | "constant_declaration" | "enum_constant"
+        ) && path.iter().any(|node| matches!(node.kind.as_str(), "field_declaration" | "constant_declaration" | "enum_constant"));
+        if !is_field || owner.is_empty() {
+            return None;
+        }
+        Some((package, owner, Some(declaration.name.text.clone()), declaration.node.kind == "enum_constant"))
+    }
+
+    /// The library files that write `member` and may mean the one `owner`
+    /// declares: in its package, or writing its name (to import it,
+    /// qualify with it, or name it as a supertype).
+    ///
+    /// An enum constant is also reached as a bare `case N:` in a switch
+    /// over a value of its enum, which a file may get without naming the
+    /// enum: those files are kept too.
+    fn library_files_naming(&self, package: &str, owner: &str, member: &str, enum_constant: bool) -> Vec<(LibraryFile, String)> {
+        let Some(libraries) = self.libraries.as_ref() else {
+            return Vec::new();
+        };
+        libraries
+            .files_containing(member)
+            .into_iter()
+            .filter(|(file, text)| {
+                file.package == package || writes_word(text, owner) || (enum_constant && labels_case(text, member))
+            })
+            .collect()
+    }
+
+    /// The uses of a library type, or of a field or enum constant of one,
+    /// in more library files than a search parses ([`LIBRARY_FILES_LIMIT`]):
+    /// told from each file's tokens, package and imports
+    /// ([`crate::indexer::words::named_uses`]), no file kept parsed. `None`
+    /// where the files are few enough to parse and resolve, or for another
+    /// kind of declaration: a method's calls need the receivers' types.
+    fn library_uses_by_name<'a>(&'a self, declaration: &Found<'_>) -> Option<Vec<(&'a Url, Position)>> {
+        if !declaration.file.library {
+            return None;
+        }
+        let (package, owner, member, enum_constant) = self.named_target(declaration)?;
+        let key = format!("{package} {} {}", owner.join("."), member.as_deref().unwrap_or_default());
+        if let Some(known) = self.named_uses.get(&key) {
+            return Some(known.iter().map(|(uri, at)| (uri, *at)).collect());
+        }
+        let libraries = self.libraries.as_ref()?;
+        let name = member.as_deref().unwrap_or_else(|| owner.last().map_or("", String::as_str));
+        let mut candidates = match &member {
+            Some(member) => self.library_files_naming(&package, &owner[0], member, enum_constant),
+            None => libraries.files_containing(name),
+        };
+        if candidates.len() <= LIBRARY_FILES_LIMIT {
+            return None;
+        }
+        // A file reaching the constant only through `case N:` cannot tell
+        // from its tokens whose `N` it is: it is parsed and resolved.
+        candidates.retain(|(file, _)| searches_uses_in(file));
+        let (by_case, named_in): (Vec<_>, Vec<_>) = candidates.drain(..).partition(|(file, text)| {
+            enum_constant && file.package != package && !writes_word(text, &owner[0])
+        });
+        let candidates = named_in;
+        let owner_names: Vec<&str> = owner.iter().map(String::as_str).collect();
+        let named = crate::indexer::words::Named {
+            package: &package,
+            owner: &owner_names,
+            member: member.as_deref(),
+            enum_constant,
+        };
+        let java: Vec<&(LibraryFile, String)> = candidates
+            .iter()
+            .filter(|(file, _)| file.language == Language::Java && searches_uses_in(file))
+            .collect();
+        let threads = std::thread::available_parallelism()
+            .map_or(4, std::num::NonZero::get)
+            .min(java.len().max(1));
+        let chunk = java.len().div_ceil(threads).max(1);
+        let named = &named;
+        let mut found: Vec<(Url, Position)> = std::thread::scope(|scope| {
+            let workers: Vec<_> = java
+                .chunks(chunk)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        let mut found = Vec::new();
+                        for (file, text) in chunk {
+                            let offsets = crate::indexer::words::named_uses(text, named);
+                            let positions: Vec<Position> =
+                                offsets.iter().map(|offset| crate::parser::position_of(text, *offset)).collect();
+                            if !places_beyond_imports(text, positions.iter().copied()) {
+                                continue;
+                            }
+                            let Some(uri) = libraries.uri_of(file) else {
+                                continue;
+                            };
+                            self.searched_files.insert(uri.clone(), file.clone());
+                            found.extend(positions.into_iter().map(|at| (uri.clone(), at)));
+                        }
+                        found
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().unwrap_or_default())
+                .collect()
+        });
+        // The declaration is one of its uses, as jdtls lists it.
+        found.push((declaration.file.uri.clone(), declaration.selection()));
+        if !by_case.is_empty() {
+            let wanted = [(&declaration.file.uri, declaration.selection())];
+            let by_case_key = format!("{key} by case");
+            let files = self.library_files_where(by_case_key, move |_| by_case.clone());
+            for file in files {
+                found.extend(
+                    self.uses_in_file_any(file, name, &wanted)
+                        .into_iter()
+                        .map(|(uri, at, _)| (uri.clone(), at)),
+                );
+            }
+        }
+        found.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
+        found.dedup();
+        let known = self.named_uses.insert(key, found);
+        Some(known.iter().map(|(uri, at)| (uri, *at)).collect())
     }
 
     /// The library files that may use a declaration: none for the
@@ -3291,17 +3640,32 @@ impl Snapshot {
             .filter(|node| !std::ptr::eq(**node, declaration.node))
             .find(|node| is_type_declaration(node))
             .is_some_and(|owner| matches!(owner.kind.as_str(), "interface_declaration" | "annotation_type_declaration"));
-        let package_private = !says("public") && !says("protected") && !owner_is_interface;
+        // An enum constant is public without saying so.
+        let package_private =
+            !says("public") && !says("protected") && !owner_is_interface && declaration.node.kind != "enum_constant";
         let files = if says("private") {
             self.file(&declaration.file.uri).into_iter().collect()
         } else if is_callable(declaration.node) && declaration.node.kind != "constructor_declaration" {
             self.library_files_calling(name)
+        } else if let Some((package, owner, Some(member), enum_constant)) = self.named_target(declaration) {
+            // A field is used where its type is written too.
+            let owner = owner[0].clone();
+            self.library_files_where(format!("{member} with {owner} in {package}"), |_| {
+                self.library_files_naming(&package, &owner, &member, enum_constant)
+            })
         } else {
             self.library_files_containing(name)
         };
         files
             .into_iter()
             .filter(|file| !package_private || self.package(file).unwrap_or_default() == package)
+            .filter(|file| {
+                file.uri == declaration.file.uri
+                    || self
+                        .searched_files
+                        .get(&file.uri)
+                        .is_none_or(|searched| searches_uses_in(&searched))
+            })
             .collect()
     }
 
@@ -3665,6 +4029,55 @@ impl Snapshot {
     /// The type a member is declared in.
     pub fn owner_of<'a>(&'a self, member: &Found<'a>) -> Option<Found<'a>> {
         self.owning_type(member)
+    }
+
+    /// The getter and the setter Lombok generated for a field: what jdtls
+    /// lists the calls of among a field's references
+    /// (`java.references.includeAccessors`, on by default). An accessor
+    /// written by hand is left out, as jdtls leaves it out, unless it says
+    /// it was generated by Lombok (`@Generated("lombok")`, delomboked).
+    pub fn accessors_of<'a>(&'a self, field: &Found<'a>) -> Vec<Found<'a>> {
+        let path = path_to(&field.file.tree, field.name.start);
+        let Some(declaration) = path.iter().rev().nth(2).filter(|declaration| {
+            declaration.kind == "field_declaration" && matches!(field.node.kind.as_str(), "variable_declarator" | "field_declaration")
+        }) else {
+            return Vec::new();
+        };
+        let Some(owner) = self.owning_type(field) else {
+            return Vec::new();
+        };
+        let written_type = declaration.child("type").map_or("", |written| written.text.as_str());
+        let (getter, setter) = crate::parser::java::lombok::accessor_names(&field.name.text, written_type);
+        // A `boolean`'s getter may be `getActive` as well as `isActive`.
+        let plain_getter = getter
+            .strip_prefix("is")
+            .map_or_else(|| getter.clone(), |rest| format!("get{rest}"));
+        members_of(owner.node)
+            .into_iter()
+            .filter(|(member, named)| {
+                let generated = member.is_generated()
+                    || member.first("modifiers").is_some_and(|modifiers| {
+                        modifiers.children.iter().any(|annotation| {
+                            annotation.kind == "annotation"
+                                && annotation.child("name").is_some_and(|name| name.text.ends_with("Generated"))
+                                && annotation.text.contains("lombok")
+                        })
+                    });
+                generated
+                    && member.kind == "method_declaration"
+                    && match parameters_of(member).len() {
+                        0 => named.text == getter || named.text == plain_getter,
+                        1 => named.text == setter,
+                        _ => false,
+                    }
+            })
+            .map(|(member, name)| Found {
+                file: field.file,
+                node: member,
+                name,
+                bindings: field.bindings.clone(),
+            })
+            .collect()
     }
 
     fn owning_type<'a>(&'a self, member: &Found<'a>) -> Option<Found<'a>> {
@@ -4439,4 +4852,23 @@ pub fn package_of(snapshot: &Snapshot, file: &FileView) -> Option<String> {
 /// Whether a type name is one of Java's primitive types.
 fn is_primitive(name: &str) -> bool {
     matches!(name, "int" | "long" | "short" | "byte" | "char" | "float" | "double" | "boolean")
+}
+
+#[cfg(test)]
+mod library_search_tests {
+    use super::{labels_case, writes_word};
+
+    #[test]
+    fn a_case_label_names_its_constant() {
+        assert!(labels_case("switch (p) {\n  case RUNTIME:\n}", "RUNTIME"));
+        assert!(!labels_case("switch (p) { case RUNTIME_ONLY: }", "RUNTIME"));
+        assert!(!labels_case("String showcase RUNTIME;", "RUNTIME"));
+        assert!(!labels_case("int caseRUNTIME;", "RUNTIME"));
+    }
+
+    #[test]
+    fn a_word_is_written_whole() {
+        assert!(writes_word("import org.springframework.http.HttpStatus;", "HttpStatus"));
+        assert!(!writes_word("HttpStatusCode code;", "HttpStatus"));
+    }
 }

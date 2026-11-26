@@ -1536,7 +1536,8 @@ fn block_comment(source: &str, indent: &str, starts_line: bool) -> String {
         return source.to_owned();
     }
     let open = if javadoc { "/**" } else { "/*" };
-    let inner = &source[open.len()..source.len() - 2];
+    let closing = closing_line(source);
+    let inner = &source[open.len()..source.len() - closing.len()];
     if !source.contains('\n') {
         let words: Vec<&str> = inner.split_whitespace().collect();
         let one_line = if words.is_empty() {
@@ -1574,8 +1575,21 @@ fn block_comment(source: &str, indent: &str, starts_line: bool) -> String {
     }
     out.push('\n');
     out.push_str(indent);
-    out.push_str(" */");
+    out.push(' ');
+    out.push_str(closing);
     out
+}
+
+/// How a comment laid out on several lines ends: `*/`, or the stars and
+/// slash its own last line is made of (`**/`), which Eclipse keeps.
+fn closing_line(source: &str) -> &str {
+    let last = source.rsplit('\n').next().unwrap_or_default().trim();
+    let stars = last.strip_suffix('/').unwrap_or_default();
+    if source.contains('\n') && stars.len() > 1 && stars.bytes().all(|byte| byte == b'*') {
+        last
+    } else {
+        "*/"
+    }
 }
 
 enum CommentLine {

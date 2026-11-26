@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 
 /// Bumped whenever the way dependencies are resolved changes, so manifests
 /// written by an older javak-lsp are re-synced instead of trusted.
-pub(crate) const MANIFEST_FORMAT: u32 = 2;
+pub(crate) const MANIFEST_FORMAT: u32 = 3;
 
 /// A build-tool run that takes longer than this is killed; the sync counts
 /// as failed and is retried only after the build files change.
@@ -383,8 +383,9 @@ pub(crate) struct ResolvedDependency {
     pub(crate) coordinate: String,
     pub(crate) jar: Option<PathBuf>,
     pub(crate) sources: Option<PathBuf>,
-    /// The library publishes no sources jar: its classes decompiled into a
-    /// cached sources jar (see [`decompile`]).
+    /// The classes no sources jar has — all of them for a library that
+    /// publishes none, the packages its sources jar lacks for another —
+    /// decompiled into a cached sources jar (see [`decompile`]).
     #[serde(default)]
     pub(crate) decompiled: Option<PathBuf>,
 }
@@ -452,20 +453,23 @@ impl DependencyManifest {
 
     /// `(group, artifact, sources jar)` for every dependency whose sources
     /// jar still exists on disk.
+    /// A dependency whose sources jar lacks some packages gives both: its
+    /// sources jar, then the decompiled rest.
     pub(crate) fn sources_jars_by_artifact(&self) -> Vec<(String, String, PathBuf)> {
         self.dependencies
             .iter()
-            .filter_map(|dependency| {
-                let sources = dependency
-                    .sources
-                    .clone()
-                    .filter(|path| path.is_file())
-                    .or_else(|| dependency.decompiled.clone().filter(|path| path.is_file()))?;
+            .flat_map(|dependency| {
                 let mut parts = dependency.coordinate.split(':');
-                let group = parts.next()?.to_owned();
-                let artifact = parts.next()?.to_owned();
-                Some((group, artifact, sources))
+                let group = parts.next().unwrap_or_default().to_owned();
+                let artifact = parts.next().unwrap_or_default().to_owned();
+                [dependency.sources.clone(), dependency.decompiled.clone()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|path| path.is_file())
+                    .map(move |sources| (group.clone(), artifact.clone(), sources))
+                    .collect::<Vec<_>>()
             })
+            .filter(|(group, artifact, _)| !group.is_empty() && !artifact.is_empty())
             .collect()
     }
 
@@ -769,12 +773,16 @@ pub(crate) fn sync(root: &Path, force: bool, options: SyncOptions) -> SyncOutcom
         BuildToolFailure::Failed(message) => message,
     });
     let _ = std::fs::remove_file(&output_file);
-    let mut resolved = match resolved {
+    let resolved = match resolved {
         Ok(resolved) => resolved,
         Err(message) => return SyncOutcome::Failed(message),
     };
+    // Decompiling waits for `decompile_saved`, after the sources jars are
+    // in use; a decompiler Gradle resolved in this run is kept for it.
     if options.decompile {
-        decompile_libraries_without_sources(root, &tool, &mut resolved);
+        if let Some(resolved_decompiler) = resolved.decompiler.as_deref() {
+            decompile::remember_decompiler(resolved_decompiler);
+        }
     }
     let manifest = DependencyManifest {
         format: MANIFEST_FORMAT,
@@ -799,6 +807,43 @@ pub(crate) fn sync(root: &Path, force: bool, options: SyncOptions) -> SyncOutcom
     }
 }
 
+/// Whether some library of the saved manifest has classes no sources jar
+/// holds and that are not decompiled yet.
+pub(crate) fn decompile_pending(root: &Path, options: SyncOptions) -> bool {
+    options.decompile
+        && load_manifest(root).is_some_and(|manifest| {
+            manifest.dependencies.iter().any(|dependency| {
+                !dependency.decompiled.as_ref().is_some_and(|path| path.is_file())
+                    && decompile::missing_sources(dependency).is_some()
+            })
+        })
+}
+
+/// Decompiles what [`decompile_pending`] finds and saves the manifest with
+/// it. A sync saves the manifest first, so the sources jars are read while
+/// this runs: decompiling a few libraries takes minutes the first time.
+/// Returns how many libraries have decompiled sources now.
+pub(crate) fn decompile_saved(root: &Path, options: SyncOptions) -> Option<usize> {
+    if !decompile_pending(root, options) {
+        return None;
+    }
+    let mut manifest = load_manifest(root)?;
+    let tool = BuildTool::detect(root)?;
+    let mut resolved = Resolved {
+        dependencies: std::mem::take(&mut manifest.dependencies),
+        ..Resolved::default()
+    };
+    decompile_libraries_without_sources(root, &tool, &mut resolved);
+    manifest.dependencies = resolved.dependencies;
+    let decompiled = manifest
+        .dependencies
+        .iter()
+        .filter(|dependency| dependency.decompiled.is_some())
+        .count();
+    save_manifest(root, &manifest).ok()?;
+    Some(decompiled)
+}
+
 /// Decompile the dependencies that have no sources jar (see [`decompile`]).
 /// Any missing piece — no such dependency, no decompiler, no `java` — is
 /// logged and leaves those libraries with their signature stubs.
@@ -806,7 +851,7 @@ fn decompile_libraries_without_sources(root: &Path, tool: &BuildTool, resolved: 
     let any_without_sources = resolved
         .dependencies
         .iter()
-        .any(|dependency| dependency.sources.is_none() && dependency.jar.is_some());
+        .any(|dependency| decompile::missing_sources(dependency).is_some());
     if !any_without_sources {
         return;
     }

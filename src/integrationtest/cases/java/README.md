@@ -93,6 +93,17 @@ Notes on how an answer is written down:
   project. jdtls reads the whole project, not only the open files.
 - **signature_help** cases that end in a syntax error do so on purpose, as
   the jdtls tests do: help is asked while a call is being typed.
+- The `lombok_*` cases were recorded from jdtls 1.63.0 started as
+  vscode-java starts it, with Lombok 1.18.48 as a Java agent
+  (`--jvm-arg=-javaagent:lombok.jar` in `JDTLS_CMD`). The fixture brings
+  the annotations as stubs of its own (`lombok/Data.java`,
+  `lombok/Generated.java`, `org/slf4j/Logger.java`…): Lombok picks them by
+  name. jdtls places each generated member at the annotation that made it
+  (see `src/parser/java/lombok.rs`), and its answers follow from that: an
+  accessor's definition is the field's name, a generated method folds on
+  the annotation's line, the outline lists a generated field and no
+  generated method. A field's references include the calls of its
+  generated accessors, never of hand-written ones (`include_accessors`).
 - A case marked `//= expected (pending)` writes down what jdtls answers
   where javak-lsp has no such check yet: it passes while the two differ and
   fails the day the server answers it, so the marker comes off then.

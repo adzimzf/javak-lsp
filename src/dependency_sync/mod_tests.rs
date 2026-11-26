@@ -635,3 +635,75 @@ fn maven_compiler_plugin_executions_name_the_level_too() {
     );
     assert_eq!(declared_java_version(dir.path()).as_deref(), Some("11"));
 }
+
+fn zip_of(path: &Path, entries: &[&str]) {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    for entry in entries {
+        zip.start_file(*entry, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"x").unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+#[test]
+fn the_packages_a_sources_jar_lacks_are_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let jar = dir.path().join("assertj.jar");
+    let sources = dir.path().join("assertj-sources.jar");
+    zip_of(
+        &jar,
+        &[
+            "META-INF/MANIFEST.MF",
+            "META-INF/versions/9/module-info.class",
+            "org/assertj/core/api/Assertions.class",
+            "org/assertj/core/api/Assertions$1.class",
+            "org/assertj/core/internal/bytebuddy/ByteBuddy.class",
+            "org/assertj/core/internal/bytebuddy/ByteBuddy$Inner.class",
+            "org/assertj/core/util/package-info.class",
+        ],
+    );
+    zip_of(&sources, &["org/assertj/core/api/Assertions.java"]);
+    assert_eq!(
+        decompile::missing_packages(&jar, &sources).unwrap(),
+        vec!["org/assertj/core/internal/bytebuddy".to_owned()]
+    );
+    let dependency = ResolvedDependency {
+        coordinate: "org.assertj:assertj-core:3.22.0".to_owned(),
+        jar: Some(jar.clone()),
+        sources: Some(sources.clone()),
+        decompiled: None,
+    };
+    assert_eq!(
+        decompile::missing_sources(&dependency),
+        Some(decompile::Missing::Packages(vec!["org/assertj/core/internal/bytebuddy".to_owned()]))
+    );
+    // A Kotlin file's `FooKt` class is in the package of `Foo.kt`.
+    zip_of(&jar, &["demo/UtilKt.class"]);
+    zip_of(&sources, &["demo/Util.kt"]);
+    assert_eq!(decompile::missing_sources(&ResolvedDependency { jar: Some(jar), sources: Some(sources), ..dependency.clone() }), None);
+    assert_eq!(
+        decompile::missing_sources(&ResolvedDependency { sources: None, ..dependency }),
+        Some(decompile::Missing::Everything)
+    );
+}
+
+#[test]
+fn a_jar_with_sources_and_its_decompiled_rest_gives_both() {
+    let dir = tempfile::tempdir().unwrap();
+    let sources = dir.path().join("assertj-sources.jar");
+    let rest = dir.path().join("assertj-missing-sources.jar");
+    std::fs::write(&sources, b"zip").unwrap();
+    std::fs::write(&rest, b"zip").unwrap();
+    let manifest = DependencyManifest {
+        dependencies: vec![ResolvedDependency {
+            coordinate: "org.assertj:assertj-core:3.22.0".to_owned(),
+            jar: None,
+            sources: Some(sources.clone()),
+            decompiled: Some(rest.clone()),
+        }],
+        ..manifest_of("maven", None)
+    };
+    let jars: Vec<PathBuf> = manifest.sources_jars_by_artifact().into_iter().map(|(_, _, jar)| jar).collect();
+    assert_eq!(jars, vec![sources, rest]);
+}

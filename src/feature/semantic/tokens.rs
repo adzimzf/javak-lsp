@@ -692,12 +692,14 @@ fn token(node: &Syn, kind: u32, modifiers: u32) -> Token {
 /// The kind and modifiers of declarations, worked out once each.
 #[derive(Default)]
 struct Kinds {
-    known: HashMap<(usize, u32, u32), (u32, u32)>,
+    known: HashMap<(usize, usize), (u32, u32)>,
 }
 
 impl Kinds {
     fn of(&mut self, _snapshot: &Snapshot, found: &Found<'_>) -> (u32, u32) {
-        let key = (std::ptr::from_ref(found.file) as usize, found.node.start.line, found.node.start.column);
+        // By node, not by where it starts: a member Lombok generates starts
+        // where its class does, at the annotation.
+        let key = (std::ptr::from_ref(found.file) as usize, std::ptr::from_ref(found.node) as usize);
         if let Some(known) = self.known.get(&key) {
             return *known;
         }

@@ -89,6 +89,12 @@ pub struct Name {
     pub in_package_or_import: bool,
 }
 
+/// The field name a member generated for the source (by Lombok) has in
+/// its class body. Nothing in the source is under it: [`Syn::walk`] and the
+/// descent to a position leave such members out, a lookup of the members
+/// by name finds them.
+pub const GENERATED: &str = "lombok";
+
 /// A parsed file, as the semantic layer reads it: a tree of nodes with a
 /// kind, the field its parent holds it under, its text and its span. It is
 /// a snapshot and owns its text, so nothing above the parser has to know
@@ -124,10 +130,16 @@ impl Syn {
         self.start <= at && at <= self.end
     }
 
-    /// Every node of the tree, parents before children.
+    /// Whether this node was generated rather than written ([`GENERATED`]).
+    pub fn is_generated(&self) -> bool {
+        self.field.as_deref() == Some(GENERATED)
+    }
+
+    /// Every node of the tree written in the source, parents before
+    /// children.
     pub fn walk(&self) -> Vec<&Syn> {
         let mut nodes = vec![self];
-        for child in &self.children {
+        for child in self.children.iter().filter(|child| !child.is_generated()) {
             nodes.extend(child.walk());
         }
         nodes

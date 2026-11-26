@@ -1,0 +1,45 @@
+//- /com/demo/Service.java
+package com.demo;
+
+import java.util.List;
+
+public interface Service {
+    void generator(Config config, List<String> columns);
+
+    List<String> getColumns(String table);
+}
+//- /com/demo/Config.java
+package com.demo;
+
+public class Config {
+}
+//- /com/demo/ConfigService.java
+package com.demo;
+
+public interface ConfigService {
+    Config find(String table);
+}
+//- /com/demo/Controller.java
+package com.demo;
+
+public class Controller {
+    private final Service generatorService;
+    private final ConfigService genConfigService;
+
+    public Controller(Service generatorService, ConfigService genConfigService) {
+        this.generatorService = generatorService;
+        this.genConfigService = genConfigService;
+    }
+
+    public void generate(String tableName, Integer type) {
+        switch (type) {
+            // generate the code
+            case 0: generatorService.generator($0genConfigService.find(tableName), generatorService.getColumns(tableName));
+                break;
+            default:
+                break;
+        }
+    }
+}
+//= expected
+generator([Config config], List<String> columns)

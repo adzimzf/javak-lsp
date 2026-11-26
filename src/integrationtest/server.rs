@@ -59,6 +59,18 @@ pub(super) enum OnError {
     Panic,
     /// The error is the server's way of answering "nothing here".
     AnswerNothing,
+    /// As [`OnError::AnswerNothing`], except an internal error (`-32603`):
+    /// the server failed, which is answered as [`failure`] says.
+    AnswerNothingUnlessItFailed,
+}
+
+/// The key of the answer [`OnError::AnswerNothingUnlessItFailed`] gives for
+/// a request the server failed: `{"failed": "<what it said>"}`.
+pub(super) const FAILED: &str = "failed";
+
+/// What the server said when it failed to answer, where it did.
+pub(super) fn failure(answer: &Value) -> Option<&str> {
+    answer.get(FAILED).and_then(Value::as_str)
 }
 
 /// An initialized server with every file of a fixture open.
@@ -264,8 +276,9 @@ impl Session {
                 message["params"]["message"].as_str().unwrap_or_default()
             );
             if let Some((_, after)) = markers.iter().find(|(marker, _)| text.contains(marker)) {
-                let after = quiet.map_or(*after, |(current, _)| current.min(*after));
-                quiet = Some((after, Instant::now() + after));
+                // The latest marker says how long to wait: a server that
+                // says it has more to do ("decompiling…") is waited for.
+                quiet = Some((*after, Instant::now() + *after));
             } else if let Some((after, _)) = quiet {
                 // Still talking: the quiet starts again.
                 quiet = Some((after, Instant::now() + after));
@@ -487,6 +500,12 @@ impl Session {
         }
     }
 
+    /// `method`'s answer, waited for until `deadline` rather than for the
+    /// session's patience; nothing where the server answers an error.
+    pub(super) async fn request_by(&mut self, method: &str, params: Value, deadline: Instant) -> Value {
+        self.request(method, params, OnError::AnswerNothing, deadline).await
+    }
+
     async fn request(
         &mut self,
         method: &str,
@@ -510,6 +529,25 @@ impl Session {
                     match on_error {
                         OnError::Panic => panic!("{method} failed: {error}"),
                         OnError::AnswerNothing => return Value::Null,
+                        OnError::AnswerNothingUnlessItFailed => {
+                            if error["code"] != json!(-32603) {
+                                return Value::Null;
+                            }
+                            // The message says little ("Internal error");
+                            // the first line of the data names the exception.
+                            let data = error["data"].as_str().unwrap_or_default();
+                            let cause = data
+                                .lines()
+                                .next()
+                                .unwrap_or_default()
+                                .trim_start_matches("java.util.concurrent.CompletionException: ");
+                            let said = if cause.is_empty() {
+                                error["message"].as_str().unwrap_or("internal error")
+                            } else {
+                                cause
+                            };
+                            return json!({ FAILED: said });
+                        }
                     }
                 }
                 return message.get("result").cloned().unwrap_or(Value::Null);
@@ -574,7 +612,10 @@ impl Session {
             }],
             // jdtls answers signature help only when it is switched on.
             "initializationOptions": {
-                "settings": {"java": {"signatureHelp": {"enabled": true}}},
+                "settings": {"java": {
+                    "signatureHelp": {"enabled": true},
+                    "configuration": java_runtimes(),
+                }},
                 // Without it jdtls answers nothing for a declaration in the
                 // JDK or a library, which an editor opens through `jdt://`.
                 "extendedClientCapabilities": {"classFileContentsSupport": true},
@@ -804,9 +845,23 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
         // jdtls names the class file (`Array.class`) or, since 1.5x, the
         // source file it would show (`Array.java`, the top-level class's
         // file for a nested one).
+        // A Kotlin file is named with its own extension.
+        if let Some(name) = file.strip_suffix(".kt") {
+            return Some(format!("{LIBRARY}/{container}/{}/{name}.kt", package.replace('.', "/")));
+        }
         let name = file
             .strip_suffix(".class")
             .or_else(|| file.strip_suffix(".java"))?;
+        // A nested class's own class file (`Flags$StringJoiner.class`),
+        // named where its class file does not say which source file it
+        // comes from (compiled without `SourceFile`, as bcprov and xerces
+        // are): it is in its top-level class's file.
+        // Only a class file is named so; a class may begin its own name
+        // with `$` (gson's `$Gson$Types`).
+        let name = match (file.ends_with(".class"), name.get(1..).and_then(|rest| rest.find('$'))) {
+            (true, Some(at)) => &name[..at + 1],
+            _ => name,
+        };
         return Some(format!(
             "{LIBRARY}/{container}/{}/{name}.java",
             package.replace('.', "/")
@@ -816,6 +871,45 @@ pub(super) fn library_place(uri: &str) -> Option<String> {
     let (_, extracted) = path.split_once("/sources/")?;
     let (_, inside) = extracted.split_once('/')?;
     Some(format!("{LIBRARY}/{inside}"))
+}
+
+/// jdtls's JDKs: only `JAVA_HOME`'s, the one javak-lsp reads too, rather
+/// than every JDK it can find. jdtls looks for the installed JDKs at start
+/// and gives a Java 8 project the oldest that runs it (a JDK 21 beside
+/// the JDK 25 both are started with): the two would answer from different
+/// JDKs. Without `JAVA_HOME`, jdtls chooses as it does.
+fn java_runtimes() -> Value {
+    let Some(home) = std::env::var_os("JAVA_HOME").map(std::path::PathBuf::from) else {
+        return json!({});
+    };
+    let release = std::fs::read_to_string(home.join("release")).unwrap_or_default();
+    let version = release
+        .lines()
+        .find_map(|line| line.strip_prefix("JAVA_VERSION="))
+        .map(|version| version.trim_matches('"').to_owned())
+        .unwrap_or_default();
+    // `1.8.0_412` is JavaSE-1.8, `25.0.1` JavaSE-25.
+    let major = if let Some(rest) = version.strip_prefix("1.") {
+        format!("1.{}", rest.split(['.', '_']).next().unwrap_or_default())
+    } else {
+        version.split('.').next().unwrap_or_default().to_owned()
+    };
+    if major.is_empty() {
+        return json!({});
+    }
+    // Every execution environment up to the JDK's own is this JDK: a
+    // project asks for its level's (`JavaSE-1.8` for Java 8), and jdtls
+    // would otherwise take another installed JDK for it.
+    let newest: u32 = major.parse().unwrap_or(8);
+    let mut runtimes: Vec<Value> = std::iter::once("1.8".to_owned())
+        .chain((9..newest).map(|version| version.to_string()))
+        .map(|version| json!({"name": format!("JavaSE-{version}"), "path": home}))
+        .collect();
+    runtimes.push(json!({"name": format!("JavaSE-{major}"), "path": home, "default": true}));
+    json!({
+        "detectJdksAtStart": false,
+        "runtimes": runtimes,
+    })
 }
 
 /// How [`library_place`] starts, so a place in a library is told apart.

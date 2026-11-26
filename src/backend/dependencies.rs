@@ -133,6 +133,7 @@ impl DependencySync {
         })
         .await
         .unwrap_or_else(|error| SyncOutcome::Failed(error.to_string()));
+        let resolved = matches!(outcome, SyncOutcome::UpToDate | SyncOutcome::Synced { .. });
         match outcome {
             SyncOutcome::NoBuildTool | SyncOutcome::UpToDate => {}
             SyncOutcome::Synced {
@@ -168,7 +169,45 @@ impl DependencySync {
                     .await;
             }
         }
+        if resolved {
+            self.decompile(root, options, indexer, client).await;
+        }
         self.retry_missing_sources(root, options, indexer, client);
+    }
+
+    /// Decompiles what of the libraries has no sources (see
+    /// [`dependency_sync::decompile_saved`]), then indexes the libraries
+    /// again. The sources jars are already in use meanwhile.
+    async fn decompile(&self, root: &Path, options: SyncOptions, indexer: &Arc<Indexer>, client: &Client) {
+        let pending_root = root.to_path_buf();
+        let pending = tokio::task::spawn_blocking(move || dependency_sync::decompile_pending(&pending_root, options))
+            .await
+            .unwrap_or(false);
+        if !pending {
+            return;
+        }
+        client
+            .log_message(
+                MessageType::INFO,
+                "javak-lsp: decompiling the libraries without (all their) sources…",
+            )
+            .await;
+        let blocking_root = root.to_path_buf();
+        let decompiled = tokio::task::spawn_blocking(move || dependency_sync::decompile_saved(&blocking_root, options))
+            .await
+            .ok()
+            .flatten();
+        let indexed = index_libraries(Some(root.to_path_buf()), self.java_home(), Arc::clone(indexer), client).await;
+        client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "javak-lsp: libraries decompiled — {} with decompiled sources; {} library types indexed",
+                    decompiled.unwrap_or(0),
+                    indexed.types
+                ),
+            )
+            .await;
     }
 
     /// Some sources failed to download for a transient reason: ask again

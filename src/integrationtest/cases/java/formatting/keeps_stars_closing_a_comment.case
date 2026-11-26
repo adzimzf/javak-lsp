@@ -1,0 +1,35 @@
+//- /com/demo/Stars.java
+$0package com.demo;
+
+/**
+ * A class.
+ * @author me
+ **/
+public class Stars {
+    /**
+     * A field.
+     ***/
+    int a;
+    /*
+     * A block.
+     **/
+    int b;
+}
+//= expected
+package com.demo;
+
+/**
+ * A class.
+ * 
+ * @author me
+ **/
+public class Stars {
+	/**
+	 * A field.
+	 ***/
+	int a;
+	/*
+	 * A block.
+	 **/
+	int b;
+}
