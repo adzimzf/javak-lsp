@@ -11,7 +11,9 @@
 //!   hierarchy), a constructor's or a logger field's the whole annotation
 //!   (`@RequiredArgsConstructor`, `@Slf4j`);
 //! - the types a member mentions are the annotation's name (`Data`),
-//!   except a setter's parameter, which is the whole annotation (`@Data`);
+//!   except `toString`'s `String`, the whole annotation (`@Data`), and a
+//!   setter's parameter, which is the field's own type where it is
+//!   written;
 //! - what a member's body reads or writes of a field is the whole
 //!   annotation.
 //!
@@ -34,9 +36,12 @@ use crate::parser::{Position, Syn, GENERATED};
 pub enum Access {
     Read,
     Write,
-    /// The field's written type stands here: in a getter's return type, a
-    /// setter's or a constructor's parameter.
+    /// The field's written type stands here: in a getter's return type or
+    /// a constructor's parameter.
     Type,
+    /// `java.lang.String` stands here, `toString`'s return type; `field`
+    /// is the annotation's start.
+    String,
 }
 
 /// A place where a generated member uses a field.
@@ -457,7 +462,8 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
                     end: annotation.whole.1,
                     access: Access::Write,
                 });
-                plan.uses.push(type_use(field, annotation.whole));
+                // The parameter's type is the field's own type node,
+                // copied with its place: no use apart from the field's.
                 if field.non_null.is_some() {
                     plan.uses.push(read(field, annotation.whole));
                 }
@@ -539,6 +545,12 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
     let to_string = data.or(value).or_else(|| on_class("ToString"));
     if let Some(annotation) = to_string.filter(|_| !taken.iter().any(|name| name == "toString")) {
         plan.members.push(method(annotation, "public String toString() {}"));
+        plan.uses.push(Use {
+            field: annotation.whole.0,
+            start: annotation.whole.0,
+            end: annotation.whole.1,
+            access: Access::String,
+        });
         for field in &instance {
             plan.uses.push(read(field, annotation.whole));
         }

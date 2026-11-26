@@ -72,6 +72,13 @@ pub fn generated(snapshot: &Snapshot, file: &FileView, found: &Found<'_>, names_
         };
         match used.access {
             Access::Read | Access::Write if is_field && used.field == found.name.start => places.push(at),
+            Access::String
+                if names_a_type
+                    && found.name.text == "String"
+                    && found.file.uri.path().ends_with("java/lang/String.java") =>
+            {
+                places.push(at);
+            }
             Access::Type if names_a_type => {
                 let path = path_to(&file.tree, used.field);
                 let Some(written) = path
