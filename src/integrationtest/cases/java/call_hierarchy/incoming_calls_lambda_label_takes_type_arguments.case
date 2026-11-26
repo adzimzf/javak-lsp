@@ -1,0 +1,23 @@
+//- /p/Consumer.java
+package p;
+public interface Consumer<T> {
+    void accept(T t);
+}
+//- /p/Node.java
+package p;
+public class Node {
+    public void $0remove() {}
+    public void forEachNode(Consumer<? super Node> action) {}
+}
+//- /p/Use.java
+package p;
+public class Use {
+    void run(Node doc) {
+        doc.forEachNode(node -> {
+            node.remove();
+        });
+    }
+}
+//= expected
+item remove() : void  /p/Node.java:3:17  public void remove() {}
+incoming accept(Node) : void  /p/Use.java:5:18  node.remove();

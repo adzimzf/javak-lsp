@@ -1,0 +1,11 @@
+//- /p/B.java
+package p;
+
+public class B {
+    void matches() { $0consume(); }
+    private void consume() {}
+}
+//= expected
+Add Javadoc comment
+Generate toString()
+Inline Method

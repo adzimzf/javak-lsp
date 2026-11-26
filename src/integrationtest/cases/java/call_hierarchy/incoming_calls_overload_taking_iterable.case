@@ -1,0 +1,20 @@
+//- /p/Element.java
+package p;
+public class Element {
+}
+//- /p/Elements.java
+package p;
+import java.util.ArrayList;
+public class Elements extends ArrayList<Element> implements java.io.Serializable, Cloneable, java.util.RandomAccess {
+    public Elements select(String query) {
+        return Selector.select(query, this);
+    }
+}
+//- /p/Selector.java
+package p;
+public class Selector {
+    public static Elements $0select(String query, Element root) { return null; }
+    public static Elements select(String query, Iterable<Element> roots) { return null; }
+}
+//= expected
+item select(String, Element) : Elements  /p/Selector.java:3:28  public static Elements select(String query, Element root) { return null; }

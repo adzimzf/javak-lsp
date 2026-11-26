@@ -1,0 +1,21 @@
+//- /p/G.java
+package p;
+
+public class G {
+    private final String current = "";
+
+    boolean currentIs(String n) {
+        return $0current().equals(n);
+    }
+
+    String current() {
+        String value = current;
+        return value;
+    }
+}
+//= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate Getters
+Invert conditions
+Sort Members for 'G.java'

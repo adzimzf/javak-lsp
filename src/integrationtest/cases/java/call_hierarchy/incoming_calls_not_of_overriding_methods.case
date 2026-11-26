@@ -1,0 +1,22 @@
+//- /p/Node.java
+package p;
+public abstract class Node {
+    public boolean $0hasAttr(String key) { return false; }
+}
+//- /p/LeafNode.java
+package p;
+abstract class LeafNode extends Node {
+    @Override
+    public boolean hasAttr(String key) { return true; }
+}
+//- /p/Decl.java
+package p;
+public class Decl extends LeafNode {
+    void use(Decl decl, Node node) {
+        decl.hasAttr("a");
+        node.hasAttr("b");
+    }
+}
+//= expected
+item hasAttr(String) : boolean  /p/Node.java:3:20  public boolean hasAttr(String key) { return false; }
+incoming use(Decl, Node) : void  /p/Decl.java:5:14  node.hasAttr("b");

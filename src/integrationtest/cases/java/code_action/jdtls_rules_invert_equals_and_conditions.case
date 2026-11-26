@@ -1,0 +1,25 @@
+//- /p/Name.java
+package p;
+
+public class Name {
+    private final String text;
+
+    Name(String text) {
+        this.text = text;
+    }
+
+    public boolean equals(Name other) {
+        String mine = text;
+        return mine == other.text;
+    }
+
+    boolean currentIs(Name current, Name normalName) {
+        return current != null && current.$0equals(normalName);
+    }
+}
+//= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate Getters
+Invert conditions
+Invert equals

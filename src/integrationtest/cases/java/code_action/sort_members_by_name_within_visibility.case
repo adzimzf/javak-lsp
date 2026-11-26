@@ -1,0 +1,12 @@
+//- /p/C.java
+package p;
+
+public class C {
+    void matches() { $0consume(); }
+    void consume() {}
+}
+//= expected
+Add Javadoc comment
+Generate toString()
+Inline Method
+Sort Members for 'C.java'

@@ -387,6 +387,21 @@ impl Snapshot {
         self.files.iter().chain(self.read.iter())
     }
 
+    /// The library file at `uri` (where [`Libraries::uri_of`] puts it), read
+    /// now unless it already is or `uri` is no library file.
+    pub fn read_library_at(&self, uri: &Url) -> Option<&FileView> {
+        if let Some(known) = self.file(uri) {
+            return Some(known);
+        }
+        let libraries = self.libraries.as_ref()?;
+        let stem = std::path::Path::new(uri.path()).file_stem()?.to_str()?;
+        let file = libraries
+            .declaring(stem)
+            .into_iter()
+            .find(|file| libraries.uri_of(file).as_ref() == Some(uri))?;
+        self.library_file(&file)
+    }
+
     /// A library file, read now unless it already is.
     fn library_file(&self, file: &LibraryFile) -> Option<&FileView> {
         let loaded = self.libraries.as_ref()?.load(file)?;
@@ -629,13 +644,18 @@ impl Snapshot {
         if !nested {
             return None;
         }
+        // A library's top-level type before any nested one of the same
+        // name: `java.util.ArrayList`, not `Arrays.ArrayList` because
+        // `Arrays.java` happens to be read already.
+        let candidates = self.libraries.as_ref().map(|libraries| libraries.declaring(name)).unwrap_or_default();
+        let library: Vec<&'a FileView> = self.library_files(candidates, package, prefer).filter(in_package).collect();
+        if let Some(found) = library.iter().copied().find_map(top_level) {
+            return Some(found);
+        }
         if let Some(found) = self.every_file().filter(in_package).find_map(declaring) {
             return Some(found);
         }
-        let candidates = self.libraries.as_ref()?.declaring(name);
-        self.library_files(candidates, package, prefer)
-            .filter(in_package)
-            .find_map(declaring)
+        library.into_iter().find_map(declaring)
     }
 
     fn declared<'a>(&self, file: &'a FileView, node: &'a Syn) -> Option<Found<'a>> {
@@ -812,7 +832,12 @@ impl Snapshot {
                     }
                     let exactly = given_at(index)
                         .is_some_and(|given| given.name == wanted.name && given.dimensions == wanted.dimensions);
-                    exactly || wanted.dimensions == 0 && accepted_at(index).contains(&wanted.name)
+                    // An array is wanted as an array of the same depth whose
+                    // element type the given one's is or extends.
+                    let array = wanted.dimensions > 0
+                        && given_at(index).is_some_and(|given| given.dimensions == wanted.dimensions && !is_primitive(&given.name))
+                        && accepted_at(index).contains(&wanted.name);
+                    exactly || array || wanted.dimensions == 0 && accepted_at(index).contains(&wanted.name)
                 })
             })
         };
@@ -820,21 +845,46 @@ impl Snapshot {
         // its fixed ones.
         let every: Vec<&Found<'a>> = candidates.iter().collect();
         let spread = || {
-            every.iter().find(|candidate| {
-                let parameters = parameters_of(candidate.node);
-                if parameters.last().is_none_or(|last| last.kind != "spread_parameter") {
-                    return false;
-                }
-                let fixed = parameters.len() - 1;
-                passed.len() >= fixed
-                    && wanted(candidate).iter().take(fixed).enumerate().all(|(index, wanted)| {
-                        let Some(wanted) = wanted else {
-                            return false;
+            let fitting: Vec<&&Found<'a>> = every
+                .iter()
+                .filter(|candidate| {
+                    let parameters = parameters_of(candidate.node);
+                    let Some(last) = parameters.last().filter(|last| last.kind == "spread_parameter") else {
+                        return false;
+                    };
+                    let fixed = parameters.len() - 1;
+                    let fixed_fit = passed.len() >= fixed
+                        && wanted(candidate).iter().take(fixed).enumerate().all(|(index, wanted)| {
+                            let Some(wanted) = wanted else {
+                                return false;
+                            };
+                            given_at(index).is_none_or(|given| given.name == wanted.name)
+                                || accepted_at(index).contains(&wanted.name)
+                        });
+                    // What is passed for the varargs is of their element type,
+                    // or is their array itself.
+                    let element = last.children.first().map(type_of_node);
+                    let rest_fit = (fixed..passed.len()).all(|index| {
+                        let (Some(element), Some(given)) = (element.as_ref(), given_at(index)) else {
+                            return true;
                         };
-                        given_at(index).is_none_or(|given| given.name == wanted.name)
-                            || accepted_at(index).contains(&wanted.name)
-                    })
-            })
+                        if given.dimensions == element.dimensions + 1 {
+                            return given.name == element.name || accepted_at(index).contains(&element.name);
+                        }
+                        let primitive_given = is_primitive(&given.name) && given.dimensions == 0;
+                        if primitive_given {
+                            // A primitive goes to a primitive or, boxed, to `Object`.
+                            return is_primitive(&element.name) || matches!(element.name.as_str(), "Object" | "Number" | "Comparable" | "Serializable");
+                        }
+                        given.dimensions == element.dimensions
+                            && (given.name == element.name || accepted_at(index).contains(&element.name) || element.name.len() == 1)
+                    });
+                    fixed_fit && rest_fit
+                })
+                .collect();
+            // The most specific: the one fixing the most parameters.
+            let most = fitting.iter().map(|candidate| parameters_of(candidate.node).len()).max()?;
+            fitting.into_iter().find(|candidate| parameters_of(candidate.node).len() == most)
         };
         let fits = exact.or_else(wider).or_else(spread);
         // Short of a fit, an overload taking as many arguments as are
@@ -1724,7 +1774,7 @@ fn bound(declaration: &Syn, arguments: &[Type]) -> Bindings {
         .collect()
 }
 
-fn substituted(written: Type, bindings: &Bindings) -> Type {
+pub(crate) fn substituted(written: Type, bindings: &Bindings) -> Type {
     if let Some(bound) = bindings.get(&written.name) {
         let mut bound = bound.clone();
         bound.dimensions += written.dimensions;
@@ -3612,6 +3662,11 @@ impl Snapshot {
     }
 
     /// The type a member is declared in.
+    /// The type a member is declared in.
+    pub fn owner_of<'a>(&'a self, member: &Found<'a>) -> Option<Found<'a>> {
+        self.owning_type(member)
+    }
+
     fn owning_type<'a>(&'a self, member: &Found<'a>) -> Option<Found<'a>> {
         let path = path_to(&member.file.tree, member.name.start);
         let declaration = path.iter().rev().find(|node| is_type_declaration(node))?;
@@ -3721,11 +3776,26 @@ impl Snapshot {
         found
     }
 
+    /// The methods up `method`'s supertypes that it overrides, whose calls
+    /// may run it: what jdtls's incoming calls count besides its own.
+    /// An abstract method's (one without a body) are counted down its
+    /// subtypes too: calls of its implementations.
+    pub fn overridden_by_call<'a>(&'a self, method: &Found<'a>) -> Vec<Found<'a>> {
+        let is_abstract = method.node.kind == "method_declaration" && method.node.child("body").is_none();
+        self.dispatching(method, is_abstract)
+    }
+
     /// The methods whose calls may run `method`, as jdtls counts them among
     /// its references: the ones it overrides up its supertypes and the ones
     /// overriding it down its subtypes, with the same parameter types — not
     /// a sibling's, and none for a static or private method.
     pub fn dispatching_to<'a>(&'a self, method: &Found<'a>) -> Vec<Found<'a>> {
+        self.dispatching(method, true)
+    }
+
+    /// [`Self::dispatching_to`], the overriding methods down the subtypes
+    /// only where `down` asks for them.
+    fn dispatching<'a>(&'a self, method: &Found<'a>, down: bool) -> Vec<Found<'a>> {
         if method.node.kind != "method_declaration" {
             return Vec::new();
         }
@@ -3748,7 +3818,9 @@ impl Snapshot {
             queue.extend(self.supertypes(&supertype));
             related.push(supertype);
         }
-        related.extend(self.subtypes_of(&owner));
+        if down {
+            related.extend(self.subtypes_of(&owner));
+        }
         let wanted = self.erased_parameter_types(method);
         let mut found = Vec::new();
         for relative in related {
@@ -4316,8 +4388,10 @@ impl Snapshot {
             name: of.name,
             bindings: of.bindings.clone(),
         }];
+        // Bounded, but past `Collection`'s depth: `ArrayList` alone has
+        // nine types above it before `Iterable`.
         let mut at = 0;
-        while at < family.len() && at < 8 {
+        while at < family.len() && at < 64 {
             for supertype in self.supertypes(&family[at]) {
                 let known = family.iter().any(|found| {
                     found.file.uri == supertype.file.uri
@@ -4360,4 +4434,9 @@ impl Snapshot {
 /// The package a file declares.
 pub fn package_of(snapshot: &Snapshot, file: &FileView) -> Option<String> {
     snapshot.package(file)
+}
+
+/// Whether a type name is one of Java's primitive types.
+fn is_primitive(name: &str) -> bool {
+    matches!(name, "int" | "long" | "short" | "byte" | "char" | "float" | "double" | "boolean")
 }
