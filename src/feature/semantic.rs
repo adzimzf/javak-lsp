@@ -2394,6 +2394,9 @@ impl Snapshot {
         if let Some(found) = self.javadoc_reference_at(&at_the_cursor, file, at) {
             return Some(found);
         }
+        if let Some(found) = self.chained_at(&at_the_cursor, file) {
+            return Some(found);
+        }
         if let Some(found) = self.superclass_at(&at_the_cursor, file) {
             return Some(found);
         }
@@ -2433,6 +2436,21 @@ impl Snapshot {
             name,
             bindings: Bindings::new(),
         })
+    }
+
+    /// The cursor on the `this` or `super` of `this(…)` or `super(…)`: the
+    /// constructor it calls, as jdtls answers.
+    fn chained_at<'a>(&'a self, path: &[&'a Syn], file: &'a FileView) -> Option<Found<'a>> {
+        let [.., invocation, keyword] = path else {
+            return None;
+        };
+        if invocation.kind != "explicit_constructor_invocation"
+            || !matches!(keyword.kind.as_str(), "this" | "super")
+            || invocation.child("constructor")?.start != keyword.start
+        {
+            return None;
+        }
+        self.chained(invocation, file)
     }
 
     /// The cursor on `super`: the class it stands for.

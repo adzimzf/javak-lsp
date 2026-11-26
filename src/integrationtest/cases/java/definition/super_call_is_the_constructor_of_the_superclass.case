@@ -1,0 +1,20 @@
+//- /com/demo/Shape.java
+package com.demo;
+
+class Shape {
+    Shape() {
+    }
+
+    Shape(int sides) {
+    }
+}
+//- /com/demo/Square.java
+package com.demo;
+
+class Square extends Shape {
+    Square() {
+        sup$0er(4);
+    }
+}
+//= expected
+/com/demo/Shape.java:7:5  Shape(int sides) {

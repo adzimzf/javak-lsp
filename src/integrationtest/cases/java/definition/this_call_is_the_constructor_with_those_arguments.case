@@ -1,0 +1,21 @@
+//- /com/demo/Reader.java
+package com.demo;
+
+class Reader {
+}
+//- /com/demo/CharacterReader.java
+package com.demo;
+
+public class CharacterReader {
+    public CharacterReader(Reader input, int size) {
+        th$0is(input);
+    }
+
+    public CharacterReader(Reader input) {
+    }
+
+    public CharacterReader(String input) {
+    }
+}
+//= expected
+/com/demo/CharacterReader.java:8:12  public CharacterReader(Reader input) {
