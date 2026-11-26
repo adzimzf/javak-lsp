@@ -60,6 +60,9 @@ pub struct Snapshot {
     /// Which library file each searched one is, to extract it when an
     /// answer names it.
     searched_files: dashmap::DashMap<Url, LibraryFile>,
+    /// The names of the methods a type and every type above it declare,
+    /// by the type's place, for a type whose whole hierarchy is known.
+    method_names: dashmap::DashMap<(Url, u32, u32), Option<MethodNames>>,
 }
 
 /// Where a type is declared: the address of its file, and the child
@@ -163,6 +166,9 @@ impl Type {
     }
 }
 
+/// The names of the methods of a type and the types above it.
+pub(crate) type MethodNames = Arc<std::collections::HashSet<String>>;
+
 /// What the type parameters of a declaration stand for here.
 pub type Bindings = HashMap<String, Type>;
 
@@ -197,6 +203,7 @@ impl Snapshot {
             extending: std::sync::OnceLock::new(),
             searched: elsa::sync::FrozenMap::new(),
             searched_files: dashmap::DashMap::new(),
+            method_names: dashmap::DashMap::new(),
         }
     }
 
@@ -445,6 +452,13 @@ impl Snapshot {
         if let Some(declaration) = self.declared_type(from, name) {
             return self.declared(from, declaration);
         }
+        // A member type the file's classes inherit (`Method` in a class
+        // that implements `Connection`) hides an import of the name.
+        if from.language == Language::Java
+            && let Some(found) = self.inherited_member_type(name, from)
+        {
+            return Some(found);
+        }
         let imported = imports(from)
             .into_iter()
             .find(|import| !import.wildcard && import.last_segment() == name);
@@ -479,6 +493,47 @@ impl Snapshot {
             return Some(found);
         }
         self.type_in_package(name, None, prefer)
+    }
+
+    /// A member type called `name` of a supertype of a class `from`
+    /// declares. Looking it up resolves supertypes, which looks names up
+    /// again: a lookup inside one is not repeated.
+    fn inherited_member_type<'a>(&'a self, name: &str, from: &'a FileView) -> Option<Found<'a>> {
+        thread_local! {
+            static LOOKING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        if LOOKING.with(|looking| looking.replace(true)) {
+            return None;
+        }
+        let found = (|| {
+            let classes: Vec<&Syn> = from.tree.walk().into_iter().filter(|node| is_type_declaration(node)).collect();
+            let mut seen = Vec::new();
+            let mut queue: Vec<Found<'a>> = Vec::new();
+            for class in classes {
+                if let Some(declared) = self.declared(from, class) {
+                    queue.extend(self.supertypes(&declared));
+                }
+            }
+            while let Some(supertype) = queue.pop() {
+                let key = (supertype.file.uri.clone(), supertype.node.start);
+                if seen.contains(&key) || seen.len() > 32 {
+                    continue;
+                }
+                seen.push(key);
+                let member = supertype.node.children.iter().find(|child| child.field.as_deref() == Some("body")).and_then(|body| {
+                    body.children
+                        .iter()
+                        .find(|child| is_type_declaration(child) && child.child("name").is_some_and(|named| named.text == name))
+                });
+                if let Some(member) = member {
+                    return self.declared(supertype.file, member);
+                }
+                queue.extend(self.supertypes(&supertype));
+            }
+            None
+        })();
+        LOOKING.with(|looking| looking.set(false));
+        found
     }
 
     /// `com.demo.shapes.Circle` is the `Circle` of that package;
@@ -1245,11 +1300,34 @@ impl Snapshot {
         let arguments = call.child("arguments");
         let passed = arguments.map(|at| (at, file));
         if let Some(object) = call.child("object") {
-            let receiver = self.type_of_expression(object, file)?;
-            let member = self
-                .of_type(&receiver, file)
-                .and_then(|owner| self.member(&owner, &name.text, passed));
-            return member.or_else(|| self.extension(&receiver, &name.text, arguments, file));
+            let Some(receiver) = self.type_of_expression(object, file) else {
+                // `org.jsoup.parser.Tag.valueOf(…)`: a type named in full.
+                let written: String = object.text.split_whitespace().collect();
+                let owner = self.dotted_type(object, file).filter(|found| {
+                    is_type_declaration(found.node) && self.qualified_type_name(found.file, found.node) == written
+                })?;
+                return self.member(&owner, &name.text, passed);
+            };
+            let owner = self.of_type(&receiver, file);
+            let member = owner.as_ref().and_then(|owner| self.member(owner, &name.text, passed));
+            // What every enum has from `Enum`, every class from `Object`.
+            let inherited = || {
+                if file.language != Language::Java || receiver.dimensions > 0 {
+                    return None;
+                }
+                let owner = owner.as_ref()?;
+                let from_enum = (owner.node.kind == "enum_declaration")
+                    .then(|| self.type_named("java.lang.Enum", file))
+                    .flatten()
+                    .and_then(|declaration| self.member(&declaration, &name.text, passed));
+                from_enum.or_else(|| {
+                    let object = self.type_named("java.lang.Object", file)?;
+                    self.member(&object, &name.text, passed)
+                })
+            };
+            return member
+                .or_else(inherited)
+                .or_else(|| self.extension(&receiver, &name.text, arguments, file));
         }
         // The types around the call, innermost first, then what `import
         // static` brings, then `Object`'s.

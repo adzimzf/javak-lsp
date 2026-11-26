@@ -200,8 +200,14 @@ impl Snapshot {
     /// The token of a name in code.
     fn name_token(&self, file: &FileView, name: &Syn, kinds: &mut Kinds) -> Option<Token> {
         let path = path_to(&file.tree, name.start);
-        // jdtls leaves an interface's own supertypes without tokens.
+        // jdtls leaves an interface's own supertypes without tokens, and
+        // labels.
         if path.iter().any(|node| node.kind == "extends_interfaces") {
+            return None;
+        }
+        if path.iter().rev().nth(1).is_some_and(|parent| {
+            matches!(parent.kind.as_str(), "labeled_statement" | "break_statement" | "continue_statement")
+        }) {
             return None;
         }
         // `xs.length`: an array's length.
@@ -272,6 +278,16 @@ impl Snapshot {
                     base.is_some_and(|base| base.end == name.end && base.start <= name.start)
                 })
         });
+        // A constructor found for a type's name elsewhere: the type.
+        let found = if found.node.kind == "constructor_declaration" && !declares && !creates {
+            let owner = path_to(&found.file.tree, found.node.start)
+                .into_iter()
+                .rev()
+                .find(|node| is_type_declaration(node) && !std::ptr::eq(*node, found.node))?;
+            Found { file: found.file, node: owner, name: owner.child("name")?, bindings: super::Bindings::new() }
+        } else {
+            found
+        };
         // `new Iterator<T>() {…}`: an anonymous class's constructor.
         if creates && creation.is_some_and(|creation| super::is_anonymous_class(creation)) {
             return Some(token(name, CLASS, CONSTRUCTOR | (context & TYPE_ARGUMENT)));
@@ -286,7 +302,7 @@ impl Snapshot {
                     .filter(|created| created.node.kind == "constructor_declaration")
             };
             let visibility = match &constructor {
-                Some(constructor) => kinds.of(self, constructor).1 & (PUBLIC | PRIVATE | PROTECTED),
+                Some(constructor) => kinds.of(self, constructor).1 & (PUBLIC | PRIVATE | PROTECTED | DEPRECATED),
                 None => {
                     let class = if is_type_declaration(found.node) { Some(found.clone()) } else { None };
                     class.map_or(0, |class| kinds.of(self, &class).1 & (PUBLIC | PRIVATE | PROTECTED))
@@ -309,6 +325,23 @@ impl Snapshot {
         }
         let (kind, mut modifiers) = kinds.of(self, &found);
         if is_type_declaration(found.node) && !declares && !with_type_arguments(&path, name) {
+            modifiers &= !GENERIC;
+        }
+        // A generic type's method called on a raw one of it is raw.
+        if modifiers & GENERIC != 0
+            && found.node.kind == "method_declaration"
+            && found.node.child("type_parameters").is_none()
+            && let Some(call) = parent.filter(|parent| parent.kind == "method_invocation")
+            && let Some(object) = call.child("object")
+            && let Some(receiver) = self.type_of_expression(object, file)
+            && receiver.arguments.is_empty()
+            && path_to(&found.file.tree, found.node.start)
+                .iter()
+                .rev()
+                .find(|around| is_type_declaration(around) && !std::ptr::eq(**around, found.node))
+                .and_then(|owner| owner.child("name"))
+                .is_some_and(|owner| owner.text == receiver.name)
+        {
             modifiers &= !GENERIC;
         }
         Some(token(name, kind, modifiers | context))
@@ -459,13 +492,15 @@ impl Snapshot {
                 }
                 let at = position_of(offset + 6 + gap + bracketed);
                 if let Some(declaration) = &documented {
-                    let (kind, found) = if bracketed == 1 {
-                        (TYPE_PARAMETER, declared_type_parameter(declaration, &parameter))
+                    let (kind, found, final_parameter) = if bracketed == 1 {
+                        (TYPE_PARAMETER, declared_type_parameter(declaration, &parameter), false)
                     } else {
-                        (PARAMETER, declared_parameter(declaration, &parameter))
+                        let declared = declared_parameter(declaration, &parameter);
+                        (PARAMETER, declared.is_some(), declared.is_some_and(says_final))
                     };
                     if found {
-                        tokens.push(Token { at, length: parameter.encode_utf16().count() as u32, kind, modifiers: DOCUMENTATION });
+                        let readonly = if final_parameter { READONLY } else { 0 };
+                        tokens.push(Token { at, length: parameter.encode_utf16().count() as u32, kind, modifiers: DOCUMENTATION | readonly });
                     }
                 }
             }
@@ -490,7 +525,7 @@ impl Snapshot {
                 match named {
                     Some(found) => {
                         let (kind, modifiers) = kinds.of(self, &found);
-                        tokens.push(Token { at, length: segment.encode_utf16().count() as u32, kind, modifiers: modifiers | DOCUMENTATION });
+                        tokens.push(Token { at, length: segment.encode_utf16().count() as u32, kind, modifiers: (modifiers & !GENERIC) | DOCUMENTATION });
                     }
                     None if whole.is_some() => {
                         tokens.push(Token { at, length: segment.encode_utf16().count() as u32, kind: NAMESPACE, modifiers: DOCUMENTATION });
@@ -548,6 +583,8 @@ impl Snapshot {
                             match named {
                                 Some(found) => {
                                     let (kind, modifiers) = kinds.of(self, &found);
+                                    // `#m(Collection)` is generic, `#m(java.util.Set)` raw.
+                                    let modifiers = if raw.contains('.') { modifiers & !GENERIC } else { modifiers };
                                     tokens.push(Token { at, length, kind, modifiers: modifiers | DOCUMENTATION });
                                 }
                                 None if whole.is_some() => {
@@ -588,14 +625,32 @@ impl Snapshot {
     }
 }
 
-/// Whether a declaration declares a parameter called `name`.
-fn declared_parameter(declaration: &Syn, name: &str) -> bool {
-    super::parameters_of(declaration).iter().any(|parameter| {
+/// The parameter called `name` a declaration declares.
+fn declared_parameter<'a>(declaration: &'a Syn, name: &str) -> Option<&'a Syn> {
+    super::parameters_of(declaration).into_iter().find(|parameter| {
         parameter
             .child("name")
             .or_else(|| parameter.first("variable_declarator").and_then(|declarator| declarator.child("name")))
             .is_some_and(|named| named.text == name)
     })
+}
+
+/// The block comment right before a declaration, if one is.
+fn doc_comment_before<'a>(file: &'a FileView, declaration: &Syn) -> Option<&'a Syn> {
+    let path = path_to(&file.tree, declaration.start);
+    let index = path.iter().position(|node| std::ptr::eq(*node, declaration))?;
+    let parent = path.get(index.checked_sub(1)?)?;
+    let at = parent.children.iter().position(|child| std::ptr::eq(child, declaration))?;
+    parent.children[..at].last().filter(|before| before.kind == "block_comment")
+}
+
+/// Whether a declaration says `final`.
+fn says_final(declaration: &Syn) -> bool {
+    declaration
+        .children
+        .iter()
+        .find(|child| child.kind == "modifiers")
+        .is_some_and(|modifiers| modifiers.children.iter().any(|modifier| modifier.kind == "final"))
 }
 
 /// Whether a declaration declares a type parameter called `name`.
@@ -641,19 +696,19 @@ struct Kinds {
 }
 
 impl Kinds {
-    fn of(&mut self, snapshot: &Snapshot, found: &Found<'_>) -> (u32, u32) {
+    fn of(&mut self, _snapshot: &Snapshot, found: &Found<'_>) -> (u32, u32) {
         let key = (std::ptr::from_ref(found.file) as usize, found.node.start.line, found.node.start.column);
         if let Some(known) = self.known.get(&key) {
             return *known;
         }
-        let answer = kind_and_modifiers(snapshot, found);
+        let answer = kind_and_modifiers(found);
         self.known.insert(key, answer);
         answer
     }
 }
 
 /// What jdtls shows a declaration as.
-fn kind_and_modifiers(snapshot: &Snapshot, found: &Found<'_>) -> (u32, u32) {
+fn kind_and_modifiers(found: &Found<'_>) -> (u32, u32) {
     let node = found.node;
     let path = path_to(&found.file.tree, node.start);
     // The type a member is declared in, and that type's own path.
@@ -684,8 +739,8 @@ fn kind_and_modifiers(snapshot: &Snapshot, found: &Found<'_>) -> (u32, u32) {
                     && modifier.child("name").is_some_and(|name| matches!(name.text.as_str(), "Deprecated" | "java.lang.Deprecated"))
             })
         });
-        let documented = snapshot
-            .comment_above(found.file, declaration)
+        // The Javadoc right before the declaration, among its siblings.
+        let documented = doc_comment_before(found.file, declaration)
             .is_some_and(|comment| {
                 comment.text.lines().any(|line| line.trim_start().trim_start_matches("/**").trim_start_matches('*').trim_start().starts_with("@deprecated"))
             });
@@ -799,7 +854,10 @@ fn kind_and_modifiers(snapshot: &Snapshot, found: &Found<'_>) -> (u32, u32) {
             }
         }
         "local_variable_declaration" | "catch_formal_parameter" | "resource" | "enhanced_for_statement" | "type_pattern" => {
-            (VARIABLE, if says(node, "final") { READONLY } else { 0 })
+            // A multi-catch's exception is final without saying so.
+            let union = node.kind == "catch_formal_parameter"
+                && node.walk().into_iter().any(|child| child.kind == "|");
+            (VARIABLE, if says(node, "final") || union { READONLY } else { 0 })
         }
         "formal_parameter" | "spread_parameter" | "lambda_expression" | "inferred_parameters" => {
             (PARAMETER, if says(node, "final") { READONLY } else { 0 })

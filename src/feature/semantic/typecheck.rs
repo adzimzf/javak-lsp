@@ -226,8 +226,7 @@ impl Snapshot {
             if !matches!(receiver.node.kind.as_str(), "class_declaration" | "interface_declaration") {
                 return None;
             }
-            let methods = self.methods_of_caller(receiver.node, receiver.file)?;
-            if methods.contains_key(&name.text) {
+            if self.method_names_of(receiver)?.contains(&name.text) {
                 defined = true;
             }
         }
@@ -251,6 +250,20 @@ impl Snapshot {
             level: Level::Error,
             unnecessary: false,
         })
+    }
+
+    /// The names of the methods of a type and the types above it, once
+    /// per type and snapshot; `None` where some of them are unknown.
+    fn method_names_of(&self, of: &Found<'_>) -> Option<std::sync::Arc<std::collections::HashSet<String>>> {
+        let key = (of.file.uri.clone(), of.node.start.line, of.node.start.column);
+        if let Some(known) = self.method_names.get(&key) {
+            return known.clone();
+        }
+        let names = self
+            .methods_of_caller(of.node, of.file)
+            .map(|methods| std::sync::Arc::new(methods.into_keys().collect::<std::collections::HashSet<String>>()));
+        self.method_names.insert(key, names.clone());
+        names
     }
 
     /// A type declaration as a message names it from inside: `G<T>` for a
@@ -429,14 +442,8 @@ impl Snapshot {
     /// only an inherited member type or a guess explains is not certain.
     pub(super) fn is_what_file_names(&self, found: &Found<'_>, name: &str, file: &FileView) -> bool {
         let same = |other: &Found<'_>| other.file.uri == found.file.uri && other.node.start == found.node.start;
-        let declared: Vec<&Syn> = file
-            .tree
-            .walk()
-            .into_iter()
-            .filter(|node| is_type_declaration(node) && node.child("name").is_some_and(|named| named.text == name))
-            .collect();
-        if !declared.is_empty() {
-            return declared.len() == 1 && found.file.uri == file.uri && found.node.start == declared[0].start;
+        if let Some(declared) = self.declared_type(file, name) {
+            return found.file.uri == file.uri && found.node.start == declared.start;
         }
         let all_imports = imports(file);
         if let Some(import) = all_imports.iter().find(|import| !import.is_static && !import.wildcard && import.last_segment() == name) {
