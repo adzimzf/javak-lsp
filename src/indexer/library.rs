@@ -303,6 +303,49 @@ impl Libraries {
                     column: declared.column,
                 });
             }
+            found.extend(self.kotlin_facades_matching(&jar, &index, query));
+        }
+        found
+    }
+
+    /// The classes Kotlin compiles a file's top-level functions into
+    /// (`ListableBeanFactoryExtensions.kt` into
+    /// `ListableBeanFactoryExtensionsKt`), whose names match `query`: Java
+    /// code calls them by that name, and jdtls lists them as classes.
+    fn kotlin_facades_matching(&self, jar: &Path, index: &WordIndex, query: &str) -> Vec<LibraryType> {
+        let mut found = Vec::new();
+        for entry in index.entries().filter(|entry| entry.ends_with(".kt")) {
+            let stem = Path::new(entry).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+            let facade = format!("{stem}Kt");
+            if !crate::feature::query::matches(query, &facade) || !self.ships(jar, entry) {
+                continue;
+            }
+            let Some(text) = self.read_entry(jar, entry) else {
+                continue;
+            };
+            // `@file:JvmName("…")` names the class otherwise.
+            if text.contains("@file:JvmName") || layout(Language::Kotlin).library_functions(&text).is_empty() {
+                continue;
+            }
+            let file = LibraryFile {
+                jar: jar.to_path_buf(),
+                entry: entry.to_owned(),
+                language: Language::Kotlin,
+                package: layout(Language::Kotlin).library_package(entry, &text),
+                rank: rank(entry),
+            };
+            self.extract(&file, &text);
+            let Some(uri) = self.uri_of(&file) else {
+                continue;
+            };
+            found.push(LibraryType {
+                name: facade,
+                container: file.package,
+                kind: super::words::TypeKind::Class,
+                uri,
+                line: 0,
+                column: 0,
+            });
         }
         found
     }

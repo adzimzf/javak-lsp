@@ -277,6 +277,11 @@ impl WordIndex {
     }
 
     /// The types the jar declares, each with the entry declaring it.
+    /// The jar's source entries.
+    pub fn entries(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(String::as_str)
+    }
+
     pub fn declared_types(&self) -> impl Iterator<Item = (&DeclaredType, &str)> {
         self.types
             .iter()
