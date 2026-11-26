@@ -500,6 +500,12 @@ impl Session {
         }
     }
 
+    /// `method`'s answer, waited for until `deadline` rather than for the
+    /// session's patience; nothing where the server answers an error.
+    pub(super) async fn request_by(&mut self, method: &str, params: Value, deadline: Instant) -> Value {
+        self.request(method, params, OnError::AnswerNothing, deadline).await
+    }
+
     async fn request(
         &mut self,
         method: &str,

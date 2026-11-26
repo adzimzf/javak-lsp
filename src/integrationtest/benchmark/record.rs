@@ -124,6 +124,19 @@ pub(super) async fn record(
             tokio::time::Instant::now() + IMPORT_DEADLINE,
         )
         .await;
+    // A search answers from what is indexed so far: jdtls indexes the JDK
+    // and the libraries in the background after it says it is ready, and
+    // a reference search asked meanwhile misses their uses. A workspace
+    // symbol search waits for every index (WAIT_UNTIL_READY_TO_SEARCH), so
+    // one is asked first and every question is answered from the whole
+    // index, the same way each run. Its time counts as importing.
+    session
+        .request_by(
+            "workspace/symbol",
+            json!({"query": "Object"}),
+            tokio::time::Instant::now() + IMPORT_DEADLINE,
+        )
+        .await;
     let import_seconds = started.elapsed().as_secs_f64();
     eprintln!(
         "  {}: {} in {import_seconds:.1}s; diagnostics are {}",
