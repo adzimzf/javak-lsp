@@ -169,6 +169,32 @@ impl Type {
     }
 }
 
+/// Whether a search for uses looks into `file`, as jdtls (Eclipse JDT)
+/// searches: not into classes it has no source of — what a decompiler
+/// wrote, whole jars or the packages a sources jar lacks — where it cannot
+/// place a use; and for a field, not into the JDK, of which it lists the
+/// declaring file alone (`System.out` is used in no other JDK file there).
+fn searches_uses_in(file: &LibraryFile, is_field: bool) -> bool {
+    let jar = file.jar.to_string_lossy();
+    let decompiled = jar.ends_with("-decompiled-sources.jar") || jar.ends_with("-missing-sources.jar");
+    let jdk = file.jar.file_name().is_some_and(|name| name == "src.zip");
+    !decompiled && !(is_field && jdk)
+}
+
+/// Whether `text` has a `case` label naming `constant` (`case RUNTIME:`).
+pub(crate) fn labels_case(text: &str, constant: &str) -> bool {
+    text.match_indices("case").any(|(at, _)| {
+        let is_part = |character: char| character.is_alphanumeric() || character == '_' || character == '$';
+        if text[..at].chars().next_back().is_some_and(is_part) {
+            return false;
+        }
+        let rest = text[at + 4..].trim_start();
+        rest.len() < text.len() - at - 4
+            && rest.starts_with(constant)
+            && !rest[constant.len()..].starts_with(|character: char| character.is_alphanumeric() || character == '_' || character == '$')
+    })
+}
+
 /// Whether `text` writes `word` as a whole word.
 fn writes_word(text: &str, word: &str) -> bool {
     let is_part = |character: char| character.is_alphanumeric() || character == '_' || character == '$';
@@ -3418,14 +3444,20 @@ impl Snapshot {
     /// The library files that write `member` and may mean the one `owner`
     /// declares: in its package, or writing its name (to import it,
     /// qualify with it, or name it as a supertype).
-    fn library_files_naming(&self, package: &str, owner: &str, member: &str) -> Vec<(LibraryFile, String)> {
+    ///
+    /// An enum constant is also reached as a bare `case N:` in a switch
+    /// over a value of its enum, which a file may get without naming the
+    /// enum: those files are kept too.
+    fn library_files_naming(&self, package: &str, owner: &str, member: &str, enum_constant: bool) -> Vec<(LibraryFile, String)> {
         let Some(libraries) = self.libraries.as_ref() else {
             return Vec::new();
         };
         libraries
             .files_containing(member)
             .into_iter()
-            .filter(|(file, text)| file.package == package || writes_word(text, owner))
+            .filter(|(file, text)| {
+                file.package == package || writes_word(text, owner) || (enum_constant && labels_case(text, member))
+            })
             .collect()
     }
 
@@ -3446,13 +3478,20 @@ impl Snapshot {
         }
         let libraries = self.libraries.as_ref()?;
         let name = member.as_deref().unwrap_or_else(|| owner.last().map_or("", String::as_str));
-        let candidates = match &member {
-            Some(member) => self.library_files_naming(&package, &owner[0], member),
+        let mut candidates = match &member {
+            Some(member) => self.library_files_naming(&package, &owner[0], member, enum_constant),
             None => libraries.files_containing(name),
         };
         if candidates.len() <= LIBRARY_FILES_LIMIT {
             return None;
         }
+        // A file reaching the constant only through `case N:` cannot tell
+        // from its tokens whose `N` it is: it is parsed and resolved.
+        candidates.retain(|(file, _)| searches_uses_in(file, member.is_some()));
+        let (by_case, named_in): (Vec<_>, Vec<_>) = candidates.drain(..).partition(|(file, text)| {
+            enum_constant && file.package != package && !writes_word(text, &owner[0])
+        });
+        let candidates = named_in;
         let owner_names: Vec<&str> = owner.iter().map(String::as_str).collect();
         let named = crate::indexer::words::Named {
             package: &package,
@@ -3460,8 +3499,10 @@ impl Snapshot {
             member: member.as_deref(),
             enum_constant,
         };
-        let java: Vec<&(LibraryFile, String)> =
-            candidates.iter().filter(|(file, _)| file.language == Language::Java).collect();
+        let java: Vec<&(LibraryFile, String)> = candidates
+            .iter()
+            .filter(|(file, _)| file.language == Language::Java && searches_uses_in(file, member.is_some()))
+            .collect();
         let threads = std::thread::available_parallelism()
             .map_or(4, std::num::NonZero::get)
             .min(java.len().max(1));
@@ -3499,6 +3540,18 @@ impl Snapshot {
         });
         // The declaration is one of its uses, as jdtls lists it.
         found.push((declaration.file.uri.clone(), declaration.selection()));
+        if !by_case.is_empty() {
+            let wanted = [(&declaration.file.uri, declaration.selection())];
+            let by_case_key = format!("{key} by case");
+            let files = self.library_files_where(by_case_key, move |_| by_case.clone());
+            for file in files {
+                found.extend(
+                    self.uses_in_file_any(file, name, &wanted)
+                        .into_iter()
+                        .map(|(uri, at, _)| (uri.clone(), at)),
+                );
+            }
+        }
         found.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         found.dedup();
         let known = self.named_uses.insert(key, found);
@@ -3523,23 +3576,33 @@ impl Snapshot {
             .filter(|node| !std::ptr::eq(**node, declaration.node))
             .find(|node| is_type_declaration(node))
             .is_some_and(|owner| matches!(owner.kind.as_str(), "interface_declaration" | "annotation_type_declaration"));
-        let package_private = !says("public") && !says("protected") && !owner_is_interface;
+        // An enum constant is public without saying so.
+        let package_private =
+            !says("public") && !says("protected") && !owner_is_interface && declaration.node.kind != "enum_constant";
         let files = if says("private") {
             self.file(&declaration.file.uri).into_iter().collect()
         } else if is_callable(declaration.node) && declaration.node.kind != "constructor_declaration" {
             self.library_files_calling(name)
-        } else if let Some((package, owner, Some(member), _)) = self.named_target(declaration) {
+        } else if let Some((package, owner, Some(member), enum_constant)) = self.named_target(declaration) {
             // A field is used where its type is written too.
             let owner = owner[0].clone();
             self.library_files_where(format!("{member} with {owner} in {package}"), |_| {
-                self.library_files_naming(&package, &owner, &member)
+                self.library_files_naming(&package, &owner, &member, enum_constant)
             })
         } else {
             self.library_files_containing(name)
         };
+        let is_field = self.named_target(declaration).is_some_and(|(_, _, member, _)| member.is_some());
         files
             .into_iter()
             .filter(|file| !package_private || self.package(file).unwrap_or_default() == package)
+            .filter(|file| {
+                file.uri == declaration.file.uri
+                    || self
+                        .searched_files
+                        .get(&file.uri)
+                        .is_none_or(|searched| searches_uses_in(&searched, is_field))
+            })
             .collect()
     }
 
@@ -4726,4 +4789,23 @@ pub fn package_of(snapshot: &Snapshot, file: &FileView) -> Option<String> {
 /// Whether a type name is one of Java's primitive types.
 fn is_primitive(name: &str) -> bool {
     matches!(name, "int" | "long" | "short" | "byte" | "char" | "float" | "double" | "boolean")
+}
+
+#[cfg(test)]
+mod library_search_tests {
+    use super::{labels_case, writes_word};
+
+    #[test]
+    fn a_case_label_names_its_constant() {
+        assert!(labels_case("switch (p) {\n  case RUNTIME:\n}", "RUNTIME"));
+        assert!(!labels_case("switch (p) { case RUNTIME_ONLY: }", "RUNTIME"));
+        assert!(!labels_case("String showcase RUNTIME;", "RUNTIME"));
+        assert!(!labels_case("int caseRUNTIME;", "RUNTIME"));
+    }
+
+    #[test]
+    fn a_word_is_written_whole() {
+        assert!(writes_word("import org.springframework.http.HttpStatus;", "HttpStatus"));
+        assert!(!writes_word("HttpStatusCode code;", "HttpStatus"));
+    }
 }
