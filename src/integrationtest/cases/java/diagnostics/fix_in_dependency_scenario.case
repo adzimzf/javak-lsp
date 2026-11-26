@@ -7,5 +7,5 @@ $0package test1;
 public class F456 {
   { F123.foo(); }
 }
-//= expected (pending)
+//= expected
 /src/main/java/test1/F456.java:3:10  The method foo() is undefined for the type F123

@@ -3,6 +3,7 @@
 //! names its nodes the way the Java grammar does.
 
 mod checks;
+mod typecheck;
 pub mod compiler;
 
 use std::collections::HashMap;
@@ -1949,7 +1950,11 @@ fn locals_of(node: &Syn) -> Vec<(&Syn, &Syn)> {
     match node.kind.as_str() {
         "method_declaration" | "constructor_declaration" | "lambda_expression" => {
             for parameter in parameters_of(node) {
-                if let Some(name) = parameter.child("name") {
+                // `String... names`: the name is its declarator's.
+                let name = parameter
+                    .child("name")
+                    .or_else(|| parameter.children.iter().find(|child| child.kind == "variable_declarator").and_then(|declarator| declarator.child("name")));
+                if let Some(name) = name {
                     declarations.push((parameter, name));
                 }
             }

@@ -214,12 +214,27 @@ impl Backend {
                 wrong_package: !diagnostics.is_empty(),
             };
             reports = compiler::reports(file, on_source_root, elsewhere);
+            if on_source_root {
+                reports.extend(snapshot.type_reports(file));
+            }
+            // Eclipse weighs `@SuppressWarnings` only in a file without errors.
+            let has_errors = !findings.is_empty() || reports.iter().any(|report| report.level == compiler::Level::Error);
+            if has_errors {
+                reports.retain(|report| !report.finding.message.starts_with("At least one of the problems in category"));
+            }
         }
         findings.sort_by_key(|finding| finding.at);
         diagnostics.extend(
             findings
                 .into_iter()
-                .map(|finding| reported(finding.at, finding.message)),
+                .map(|finding| {
+                    let end = finding.end;
+                    let mut diagnostic = reported(finding.at, finding.message);
+                    if let Some(end) = end {
+                        diagnostic.range.end = lsp_position(end);
+                    }
+                    diagnostic
+                }),
         );
         diagnostics.extend(reports.into_iter().map(reported_by_compiler));
         diagnostics
@@ -476,11 +491,16 @@ fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
         compiler::Level::Warning => DiagnosticSeverity::WARNING,
         compiler::Level::Information => DiagnosticSeverity::INFORMATION,
     };
-    Diagnostic {
+    let end = report.finding.end;
+    let mut diagnostic = Diagnostic {
         severity: Some(severity),
         tags: report.unnecessary.then(|| vec![DiagnosticTag::UNNECESSARY]),
         ..reported(report.finding.at, report.finding.message)
+    };
+    if let Some(end) = end {
+        diagnostic.range.end = lsp_position(end);
     }
+    diagnostic
 }
 
 fn lsp_position(at: Position) -> tower_lsp::lsp_types::Position {

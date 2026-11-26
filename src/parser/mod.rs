@@ -27,6 +27,8 @@ pub struct Position {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
     pub at: Position,
+    /// Where it ends, where that is known; a point at `at` otherwise.
+    pub end: Option<Position>,
     pub message: String,
 }
 
