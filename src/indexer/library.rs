@@ -22,6 +22,15 @@ use super::words::WordIndex;
 use crate::language::Language;
 use crate::parser::{syntax, Syn};
 
+/// Whether a type's name is an anonymous class's binary name
+/// (`StringModel$1`): a decompiler writes one out as a class of its own
+/// where the class file does not say whose it is, and jdtls (JDT), which
+/// reads it as anonymous, never lists it as a symbol.
+fn is_anonymous(name: &str) -> bool {
+    name.rsplit_once('$')
+        .is_some_and(|(_, last)| !last.is_empty() && last.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 /// One source file of a library jar.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LibraryFile {
@@ -229,6 +238,7 @@ impl Libraries {
             let mut archive = None;
             for (declared, entry) in index.declared_types() {
                 if Language::of_path(entry) != Some(Language::Java)
+                    || is_anonymous(&declared.name)
                     || !crate::feature::query::matches(query, &declared.name)
                     || entry.contains("/snippet-files/")
                     || entry.contains("/doc-files/")
@@ -622,5 +632,17 @@ pub(crate) mod tests {
             .map(|(key, _)| key)
             .collect();
         assert_eq!(started, vec!["List.first"]);
+    }
+}
+
+#[cfg(test)]
+mod anonymous_tests {
+    #[test]
+    fn an_anonymous_class_name_is_told_apart() {
+        assert!(super::is_anonymous("StringModel$1"));
+        assert!(super::is_anonymous("Outer$Inner$12"));
+        assert!(!super::is_anonymous("StringModel"));
+        assert!(!super::is_anonymous("Flags$StringJoiner"));
+        assert!(!super::is_anonymous("Price$"));
     }
 }
