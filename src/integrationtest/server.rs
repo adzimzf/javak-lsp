@@ -882,9 +882,18 @@ fn java_runtimes() -> Value {
     if major.is_empty() {
         return json!({});
     }
+    // Every execution environment up to the JDK's own is this JDK: a
+    // project asks for its level's (`JavaSE-1.8` for Java 8), and jdtls
+    // would otherwise take another installed JDK for it.
+    let newest: u32 = major.parse().unwrap_or(8);
+    let mut runtimes: Vec<Value> = std::iter::once("1.8".to_owned())
+        .chain((9..newest).map(|version| version.to_string()))
+        .map(|version| json!({"name": format!("JavaSE-{version}"), "path": home}))
+        .collect();
+    runtimes.push(json!({"name": format!("JavaSE-{major}"), "path": home, "default": true}));
     json!({
         "detectJdksAtStart": false,
-        "runtimes": [{"name": format!("JavaSE-{major}"), "path": home, "default": true}],
+        "runtimes": runtimes,
     })
 }
 
