@@ -166,6 +166,9 @@ impl Type {
     }
 }
 
+/// The most library files one search reads and parses.
+const LIBRARY_FILES_LIMIT: usize = 500;
+
 /// The names of the methods of a type and the types above it.
 pub(crate) type MethodNames = Arc<std::collections::HashSet<String>>;
 
@@ -238,7 +241,14 @@ impl Snapshot {
                 let Some(libraries) = self.libraries.as_ref() else {
                     return Vec::new();
                 };
-                let found = search(libraries);
+                let mut found = search(libraries);
+                // A name the libraries write in thousands of files
+                // (`equals`, `getMessage`) would take a minute and gigabytes
+                // to search through: past the limit they are left out, and
+                // only the workspace answers.
+                if found.len() > LIBRARY_FILES_LIMIT {
+                    found.clear();
+                }
                 let unread: Vec<(LibraryFile, String, Url)> = found
                     .into_iter()
                     .filter_map(|(file, text)| {
