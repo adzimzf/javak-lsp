@@ -48,6 +48,16 @@ pub(super) const REPOS: &[Repo] = &[
         build: Build::Maven,
         remove: &[],
     },
+    // A multi-module Maven project (five modules that depend on each
+    // other) built on Spring Boot, Spring Data JPA and Lombok. Its only
+    // tag, v2.7, is years behind master, so master is asked.
+    Repo {
+        name: "eladmin",
+        url: "https://github.com/elunez/eladmin",
+        rev: "master",
+        build: Build::Maven,
+        remove: &[],
+    },
     // Repo {
     //     name: "spring-petclinic",
     //     url: "https://github.com/spring-projects/spring-petclinic",
