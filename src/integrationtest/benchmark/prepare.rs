@@ -71,6 +71,14 @@ pub(super) fn fetch_dependencies(repo: &Repo, project: &Path) {
                         "-Daether.connector.requestTimeout=60000",
                         "-Daether.connector.http.retryHandler.count=3",
                     ])
+                    // In a multi-module project a module's libraries
+                    // include its sibling modules, which no repository
+                    // has: Maven hands them over from the reactor only
+                    // once their `compile` phase has run. Running the
+                    // phase with the compiler skipped is enough, and
+                    // works where compiling would not (an annotation
+                    // processor too old for the JDK, such as Lombok).
+                    .args(["-Dmaven.main.skip=true", "compile"])
                     .args(["dependency:resolve", "dependency:sources"])
                     .current_dir(project),
                 "maven",
