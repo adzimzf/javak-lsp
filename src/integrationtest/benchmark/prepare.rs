@@ -13,6 +13,10 @@ const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 6
 /// The jdtls milestone downloaded when none is installed.
 const JDTLS_VERSION: &str = "1.63.0";
 
+/// The Lombok jdtls loads as a Java agent, as vscode-java does with the
+/// one it bundles.
+const LOMBOK_VERSION: &str = "1.18.48";
+
 /// A server: the program and the arguments it starts with.
 #[derive(Clone)]
 pub(super) struct ServerCommand {
@@ -135,20 +139,52 @@ pub(super) fn copy_project(from: &Path, to: &Path) {
         .unwrap_or_else(|error| panic!("copying {}: {error}", from.display()));
 }
 
-/// jdtls: `JDTLS_CMD`, else the `jdtls` on the `PATH`, else a milestone
-/// downloaded once into the cache.
+/// jdtls: `JDTLS_CMD` as it is, else the `jdtls` on the `PATH` or a
+/// milestone downloaded once into the cache, started with Lombok.
 pub(super) fn jdtls() -> ServerCommand {
     if let Ok(command) = std::env::var("JDTLS_CMD") {
         return ServerCommand::parse(&command);
     }
+    let lombok = format!("--jvm-arg=-javaagent:{}", download_lombok().display());
     if let Some(found) = on_path("jdtls") {
-        return ServerCommand::parse(&found.to_string_lossy());
+        let mut command = ServerCommand::parse(&found.to_string_lossy());
+        command.arguments.push(lombok);
+        return command;
     }
     let launcher = download_jdtls();
     ServerCommand {
         program: "python3".to_owned(),
-        arguments: vec![launcher.to_string_lossy().into_owned()],
+        arguments: vec![launcher.to_string_lossy().into_owned(), lombok],
     }
+}
+
+/// Lombok's jar in `~/.cache/javak-lsp/lombok`, downloaded from Maven
+/// Central when it is not there yet. vscode-java starts jdtls with it as
+/// a Java agent, so the members Lombok generates (constructors, getters…)
+/// exist for jdtls as they do for its users: without it jdtls reports a
+/// `@RequiredArgsConstructor` class's final fields as never initialized.
+fn download_lombok() -> PathBuf {
+    let home = std::env::var("HOME").expect("HOME is set");
+    let directory = Path::new(&home)
+        .join(".cache/javak-lsp/lombok")
+        .join(LOMBOK_VERSION);
+    let jar = directory.join("lombok.jar");
+    if jar.is_file() {
+        return jar;
+    }
+    std::fs::create_dir_all(&directory).expect("the cache is writable");
+    let partial = directory.join("lombok.jar.part");
+    let url = format!(
+        "https://repo.maven.apache.org/maven2/org/projectlombok/lombok/\
+         {LOMBOK_VERSION}/lombok-{LOMBOK_VERSION}.jar"
+    );
+    run(
+        Command::new("curl").args(["-fsSL", "-o"]).arg(&partial).arg(url),
+        "curl lombok",
+    )
+    .expect("lombok downloads");
+    std::fs::rename(&partial, &jar).expect("the cache is writable");
+    jar
 }
 
 /// javak-lsp: `JAVAK_LSP_CMD`, else this checkout's release build, else
