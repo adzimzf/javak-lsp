@@ -57,6 +57,9 @@ pub struct Snapshot {
     /// The library files that write a word, by the word, as searched once
     /// per snapshot ([`Self::library_files_containing`]).
     searched: elsa::sync::FrozenMap<String, Vec<Url>>,
+    /// The uses of a type or field in more library files than a search
+    /// parses, found from their tokens ([`Self::library_uses_by_name`]).
+    named_uses: elsa::sync::FrozenMap<String, Vec<(Url, Position)>>,
     /// Which library file each searched one is, to extract it when an
     /// answer names it.
     searched_files: dashmap::DashMap<Url, LibraryFile>,
@@ -166,6 +169,15 @@ impl Type {
     }
 }
 
+/// Whether `text` writes `word` as a whole word.
+fn writes_word(text: &str, word: &str) -> bool {
+    let is_part = |character: char| character.is_alphanumeric() || character == '_' || character == '$';
+    text.match_indices(word).any(|(at, _)| {
+        !text[..at].chars().next_back().is_some_and(is_part)
+            && !text[at + word.len()..].chars().next().is_some_and(is_part)
+    })
+}
+
 /// The most library files one search reads and parses.
 const LIBRARY_FILES_LIMIT: usize = 500;
 
@@ -205,6 +217,7 @@ impl Snapshot {
             ancestors: elsa::sync::FrozenMap::new(),
             extending: std::sync::OnceLock::new(),
             searched: elsa::sync::FrozenMap::new(),
+            named_uses: elsa::sync::FrozenMap::new(),
             searched_files: dashmap::DashMap::new(),
             method_names: dashmap::DashMap::new(),
         }
@@ -3325,6 +3338,11 @@ impl Snapshot {
     /// once (a method and those it overrides or is overridden by), each
     /// use resolved once, with which of `declarations` it means.
     pub fn library_uses_of_any<'a>(&'a self, declarations: &[&Found<'_>]) -> Vec<(&'a Url, Position, usize)> {
+        if let [declaration] = declarations
+            && let Some(uses) = self.library_uses_by_name(declaration)
+        {
+            return uses.into_iter().map(|(uri, at)| (uri, at, 0)).collect();
+        }
         let mut files: Vec<&FileView> = Vec::new();
         for declaration in declarations {
             for file in self.library_files_for(declaration) {
@@ -3368,6 +3386,125 @@ impl Snapshot {
         places
     }
 
+    /// What a type, or a field or enum constant of one, is to a search by
+    /// name ([`crate::indexer::words::Named`]): its package, the types it
+    /// is in, and its own name for a member. `None` for anything else, and
+    /// for a private member, which only its own file can use.
+    fn named_target(&self, declaration: &Found<'_>) -> Option<(String, Vec<String>, Option<String>, bool)> {
+        let modifiers = declaration.node.first("modifiers").map(|modifiers| modifiers.text.as_str()).unwrap_or_default();
+        if modifiers.split_whitespace().any(|written| written == "private") {
+            return None;
+        }
+        let package = self.package(declaration.file).unwrap_or_default();
+        let path = path_to(&declaration.file.tree, declaration.name.start);
+        let types: Vec<&Syn> = path.iter().copied().filter(|node| is_type_declaration(node)).collect();
+        let owner: Vec<String> = types
+            .iter()
+            .filter_map(|node| node.child("name").map(|name| name.text.clone()))
+            .collect();
+        if is_type_declaration(declaration.node) {
+            return (!owner.is_empty()).then_some((package, owner, None, false));
+        }
+        let is_field = matches!(
+            declaration.node.kind.as_str(),
+            "variable_declarator" | "field_declaration" | "constant_declaration" | "enum_constant"
+        ) && path.iter().any(|node| matches!(node.kind.as_str(), "field_declaration" | "constant_declaration" | "enum_constant"));
+        if !is_field || owner.is_empty() {
+            return None;
+        }
+        Some((package, owner, Some(declaration.name.text.clone()), declaration.node.kind == "enum_constant"))
+    }
+
+    /// The library files that write `member` and may mean the one `owner`
+    /// declares: in its package, or writing its name (to import it,
+    /// qualify with it, or name it as a supertype).
+    fn library_files_naming(&self, package: &str, owner: &str, member: &str) -> Vec<(LibraryFile, String)> {
+        let Some(libraries) = self.libraries.as_ref() else {
+            return Vec::new();
+        };
+        libraries
+            .files_containing(member)
+            .into_iter()
+            .filter(|(file, text)| file.package == package || writes_word(text, owner))
+            .collect()
+    }
+
+    /// The uses of a library type, or of a field or enum constant of one,
+    /// in more library files than a search parses ([`LIBRARY_FILES_LIMIT`]):
+    /// told from each file's tokens, package and imports
+    /// ([`crate::indexer::words::named_uses`]), no file kept parsed. `None`
+    /// where the files are few enough to parse and resolve, or for another
+    /// kind of declaration: a method's calls need the receivers' types.
+    fn library_uses_by_name<'a>(&'a self, declaration: &Found<'_>) -> Option<Vec<(&'a Url, Position)>> {
+        if !declaration.file.library {
+            return None;
+        }
+        let (package, owner, member, enum_constant) = self.named_target(declaration)?;
+        let key = format!("{package} {} {}", owner.join("."), member.as_deref().unwrap_or_default());
+        if let Some(known) = self.named_uses.get(&key) {
+            return Some(known.iter().map(|(uri, at)| (uri, *at)).collect());
+        }
+        let libraries = self.libraries.as_ref()?;
+        let name = member.as_deref().unwrap_or_else(|| owner.last().map_or("", String::as_str));
+        let candidates = match &member {
+            Some(member) => self.library_files_naming(&package, &owner[0], member),
+            None => libraries.files_containing(name),
+        };
+        if candidates.len() <= LIBRARY_FILES_LIMIT {
+            return None;
+        }
+        let owner_names: Vec<&str> = owner.iter().map(String::as_str).collect();
+        let named = crate::indexer::words::Named {
+            package: &package,
+            owner: &owner_names,
+            member: member.as_deref(),
+            enum_constant,
+        };
+        let java: Vec<&(LibraryFile, String)> =
+            candidates.iter().filter(|(file, _)| file.language == Language::Java).collect();
+        let threads = std::thread::available_parallelism()
+            .map_or(4, std::num::NonZero::get)
+            .min(java.len().max(1));
+        let chunk = java.len().div_ceil(threads).max(1);
+        let named = &named;
+        let mut found: Vec<(Url, Position)> = std::thread::scope(|scope| {
+            let workers: Vec<_> = java
+                .chunks(chunk)
+                .map(|chunk| {
+                    scope.spawn(move || {
+                        let mut found = Vec::new();
+                        for (file, text) in chunk {
+                            let offsets = crate::indexer::words::named_uses(text, named);
+                            if offsets.is_empty() {
+                                continue;
+                            }
+                            let Some(uri) = libraries.uri_of(file) else {
+                                continue;
+                            };
+                            self.searched_files.insert(uri.clone(), file.clone());
+                            found.extend(
+                                offsets
+                                    .into_iter()
+                                    .map(|offset| (uri.clone(), crate::parser::position_of(text, offset))),
+                            );
+                        }
+                        found
+                    })
+                })
+                .collect();
+            workers
+                .into_iter()
+                .flat_map(|worker| worker.join().unwrap_or_default())
+                .collect()
+        });
+        // The declaration is one of its uses, as jdtls lists it.
+        found.push((declaration.file.uri.clone(), declaration.selection()));
+        found.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
+        found.dedup();
+        let known = self.named_uses.insert(key, found);
+        Some(known.iter().map(|(uri, at)| (uri, *at)).collect())
+    }
+
     /// The library files that may use a declaration: none for the
     /// workspace's (a library is compiled without it), its own file for a
     /// private member, its package for a package-private one, and else
@@ -3391,6 +3528,12 @@ impl Snapshot {
             self.file(&declaration.file.uri).into_iter().collect()
         } else if is_callable(declaration.node) && declaration.node.kind != "constructor_declaration" {
             self.library_files_calling(name)
+        } else if let Some((package, owner, Some(member), _)) = self.named_target(declaration) {
+            // A field is used where its type is written too.
+            let owner = owner[0].clone();
+            self.library_files_where(format!("{member} with {owner} in {package}"), |_| {
+                self.library_files_naming(&package, &owner, &member)
+            })
         } else {
             self.library_files_containing(name)
         };

@@ -585,6 +585,143 @@ fn placed_tokens(text: &str) -> Vec<(&str, usize)> {
     tokens
 }
 
+/// A type, or a field or enum constant of one, to find the uses of by
+/// reading a file's tokens: what a search does in more library files than
+/// it can parse.
+pub struct Named<'a> {
+    /// The package it is declared in: `java.lang.annotation`.
+    pub package: &'a str,
+    /// The type, and the types it is nested in, outermost first:
+    /// `["ElementType"]`.
+    pub owner: &'a [&'a str],
+    /// The field or enum constant of `owner` to find; `None` for the type.
+    pub member: Option<&'a str>,
+    /// Whether `member` is an enum constant, written bare after `case`.
+    pub enum_constant: bool,
+}
+
+/// Where a Java file's code writes `named` (byte offsets of the names),
+/// told by its tokens, package and imports alone, as the compiler would
+/// read them: `ElementType.TYPE` where `ElementType` is imported, in the
+/// package, in `java.lang` or written in full; a bare `TYPE` statically
+/// imported, or after `case`; the type's own name where it is visible.
+/// A type the file declares itself of the same name hides the other.
+pub fn named_uses(text: &str, named: &Named<'_>) -> Vec<usize> {
+    let tokens = placed_tokens(text);
+    let word = |index: usize| tokens.get(index).map_or("", |(token, _)| *token);
+    let mut package = String::new();
+    let mut imports: Vec<(bool, String)> = Vec::new();
+    let mut declared: Vec<&str> = Vec::new();
+    for (index, (token, _)) in tokens.iter().enumerate() {
+        match *token {
+            "package" if package.is_empty() && imports.is_empty() => package = dotted(&tokens[index + 1..]),
+            "import" => {
+                let is_static = word(index + 1) == "static";
+                imports.push((is_static, dotted(&tokens[index + 1 + usize::from(is_static)..])));
+            }
+            "class" | "interface" | "enum" | "record" if index == 0 || word(index - 1) != "." => {
+                if let Some(name) = tokens.get(index + 1).map(|(name, _)| *name).filter(|name| is_identifier(name)) {
+                    declared.push(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(&top) = named.owner.first() else {
+        return Vec::new();
+    };
+    let full: Vec<&str> = named
+        .package
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .chain(named.owner.iter().copied())
+        .collect();
+    let top_qualified = format!("{}.{top}", named.package);
+    let in_package = package == named.package;
+    let visible = {
+        let own = declared.contains(&top);
+        let imported_elsewhere = imports.iter().any(|(is_static, import)| {
+            !is_static && import.rsplit('.').next() == Some(top) && *import != top_qualified
+        });
+        let imported = imports
+            .iter()
+            .any(|(is_static, import)| !is_static && (*import == top_qualified || *import == format!("{}.*", named.package)));
+        if own {
+            in_package
+        } else if imported_elsewhere {
+            false
+        } else {
+            imported || in_package || named.package == "java.lang"
+        }
+    };
+    // The names before `.` that qualify the token at `index`.
+    let qualifier = |index: usize| -> Vec<&str> {
+        let mut chain = Vec::new();
+        let mut at = index;
+        while at >= 2 && word(at - 1) == "." && is_identifier(word(at - 2)) {
+            chain.push(word(at - 2));
+            at -= 2;
+        }
+        chain.reverse();
+        chain
+    };
+    let mut found = Vec::new();
+    match named.member {
+        Some(member) => {
+            let owner_path = named.owner.join(".");
+            let statically_imported = imports.iter().any(|(is_static, import)| {
+                *is_static
+                    && (*import == format!("{}.{owner_path}.{member}", named.package)
+                        || *import == format!("{}.{owner_path}.*", named.package))
+            });
+            for (index, (token, offset)) in tokens.iter().enumerate() {
+                if *token != member || word(index + 1) == "(" {
+                    continue;
+                }
+                let qualified_by = qualifier(index);
+                let matches = if qualified_by.is_empty() {
+                    let after_case = named.enum_constant && index > 0 && word(index - 1) == "case" && (visible || in_package);
+                    (statically_imported || after_case) && (index == 0 || word(index - 1) != ".")
+                } else {
+                    qualified_by == full || (qualified_by == named.owner && visible)
+                };
+                if matches {
+                    found.push(*offset);
+                }
+            }
+        }
+        None => {
+            let name = *named.owner.last().unwrap_or(&top);
+            let outer: Vec<&str> = full[..full.len() - 1].to_vec();
+            for (index, (token, offset)) in tokens.iter().enumerate() {
+                if *token != name || (index > 0 && matches!(word(index - 1), "class" | "interface" | "enum" | "record")) {
+                    continue;
+                }
+                let qualified_by = qualifier(index);
+                let matches = if qualified_by.is_empty() {
+                    named.owner.len() == 1 && visible
+                } else {
+                    qualified_by == outer
+                        || (named.owner.len() > 1 && qualified_by == named.owner[..named.owner.len() - 1] && visible)
+                };
+                if matches {
+                    found.push(*offset);
+                }
+            }
+        }
+    }
+    found
+}
+
+/// `a.b.C` from the tokens up to `;`, `*` included.
+fn dotted(tokens: &[(&str, usize)]) -> String {
+    tokens
+        .iter()
+        .map(|(token, _)| *token)
+        .take_while(|token| *token != ";")
+        .collect()
+}
+
 fn write_varint(out: &mut Vec<u8>, mut value: u32) {
     while value >= 0x80 {
         out.push((value as u8) | 0x80);
@@ -612,6 +749,61 @@ fn read_varint(input: &mut &[u8]) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    fn uses(text: &str, named: &Named<'_>) -> Vec<String> {
+        named_uses(text, named)
+            .into_iter()
+            .map(|offset| {
+                let line = text[..offset].matches('\n').count() + 1;
+                let end = text[offset..].find(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(text.len(), |end| offset + end);
+                format!("{line}:{}", &text[offset..end])
+            })
+            .collect()
+    }
+
+    const TYPE: Named<'static> = Named {
+        package: "java.lang.annotation",
+        owner: &["ElementType"],
+        member: Some("TYPE"),
+        enum_constant: true,
+    };
+
+    #[test]
+    fn a_field_is_used_where_its_type_is_imported_qualified_or_statically_imported() {
+        let imported = "package a;\nimport java.lang.annotation.ElementType;\n@Target(ElementType.TYPE)\n@interface A {}\n";
+        assert_eq!(uses(imported, &TYPE), ["3:TYPE"]);
+        let on_demand = "package a;\nimport java.lang.annotation.*;\n@Target({ElementType.TYPE, ElementType.FIELD})\n@interface A {}\n";
+        assert_eq!(uses(on_demand, &TYPE), ["3:TYPE"]);
+        let full = "package a;\nclass A { Object o = java.lang.annotation.ElementType.TYPE; }\n";
+        assert_eq!(uses(full, &TYPE), ["2:TYPE"]);
+        let statically = "package a;\nimport static java.lang.annotation.ElementType.TYPE;\n@Target(TYPE)\n@interface A {}\n";
+        assert_eq!(uses(statically, &TYPE), ["2:TYPE", "3:TYPE"]);
+        let in_switch = "package a;\nimport java.lang.annotation.ElementType;\nclass A { void f(ElementType t) { switch (t) { case TYPE: } } }\n";
+        assert_eq!(uses(in_switch, &TYPE), ["3:TYPE"]);
+    }
+
+    #[test]
+    fn a_field_of_another_type_of_the_same_name_is_not_used() {
+        let elsewhere = "package a;\nimport b.ElementType;\nclass A { Object o = ElementType.TYPE; }\n";
+        assert!(uses(elsewhere, &TYPE).is_empty());
+        let own = "package a;\nclass A { enum ElementType { TYPE } Object o = ElementType.TYPE; }\n";
+        assert!(uses(own, &TYPE).is_empty());
+        let not_imported = "package a;\nclass A { Object o = ElementType.TYPE; }\n";
+        assert!(uses(not_imported, &TYPE).is_empty());
+        let commented = "package a;\nimport java.lang.annotation.ElementType;\n// ElementType.TYPE\nclass A { String s = \"ElementType.TYPE\"; Object o = x.TYPE; int t = TYPE(); }\n";
+        assert!(uses(commented, &TYPE).is_empty());
+    }
+
+    #[test]
+    fn a_type_is_used_where_it_is_visible() {
+        let list = Named { package: "java.util", owner: &["List"], member: None, enum_constant: false };
+        let text = "package a;\nimport java.util.List;\nclass A { List<String> l; java.util.List m; java.awt.List n; }\n";
+        assert_eq!(uses(text, &list), ["2:List", "3:List", "3:List"]);
+        let awt = "package a;\nimport java.awt.List;\nclass A { List l; }\n";
+        assert!(uses(awt, &list).is_empty());
+        let long = Named { package: "java.lang", owner: &["Long"], member: None, enum_constant: false };
+        assert_eq!(uses("package a;\nclass A { Long l; }\n", &long), ["2:Long"]);
+    }
+
     use super::*;
 
     #[test]
