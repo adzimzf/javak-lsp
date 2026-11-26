@@ -554,9 +554,11 @@ impl<'a, 't> Formatter<'a, 't> {
             }
             "array_initializer" | "element_value_array_initializer" => {
                 let open = self.first_token(node);
-                for child in children {
+                for (index, child) in children.iter().enumerate() {
                     match child.kind() {
                         "{" => self.wrap(self.after(*child), point(node, false, self)),
+                        // A trailing comma leaves the break before `}` to it.
+                        "," if children.get(index + 1).is_some_and(|next| next.kind() == "}") => {}
                         "," => self.wrap(self.after(*child), point(node, true, self)),
                         "}" => {
                             let at = self.index_of(*child);
@@ -649,7 +651,12 @@ impl<'a, 't> Formatter<'a, 't> {
                             .map(|object| object.id())
                             == Some(child.id())
                 });
-                for child in children.iter().filter(|child| child.kind() == ".") {
+                // Eclipse wraps before a `.` that follows a call, never one
+                // after a name (`errors.add(…)` stays together).
+                let after_a_call = node
+                    .child_by_field_name("object")
+                    .is_some_and(|object| matches!(object.kind(), "method_invocation" | "object_creation_expression"));
+                for child in children.iter().filter(|child| child.kind() == "." && after_a_call) {
                     let at = self.index_of(*child);
                     self.wrap(at, point(owner, true, self));
                 }
@@ -1113,12 +1120,29 @@ impl<'a, 't> Formatter<'a, 't> {
             .map(|(index, _)| *index)
             .collect();
         let fits = |index: usize| ends[index - 1 - start] <= LINE_LENGTH;
-        in_group
+        let greedy = in_group
             .iter()
             .rev()
             .find(|&&index| fits(index))
             .or_else(|| in_group.first())
-            .copied()
+            .copied()?;
+        // What is left after a wrap at `index`, from its continuation.
+        let continuation = (indents[start] + CONTINUATION) * tab;
+        let rest_fits = |index: usize| {
+            let before = ends[index - 1 - start];
+            continuation + longest.saturating_sub(before + 1) <= LINE_LENGTH
+        };
+        if fits(greedy) && rest_fits(greedy) {
+            return Some(greedy);
+        }
+        // One wrap deeper that makes both lines fit costs Eclipse less than
+        // the outer one and more after it.
+        let single = candidates
+            .iter()
+            .filter(|(index, _)| fits(*index) && rest_fits(*index))
+            .min_by_key(|(index, point)| (point.depth, std::cmp::Reverse(*index)))
+            .map(|(index, _)| *index);
+        Some(single.unwrap_or(greedy))
     }
 
     /// The text of each gap and of each token that is laid out again.
@@ -1166,8 +1190,10 @@ impl<'a, 't> Formatter<'a, 't> {
             let indent = self.indentation(indents[index]);
             let starts_line = index == 0 || gap.breaks > 0;
             let laid_out = match token.kind() {
-                "line_comment" if starts_line => Some(line_comment(source, &indent)),
-                "line_comment" => Some(line_comment(source, &self.alignment(column))),
+                "line_comment" if starts_line => {
+                    Some(line_comment(source, &indent, columns(&indent, self.options.tab_size)))
+                }
+                "line_comment" => Some(line_comment(source, &self.alignment(column), column)),
                 "block_comment" => Some(block_comment(source, &indent, starts_line)),
                 "string_literal" if source.starts_with("\"\"\"") => Some(text_block(
                     source,
@@ -1467,13 +1493,16 @@ fn space_between(previous: Node, next: Node) -> bool {
 
 /// A line comment with one space after `//` and between its words, cut
 /// into lines that fit, each further line starting at `indent`.
-fn line_comment(source: &str, indent: &str) -> String {
+fn line_comment(source: &str, indent: &str, column: usize) -> String {
     let content = &source[2..];
     if content.starts_with('/') || content.starts_with("$NON-NLS") || content.trim().is_empty() {
         return source.trim_end().to_owned();
     }
     let words: Vec<&str> = content.split_whitespace().collect();
-    fill(&words, COMMENT_LENGTH - 3)
+    // 80 columns from where the comment starts, and never past the line's
+    // 120.
+    let width = (COMMENT_LENGTH - 3).min(LINE_LENGTH.saturating_sub(column + 3)).max(1);
+    fill(&words, width)
         .into_iter()
         .map(|line| format!("// {line}"))
         .collect::<Vec<_>>()
@@ -1534,6 +1563,13 @@ fn block_comment(source: &str, indent: &str, starts_line: bool) -> String {
                 out.push_str(" * ");
                 out.push_str(&text);
             }
+            // The indentation pushed above is not the line's own, but for
+            // an empty line.
+            CommentLine::Raw(raw) if !raw.trim().is_empty() => {
+                out.truncate(out.len() - indent.len());
+                out.push_str(&raw);
+            }
+            CommentLine::Raw(_) => {}
         }
     }
     out.push('\n');
@@ -1548,6 +1584,8 @@ enum CommentLine {
     /// A blank line the formatter puts in.
     Inserted,
     Text(String),
+    /// A line kept as written, without a ` * `.
+    Raw(String),
 }
 
 /// The lines of a block comment's inside: words single-spaced and wrapped,
@@ -1555,7 +1593,8 @@ enum CommentLine {
 /// and around a `<pre>`, `<p>` on a line of its own, and the descriptions
 /// of `@param` and `@throws` tags lined up under each other.
 fn comment_lines(inner: &str, javadoc: bool) -> Vec<CommentLine> {
-    let stripped = stripped_lines(inner);
+    let with_raw = stripped_with_raw(inner);
+    let stripped: Vec<String> = with_raw.iter().map(|(line, _)| line.clone()).collect();
     let aligned = if javadoc {
         tag_alignment(&stripped)
     } else {
@@ -1566,28 +1605,32 @@ fn comment_lines(inner: &str, javadoc: bool) -> Vec<CommentLine> {
     let mut in_pre = false;
     let mut in_tags = false;
     let mut after_pre = false;
+    let mut in_code_pre = false;
     // How far a tag's description continues past the ` * `: under the
     // description's first word.
     let mut hang = 0;
     let last_is_text =
-        |lines: &Vec<CommentLine>| matches!(lines.last(), Some(CommentLine::Text(_)));
+        |lines: &Vec<CommentLine>| matches!(lines.last(), Some(CommentLine::Text(_) | CommentLine::Raw(_)));
     for (number, line) in stripped.iter().enumerate() {
         if in_pre {
             if line.contains("</pre>") {
                 in_pre = false;
-                after_pre = true;
+                after_pre = !in_code_pre;
             }
-            if line.trim().is_empty() {
-                lines.push(CommentLine::Blank);
-            } else {
-                lines.push(CommentLine::Text(line.trim_end().to_owned()));
+            match &with_raw[number].1 {
+                // A line of a `<pre>` written without its `*`: as it is.
+                Some(raw) if javadoc => lines.push(CommentLine::Raw(raw.clone())),
+                _ if line.trim().is_empty() => lines.push(CommentLine::Blank),
+                _ => lines.push(CommentLine::Text(line.trim_end().to_owned())),
             }
             continue;
         }
         let line = line.replace("<li> ", "<li>");
         let words: Vec<&str> = line.split_whitespace().collect();
         if words.is_empty() {
-            lines.push(CommentLine::Blank);
+            // A blank line written without its `*` Eclipse lays out itself.
+            let unstarred = with_raw[number].1.is_some();
+            lines.push(if javadoc && unstarred { CommentLine::Inserted } else { CommentLine::Blank });
             after_pre = false;
             continue;
         }
@@ -1597,12 +1640,14 @@ fn comment_lines(inner: &str, javadoc: bool) -> Vec<CommentLine> {
         }
         after_pre = false;
         let pad = " ".repeat(hang);
-        if javadoc && text.starts_with("<pre>") {
-            if last_is_text(&lines) {
+        if javadoc && (text.starts_with("<pre>") || text.starts_with("<code><pre>")) {
+            // A `<pre>` inside `<code>` is not set apart by blank lines.
+            in_code_pre = text.starts_with("<code>");
+            if last_is_text(&lines) && !in_code_pre {
                 lines.push(CommentLine::Inserted);
             }
             in_pre = !text.contains("</pre>");
-            after_pre = !in_pre;
+            after_pre = !in_pre && !in_code_pre;
             lines.push(CommentLine::Text(format!("{pad}{}", line.trim())));
             continue;
         }
@@ -1610,6 +1655,7 @@ fn comment_lines(inner: &str, javadoc: bool) -> Vec<CommentLine> {
             if !in_tags && last_is_text(&lines) {
                 lines.push(CommentLine::Inserted);
             }
+
             in_tags = true;
             let named = is_named_tag(words[0]) && words.len() > 1;
             let lead = if named { 2 } else { 1 };
@@ -1636,6 +1682,36 @@ fn comment_lines(inner: &str, javadoc: bool) -> Vec<CommentLine> {
             continue;
         }
         let available = width - hang;
+        // `</p>` on a line of its own, as Eclipse puts it.
+        if javadoc && text.contains("</p>") && text != "</p>" {
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find("</p>") {
+                let before = rest[..at].trim();
+                if !before.is_empty() {
+                    let before = before.strip_prefix("<p>").map_or(before, str::trim_start);
+                    if rest[..at].trim().starts_with("<p>") {
+                        lines.push(CommentLine::Text(format!("{pad}<p>")));
+                    }
+                    if !before.is_empty() {
+                        lines.extend(
+                            fill_units(&pieces_of(before, available), available, available)
+                                .into_iter()
+                                .map(|line| CommentLine::Text(format!("{pad}{line}"))),
+                        );
+                    }
+                }
+                lines.push(CommentLine::Text(format!("{pad}</p>")));
+                rest = rest[at + 4..].trim_start();
+            }
+            if !rest.is_empty() {
+                lines.extend(
+                    fill_units(&pieces_of(rest, available), available, available)
+                        .into_iter()
+                        .map(|line| CommentLine::Text(format!("{pad}{line}"))),
+                );
+            }
+            continue;
+        }
         if javadoc && text.starts_with("<p>") && text.len() > 3 {
             lines.push(CommentLine::Text(format!("{pad}<p>")));
             let rest = text[3..].trim_start();
@@ -1657,12 +1733,15 @@ fn comment_lines(inner: &str, javadoc: bool) -> Vec<CommentLine> {
 
 /// The lines between `/*` and `*/` without their leading ` * `, and
 /// without blank lines at either end.
-fn stripped_lines(inner: &str) -> Vec<String> {
+/// [`stripped_lines`], each with the line as written where it has no
+/// leading `*`: Eclipse keeps such a line of a `<pre>` as it is.
+fn stripped_with_raw(inner: &str) -> Vec<(String, Option<String>)> {
     let raw: Vec<&str> = inner.split('\n').collect();
     let count = raw.len();
-    let mut stripped: Vec<String> = Vec::new();
+    let mut stripped: Vec<(String, Option<String>)> = Vec::new();
     for (index, line) in raw.iter().enumerate() {
         let trimmed = line.trim_start();
+        let starred = index == 0 || trimmed.starts_with('*');
         let rest = if index == 0 {
             trimmed
         } else {
@@ -1672,12 +1751,13 @@ fn stripped_lines(inner: &str) -> Vec<String> {
         if index + 1 == count && rest.trim().is_empty() {
             continue;
         }
-        stripped.push(rest.to_owned());
+        stripped.push((rest.to_owned(), (!starred).then(|| line.trim_end_matches('\r').to_owned())));
     }
-    while stripped.first().is_some_and(|line| line.trim().is_empty()) {
+    while stripped.first().is_some_and(|(line, _)| line.trim().is_empty()) {
         stripped.remove(0);
     }
-    while stripped.last().is_some_and(|line| line.trim().is_empty()) {
+    // A blank last line written without its `*` stays.
+    while stripped.last().is_some_and(|(line, raw)| line.trim().is_empty() && raw.is_none()) {
         stripped.pop();
     }
     stripped
@@ -2077,7 +2157,7 @@ mod tests {
     fn wraps_a_line_comment_at_eighty_columns() {
         let words: Vec<&str> = std::iter::repeat_n("word", 30).collect();
         let comment = format!("//{}", words.join("  "));
-        let laid_out = line_comment(&comment, "");
+        let laid_out = line_comment(&comment, "", 0);
         assert!(laid_out.lines().all(|line| line.len() <= COMMENT_LENGTH));
         assert!(laid_out.lines().all(|line| line.starts_with("// word")));
     }
