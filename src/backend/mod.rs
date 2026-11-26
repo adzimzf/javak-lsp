@@ -82,9 +82,9 @@ impl Backend {
         Ok(item.map(|item| vec![type_item(&snapshot, &item, None)]))
     }
 
-    fn type_hierarchy_related(&self, item: &TypeHierarchyItem, up: bool) -> Result<Option<Vec<TypeHierarchyItem>>> {
+    fn type_hierarchy_related(indexer: &Indexer, item: &TypeHierarchyItem, up: bool) -> Result<Option<Vec<TypeHierarchyItem>>> {
         use crate::feature::type_hierarchy as hierarchy;
-        let snapshot = self.indexer.snapshot();
+        let snapshot = indexer.snapshot();
         let place = |key: &str| -> Option<(Url, Position)> {
             let data = item.data.as_ref()?.get(key)?;
             let uri = Url::parse(data.get("uri")?.as_str()?).ok()?;
@@ -939,93 +939,17 @@ impl LanguageServer for Backend {
         &self,
         params: request::GotoImplementationParams,
     ) -> Result<Option<request::GotoImplementationResponse>> {
-        let at = params.text_document_position_params;
-        let snapshot = self.indexer.snapshot();
-        let places: Vec<Location> = snapshot
-            .implementations_at(&at.text_document.uri, cursor(at.position))
-            .into_iter()
-            .map(|found| Location {
-                uri: found.file.uri.clone(),
-                range: at_name(found.selection()),
-            })
-            .collect();
-        Ok(Some(request::GotoImplementationResponse::Array(places)))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || goto_implementation_now(&indexer, params)).await
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let at = params.text_document_position;
-        let snapshot = self.indexer.snapshot();
-        let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position))
-        else {
-            return Ok(None);
-        };
-        let java = found.file.language == Language::Java;
-        // jdtls searches the libraries' sources too: the JDK calls a method
-        // of the JDK.
-        let everywhere = |of: &Found<'_>| {
-            let mut uses = snapshot.uses_of(of);
-            if java {
-                uses.extend(snapshot.library_uses_of(of));
-            }
-            uses
-        };
-        let mut uses = snapshot.uses_of(&found);
-        let also = features(found.file.language).also_referenced(&snapshot, &found);
-        let related = if java && found.node.kind == "method_declaration" {
-            snapshot.dispatching_to(&found)
-        } else {
-            Vec::new()
-        };
-        // A call of a method it overrides or is overridden by may run it:
-        // jdtls lists those calls too — but not `super.m()`, which runs the
-        // one it names.
-        for related in &related {
-            let declared = (&related.file.uri, related.selection());
-            uses.extend(snapshot.uses_of(related).into_iter().filter(|(uri, at)| {
-                (*uri, *at) != declared && !is_super_call(&snapshot, uri, *at)
-            }));
-        }
-        if java {
-            let mut family: Vec<&Found<'_>> = vec![&found];
-            family.extend(related.iter());
-            for (uri, at, index) in snapshot.library_uses_of_any(&family) {
-                let declared = (&family[index].file.uri, family[index].selection());
-                if index == 0 || ((uri, at) != declared && !is_super_call(&snapshot, uri, at)) {
-                    uses.push((uri, at));
-                }
-            }
-        }
-        for also in also {
-            // In Java their uses, not where they are declared.
-            let declared = (&also.file.uri, also.selection());
-            uses.extend(
-                everywhere(&also)
-                    .into_iter()
-                    .filter(|(uri, at)| !java || (*uri, *at) != declared),
-            );
-        }
-        if found.file.language == Language::Java {
-            // `this(in)` and `super(in)` call a constructor without naming it.
-            if is_constructor(&found) {
-                let calls = call_hierarchy::call_sites(&snapshot, &found);
-                uses.extend(calls.into_iter().map(|(file, start, _)| (&file.uri, start)));
-            }
-            uses = as_jdtls_reports(&snapshot, &found, uses);
-            uses.extend(snapshot.javadoc_uses_of(&found));
-        }
-        uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
-        uses.dedup();
-        let places = uses
-            .into_iter()
-            .map(|(uri, at)| {
-                snapshot.extract_if_searched(uri);
-                Location {
-                    uri: uri.clone(),
-                    range: at_name(at),
-                }
-            })
-            .collect();
-        Ok(Some(places))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || references_now(&indexer, params)).await
     }
 
     async fn document_highlight(
@@ -1308,32 +1232,10 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
-        let mut symbols = self.indexer.types_matching(&params.query);
-        // jdtls lists the libraries' types too.
-        #[allow(deprecated)]
-        symbols.extend(self.indexer.libraries.types_matching(&params.query).into_iter().map(|declared| {
-            use crate::indexer::words::TypeKind;
-            let start = tower_lsp::lsp_types::Position {
-                line: declared.line,
-                character: declared.column,
-            };
-            SymbolInformation {
-                name: declared.name,
-                kind: match declared.kind {
-                    TypeKind::Interface | TypeKind::Annotation => SymbolKind::INTERFACE,
-                    TypeKind::Enum => SymbolKind::ENUM,
-                    TypeKind::Class | TypeKind::Record => SymbolKind::CLASS,
-                },
-                tags: None,
-                deprecated: None,
-                location: Location {
-                    uri: declared.uri,
-                    range: Range { start, end: start },
-                },
-                container_name: Some(declared.container),
-            }
-        }));
-        Ok(Some(symbols))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || symbol_now(&indexer, params)).await
     }
 
     async fn prepare_call_hierarchy(
@@ -1354,40 +1256,20 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
-        let snapshot = self.indexer.snapshot();
-        let Some(of) = item_of(&snapshot, &params.item) else {
-            return Ok(None);
-        };
-        let calls = call_hierarchy::incoming(&snapshot, &of)
-            .into_iter()
-            .map(|calls| CallHierarchyIncomingCall {
-                // As jdtls does: the caller is shown at its first call.
-                from: {
-                    snapshot.extract_if_searched(&calls.member.file.uri);
-                    call_item(&snapshot, &calls.member, calls.at.first().copied())
-                },
-                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
-            })
-            .collect();
-        Ok(Some(calls))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || incoming_calls_now(&indexer, params)).await
     }
 
     async fn outgoing_calls(
         &self,
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
-        let snapshot = self.indexer.snapshot();
-        let Some(of) = item_of(&snapshot, &params.item) else {
-            return Ok(None);
-        };
-        let calls = call_hierarchy::outgoing(&snapshot, &of)
-            .into_iter()
-            .map(|calls| CallHierarchyOutgoingCall {
-                to: call_item(&snapshot, &calls.member, None),
-                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
-            })
-            .collect();
-        Ok(Some(calls))
+        // Searches the libraries: off the request loop, so that other
+        // requests are answered meanwhile.
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || outgoing_calls_now(&indexer, params)).await
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
@@ -1581,14 +1463,16 @@ impl LanguageServer for Backend {
         &self,
         params: TypeHierarchySupertypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        self.type_hierarchy_related(&params.item, true)
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || Backend::type_hierarchy_related(&indexer, &params.item, true)).await
     }
 
     async fn subtypes(
         &self,
         params: TypeHierarchySubtypesParams,
     ) -> Result<Option<Vec<TypeHierarchyItem>>> {
-        self.type_hierarchy_related(&params.item, false)
+        let indexer = Arc::clone(&self.indexer);
+        blocking(move || Backend::type_hierarchy_related(&indexer, &params.item, false)).await
     }
 
     async fn selection_range(
@@ -1776,4 +1660,163 @@ fn symbol_kind(kind: Kind) -> SymbolKind {
         Kind::Function => SymbolKind::FUNCTION,
         Kind::Object => SymbolKind::OBJECT,
     }
+}
+
+fn references_now(indexer: &Indexer, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let at = params.text_document_position;
+        let snapshot = indexer.snapshot();
+        let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position))
+        else {
+            return Ok(None);
+        };
+        let java = found.file.language == Language::Java;
+        // jdtls searches the libraries' sources too: the JDK calls a method
+        // of the JDK.
+        let everywhere = |of: &Found<'_>| {
+            let mut uses = snapshot.uses_of(of);
+            if java {
+                uses.extend(snapshot.library_uses_of(of));
+            }
+            uses
+        };
+        let mut uses = snapshot.uses_of(&found);
+        let also = features(found.file.language).also_referenced(&snapshot, &found);
+        let related = if java && found.node.kind == "method_declaration" {
+            snapshot.dispatching_to(&found)
+        } else {
+            Vec::new()
+        };
+        // A call of a method it overrides or is overridden by may run it:
+        // jdtls lists those calls too — but not `super.m()`, which runs the
+        // one it names.
+        for related in &related {
+            let declared = (&related.file.uri, related.selection());
+            uses.extend(snapshot.uses_of(related).into_iter().filter(|(uri, at)| {
+                (*uri, *at) != declared && !is_super_call(&snapshot, uri, *at)
+            }));
+        }
+        if java {
+            let mut family: Vec<&Found<'_>> = vec![&found];
+            family.extend(related.iter());
+            for (uri, at, index) in snapshot.library_uses_of_any(&family) {
+                let declared = (&family[index].file.uri, family[index].selection());
+                if index == 0 || ((uri, at) != declared && !is_super_call(&snapshot, uri, at)) {
+                    uses.push((uri, at));
+                }
+            }
+        }
+        for also in also {
+            // In Java their uses, not where they are declared.
+            let declared = (&also.file.uri, also.selection());
+            uses.extend(
+                everywhere(&also)
+                    .into_iter()
+                    .filter(|(uri, at)| !java || (*uri, *at) != declared),
+            );
+        }
+        if found.file.language == Language::Java {
+            // `this(in)` and `super(in)` call a constructor without naming it.
+            if is_constructor(&found) {
+                let calls = call_hierarchy::call_sites(&snapshot, &found);
+                uses.extend(calls.into_iter().map(|(file, start, _)| (&file.uri, start)));
+            }
+            uses = as_jdtls_reports(&snapshot, &found, uses);
+            uses.extend(snapshot.javadoc_uses_of(&found));
+        }
+        uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
+        uses.dedup();
+        let places = uses
+            .into_iter()
+            .map(|(uri, at)| {
+                snapshot.extract_if_searched(uri);
+                Location {
+                    uri: uri.clone(),
+                    range: at_name(at),
+                }
+            })
+            .collect();
+        Ok(Some(places))
+    }
+
+fn goto_implementation_now(indexer: &Indexer, params: request::GotoImplementationParams) -> Result<Option<request::GotoImplementationResponse>> {
+        let at = params.text_document_position_params;
+        let snapshot = indexer.snapshot();
+        let places: Vec<Location> = snapshot
+            .implementations_at(&at.text_document.uri, cursor(at.position))
+            .into_iter()
+            .map(|found| Location {
+                uri: found.file.uri.clone(),
+                range: at_name(found.selection()),
+            })
+            .collect();
+        Ok(Some(request::GotoImplementationResponse::Array(places)))
+    }
+
+fn incoming_calls_now(indexer: &Indexer, params: CallHierarchyIncomingCallsParams) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let snapshot = indexer.snapshot();
+        let Some(of) = item_of(&snapshot, &params.item) else {
+            return Ok(None);
+        };
+        let calls = call_hierarchy::incoming(&snapshot, &of)
+            .into_iter()
+            .map(|calls| CallHierarchyIncomingCall {
+                // As jdtls does: the caller is shown at its first call.
+                from: {
+                    snapshot.extract_if_searched(&calls.member.file.uri);
+                    call_item(&snapshot, &calls.member, calls.at.first().copied())
+                },
+                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
+            })
+            .collect();
+        Ok(Some(calls))
+    }
+
+fn symbol_now(indexer: &Indexer, params: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+        let mut symbols = indexer.types_matching(&params.query);
+        // jdtls lists the libraries' types too.
+        #[allow(deprecated)]
+        symbols.extend(indexer.libraries.types_matching(&params.query).into_iter().map(|declared| {
+            use crate::indexer::words::TypeKind;
+            let start = tower_lsp::lsp_types::Position {
+                line: declared.line,
+                character: declared.column,
+            };
+            SymbolInformation {
+                name: declared.name,
+                kind: match declared.kind {
+                    TypeKind::Interface | TypeKind::Annotation => SymbolKind::INTERFACE,
+                    TypeKind::Enum => SymbolKind::ENUM,
+                    TypeKind::Class | TypeKind::Record => SymbolKind::CLASS,
+                },
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: declared.uri,
+                    range: Range { start, end: start },
+                },
+                container_name: Some(declared.container),
+            }
+        }));
+        Ok(Some(symbols))
+    }
+
+fn outgoing_calls_now(indexer: &Indexer, params: CallHierarchyOutgoingCallsParams) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let snapshot = indexer.snapshot();
+        let Some(of) = item_of(&snapshot, &params.item) else {
+            return Ok(None);
+        };
+        let calls = call_hierarchy::outgoing(&snapshot, &of)
+            .into_iter()
+            .map(|calls| CallHierarchyOutgoingCall {
+                to: call_item(&snapshot, &calls.member, None),
+                from_ranges: calls.at.iter().map(|&span| span_range(span)).collect(),
+            })
+            .collect();
+        Ok(Some(calls))
+    }
+
+/// Runs `work` on a thread of its own and waits for it without holding up
+/// the request loop.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    tokio::task::spawn_blocking(work).await.expect("a request's work panicked")
 }
