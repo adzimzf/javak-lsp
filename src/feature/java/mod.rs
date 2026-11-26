@@ -66,7 +66,10 @@ impl LanguageFeatures for Java {
 
     /// A class is referenced where its constructors are called: `new
     /// Point(…)` names the class, as jdtls counts it.
-    fn also_referenced<'a>(&self, _snapshot: &'a Snapshot, found: &Found<'a>) -> Vec<Found<'a>> {
+    fn also_referenced<'a>(&self, snapshot: &'a Snapshot, found: &Found<'a>) -> Vec<Found<'a>> {
+        if matches!(found.node.kind.as_str(), "variable_declarator" | "field_declaration") {
+            return snapshot.accessors_of(found);
+        }
         if !matches!(found.node.kind.as_str(), "class_declaration" | "record_declaration" | "enum_declaration") {
             return Vec::new();
         }

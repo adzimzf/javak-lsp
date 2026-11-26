@@ -52,6 +52,52 @@ impl Highlight {
     }
 }
 
+/// Where the members Lombok generates use `found`, as jdtls highlights
+/// them: at the annotation that generates them, a field read (a getter)
+/// or written (a setter, a constructor), and a type where a generated
+/// member repeats a field's type.
+pub fn generated(snapshot: &Snapshot, file: &FileView, found: &Found<'_>, names_a_type: bool) -> Vec<Highlight> {
+    use crate::parser::java::lombok::{uses, Access};
+    if !file.text.contains("lombok") {
+        return Vec::new();
+    }
+    let is_field = found.file.uri == file.uri;
+    let wanted = (&found.file.uri, found.selection());
+    let mut places = Vec::new();
+    for used in uses(&file.tree) {
+        let at = Highlight {
+            start: used.start,
+            end: used.end,
+            write: used.access == Access::Write,
+        };
+        match used.access {
+            Access::Read | Access::Write if is_field && used.field == found.name.start => places.push(at),
+            Access::Type if names_a_type => {
+                let path = path_to(&file.tree, used.field);
+                let Some(written) = path
+                    .iter()
+                    .rev()
+                    .find(|node| node.kind == "field_declaration")
+                    .and_then(|field| field.child("type"))
+                else {
+                    continue;
+                };
+                let names_it = written
+                    .walk()
+                    .into_iter()
+                    .filter(|node| node.kind == "type_identifier")
+                    .filter_map(|node| snapshot.declaration_at(&file.uri, node.start))
+                    .any(|declaration| (&declaration.file.uri, declaration.selection()) == wanted);
+                if names_it {
+                    places.push(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    places
+}
+
 /// The places jdtls highlights for a cursor, or `None` where the cursor is
 /// on a plain name and the uses of that name are the answer.
 pub fn special(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<Vec<Highlight>> {

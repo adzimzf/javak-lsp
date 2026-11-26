@@ -5,6 +5,7 @@ use tree_sitter::Node;
 
 mod errors;
 mod folds;
+pub mod lombok;
 
 use super::treesitter::{at, empty_tree, first_of_kind, FoldKinds, Grammar};
 use super::{Finding, Fold, Kind, Name, Outline, Position, Syn, Syntax};
@@ -67,7 +68,9 @@ impl Syntax for Java {
     }
 
     fn tree(&self, text: &str) -> Syn {
-        GRAMMAR.snapshot(text).unwrap_or_else(empty_tree)
+        let mut tree = GRAMMAR.snapshot(text).unwrap_or_else(empty_tree);
+        lombok::expand(&mut tree);
+        tree
     }
 
     fn name_at(&self, text: &str, cursor: Position) -> Option<Name> {
@@ -86,7 +89,20 @@ impl Syntax for Java {
     }
 
     fn folds(&self, text: &str) -> Vec<Fold> {
-        folds::folds(text)
+        let mut folds = folds::folds(text);
+        if text.contains("lombok") {
+            if let Some(tree) = GRAMMAR.snapshot(text) {
+                // Each method Lombok generates is a region on its
+                // annotation's lines, one apiece, as jdtls reports them.
+                folds.extend(lombok::folds(&tree).into_iter().map(|(first_line, last_line)| Fold {
+                    first_line,
+                    last_line,
+                    kind: None,
+                }));
+                folds.sort_unstable();
+            }
+        }
+        folds
     }
 }
 

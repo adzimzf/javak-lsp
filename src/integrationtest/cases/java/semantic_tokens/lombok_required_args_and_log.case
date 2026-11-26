@@ -1,0 +1,153 @@
+//- /com/demo/Person.java
+package com.demo;
+
+import lombok.Data;
+
+@Data
+public class Person {
+    private String name;
+    private boolean active;
+    private final Long id;
+    private static int created;
+}
+//- /com/demo/Service.java
+$0package com.demo;
+
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@RequiredArgsConstructor
+public class Service {
+    private final Repo repo;
+    @NonNull
+    private String label;
+    private int count;
+
+    void run(Person person) {
+        log.info(person.getName());
+        person.setActive(person.isActive());
+        new Service(repo, "x");
+    }
+}
+//- /com/demo/Repo.java
+package com.demo;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@NoArgsConstructor
+@AllArgsConstructor
+public class Repo {
+    @Getter
+    private String url;
+    @Getter
+    @Setter
+    private int size;
+}
+//- /lombok/Data.java (not open)
+package lombok;
+
+public @interface Data {
+}
+//- /lombok/Generated.java (not open)
+package lombok;
+
+public @interface Generated {
+}
+//- /lombok/Getter.java (not open)
+package lombok;
+
+public @interface Getter {
+}
+//- /lombok/Setter.java (not open)
+package lombok;
+
+public @interface Setter {
+}
+//- /lombok/NonNull.java (not open)
+package lombok;
+
+public @interface NonNull {
+}
+//- /lombok/RequiredArgsConstructor.java (not open)
+package lombok;
+
+public @interface RequiredArgsConstructor {
+}
+//- /lombok/NoArgsConstructor.java (not open)
+package lombok;
+
+public @interface NoArgsConstructor {
+}
+//- /lombok/AllArgsConstructor.java (not open)
+package lombok;
+
+public @interface AllArgsConstructor {
+}
+//- /lombok/EqualsAndHashCode.java (not open)
+package lombok;
+
+public @interface EqualsAndHashCode {
+}
+//- /lombok/extern/slf4j/Slf4j.java (not open)
+package lombok.extern.slf4j;
+
+public @interface Slf4j {
+}
+//- /org/slf4j/Logger.java (not open)
+package org.slf4j;
+
+public interface Logger {
+    void info(String message);
+}
+//- /org/slf4j/LoggerFactory.java (not open)
+package org.slf4j;
+
+public final class LoggerFactory {
+    public static Logger getLogger(Class<?> type) {
+        return null;
+    }
+}
+//= expected
+1:9  com  namespace
+1:13  demo  namespace
+3:8  lombok  namespace [importDeclaration]
+3:15  NonNull  decorator [public, importDeclaration]
+4:8  lombok  namespace [importDeclaration]
+4:15  RequiredArgsConstructor  decorator [public, importDeclaration]
+5:8  lombok  namespace [importDeclaration]
+5:15  extern  namespace [importDeclaration]
+5:22  slf4j  namespace [importDeclaration]
+5:28  Slf4j  decorator [public, importDeclaration]
+7:2  Slf4j  decorator [public]
+8:2  RequiredArgsConstructor  decorator [public]
+9:1  public  modifier
+9:8  class  modifier
+9:14  Service  class [declaration, public]
+10:5  private  modifier
+10:13  final  modifier
+10:19  Repo  class [public]
+10:24  repo  property [readonly, declaration, private]
+11:6  NonNull  decorator [public]
+12:5  private  modifier
+12:13  String  class [readonly, public]
+12:20  label  property [declaration, private]
+13:5  private  modifier
+13:17  count  property [declaration, private]
+15:10  run  method [declaration]
+15:14  Person  class [public]
+15:21  person  parameter [declaration]
+16:9  log  property [static, readonly, private]
+16:13  info  method [abstract, public]
+16:18  person  parameter
+16:25  getName  method [public]
+17:9  person  parameter
+17:16  setActive  method [public]
+17:26  person  parameter
+17:33  isActive  method [public]
+18:13  Service  class [public, constructor]
+18:21  repo  property [readonly, private]
