@@ -3,7 +3,10 @@
 //! names its nodes the way the Java grammar does.
 
 mod checks;
+mod tokens;
 mod typecheck;
+
+pub use tokens::{Token as SemanticToken, MODIFIERS as TOKEN_MODIFIERS, TYPES as TOKEN_TYPES};
 pub mod compiler;
 
 use std::collections::HashMap;
@@ -456,7 +459,9 @@ impl Snapshot {
         }
         let package = self.package(from);
         let own = package.as_deref().unwrap_or("");
-        if let Some(found) = self.type_in_package(name, Some(own), prefer) {
+        // The package's top-level types, then on-demand imports and
+        // `java.lang`; a nested type of the package only after them all.
+        if let Some(found) = self.type_in_package_where(name, Some(own), prefer, false) {
             return Some(found);
         }
         let on_demand = imports(from).into_iter().filter(|import| import.wildcard);
@@ -469,6 +474,9 @@ impl Snapshot {
             if let Some(found) = self.type_in_package(name, Some(implicit), prefer) {
                 return Some(found);
             }
+        }
+        if let Some(found) = self.type_in_package(name, Some(own), prefer) {
+            return Some(found);
         }
         self.type_in_package(name, None, prefer)
     }
@@ -522,6 +530,18 @@ impl Snapshot {
         package: Option<&str>,
         prefer: Language,
     ) -> Option<Found<'a>> {
+        self.type_in_package_where(name, package, prefer, true)
+    }
+
+    /// [`Self::type_in_package`], with the package's nested types only
+    /// where `nested` says so.
+    fn type_in_package_where<'a>(
+        &'a self,
+        name: &str,
+        package: Option<&str>,
+        prefer: Language,
+        nested: bool,
+    ) -> Option<Found<'a>> {
         let declaring = |file: &'a FileView| {
             let declaration = self.declared_type(file, name)?;
             self.declared(file, declaration)
@@ -540,6 +560,9 @@ impl Snapshot {
         };
         if let Some(found) = self.every_file().filter(in_package).find_map(top_level) {
             return Some(found);
+        }
+        if !nested {
+            return None;
         }
         if let Some(found) = self.every_file().filter(in_package).find_map(declaring) {
             return Some(found);
@@ -775,9 +798,41 @@ impl Snapshot {
                 if field.kind == "this" {
                     return Some(type_of_node(object));
                 }
-                let receiver = self.type_of_expression(object, from)?;
-                let owner = self.of_type(&receiver, from)?;
-                let member = self.member(&owner, &field.text, None)?;
+                let owner = match self.type_of_expression(object, from) {
+                    Some(receiver) => self.of_type(&receiver, from)?,
+                    // `Token.TokenType.StartTag`: the object names a type.
+                    None => {
+                        let written: String = object.text.split_whitespace().collect();
+                        let names_a_type = written
+                            .split('.')
+                            .all(|part| !part.is_empty() && part.chars().all(|character| character.is_alphanumeric() || character == '_'));
+                        let first = written.split('.').next().unwrap_or_default();
+                        if !names_a_type || self.name_in_scope(first, from, object.start).is_some_and(|found| !is_type_declaration(found.node)) {
+                            return None;
+                        }
+                        self.type_named(&written, from).filter(|found| is_type_declaration(found.node))?
+                    }
+                };
+                // A member type is found in the owner's body.
+                let member_type = owner.node.child("body").and_then(|body| {
+                    body.children
+                        .iter()
+                        .find(|child| is_type_declaration(child) && child.child("name").is_some_and(|named| named.text == field.text))
+                });
+                let member = match member_type {
+                    Some(declaration) => self.declared(owner.file, declaration)?,
+                    None => self.member(&owner, &field.text, None)?,
+                };
+                // `Token.TokenType`: a member type, named in full so that it
+                // is not taken for another type of its simple name.
+                if is_type_declaration(member.node) {
+                    let qualified = self.qualified_type_name(member.file, member.node);
+                    let (qualifier, name) = qualified.rsplit_once('.')?;
+                    return Some(Type {
+                        qualifier: Some(qualifier.to_owned()),
+                        ..Type::named(name)
+                    });
+                }
                 self.type_of_declaration(&member)
             }
             "method_invocation" => {
@@ -877,10 +932,16 @@ impl Snapshot {
                 .child("type")
                 .or_else(|| node.first("catch_type").and_then(|caught| caught.children.first()))
                 .map(type_of_node),
-            "formal_parameter" | "spread_parameter" | "field_declaration"
-            | "local_variable_declaration" | "resource" | "type_pattern" => {
+            "formal_parameter" | "field_declaration" | "local_variable_declaration" | "resource" | "type_pattern" => {
                 node.child("type").map(type_of_node)
             }
+            // `String... names` is a `String[]`.
+            "spread_parameter" => node
+                .children
+                .iter()
+                .find(|child| child.field.as_deref() == Some("type") || child.kind.ends_with("_type") || child.kind == "type_identifier")
+                .map(type_of_node)
+                .map(|element| Type { dimensions: element.dimensions + 1, ..element }),
             "instanceof_expression" | "lambda_expression" => self.inferred(declaration),
             "enum_constant" => Some(Type::named(&enclosing_type(&declaration.file.tree, node.start)?.0)),
             "class_declaration" | "record_declaration" | "interface_declaration"
@@ -1075,7 +1136,7 @@ impl Snapshot {
                 bindings: Bindings::new(),
             });
         }
-        self.type_named(&innermost.child("name")?.text, file)
+        self.declared(file, innermost)
     }
 
     /// What `name` is where the cursor is: the nearest local, parameter or
@@ -1119,17 +1180,9 @@ impl Snapshot {
             }
         }
         for ancestor in path.iter().rev() {
-            let declares_a_type = matches!(
-                ancestor.kind.as_str(),
-                "class_declaration"
-                    | "record_declaration"
-                    | "interface_declaration"
-                    | "enum_declaration"
-            );
-            if !declares_a_type {
+            let Some(of) = self.member_scope(file, ancestor) else {
                 continue;
-            }
-            let of = self.declared(file, ancestor)?;
+            };
             // A constructor is called by `new` or `this(…)`, never named:
             // the class's own name there is the class.
             let member = self
@@ -1143,6 +1196,24 @@ impl Snapshot {
             return Some(found);
         }
         self.type_named(name, file)
+    }
+
+    /// What declares the members a name inside `node` may mean: a type,
+    /// an anonymous class, an enum constant's own body.
+    fn member_scope<'a>(&'a self, file: &'a FileView, node: &'a Syn) -> Option<Found<'a>> {
+        let name = if is_anonymous_class(node) {
+            node.child("type")?
+        } else if node.kind == "enum_constant" && node.child("body").is_some() {
+            node.child("name")?
+        } else if matches!(
+            node.kind.as_str(),
+            "class_declaration" | "record_declaration" | "interface_declaration" | "enum_declaration"
+        ) {
+            node.child("name")?
+        } else {
+            return None;
+        };
+        Some(Found { file, node, name, bindings: Bindings::new() })
     }
 
     /// A member a `import static` names, by the type it is imported from.
@@ -1180,9 +1251,29 @@ impl Snapshot {
                 .and_then(|owner| self.member(&owner, &name.text, passed));
             return member.or_else(|| self.extension(&receiver, &name.text, arguments, file));
         }
-        let member = self
-            .enclosing(file, name.start)
-            .and_then(|owner| self.member(&owner, &name.text, passed));
+        // The types around the call, innermost first, then what `import
+        // static` brings, then `Object`'s.
+        let mut member = None;
+        if file.language == Language::Java {
+            for ancestor in path_to(&file.tree, name.start).iter().rev() {
+                if let Some(scope) = self.member_scope(file, ancestor)
+                    && let Some(found) = self.member(&scope, &name.text, passed).filter(|found| !is_constructor(found.node))
+                {
+                    member = Some(found);
+                    break;
+                }
+            }
+            member = member
+                .or_else(|| self.statically_imported(&name.text, file))
+                .or_else(|| {
+                    let object = self.type_named("java.lang.Object", file)?;
+                    self.member(&object, &name.text, passed)
+                });
+        } else {
+            member = self
+                .enclosing(file, name.start)
+                .and_then(|owner| self.member(&owner, &name.text, passed));
+        }
         if member.is_some() || !features(file.language).has_top_level_functions() {
             return member;
         }
@@ -1199,7 +1290,8 @@ impl Snapshot {
     /// declares none — the class itself, standing for its default one.
     pub fn created<'a>(&'a self, creation: &'a Syn, file: &'a FileView) -> Option<Found<'a>> {
         let created = creation.child("type")?;
-        let declaration = self.type_named(&type_of_node(created).name, file)?;
+        // `new Token.Character()` is Token's `Character`, not java.lang's.
+        let declaration = self.of_type(&type_of_node(created), file)?;
         let arguments = creation.child("arguments").map(|at| (at, file));
         let constructor = self.member(&declaration, &declaration.name.text, arguments);
         constructor.or(Some(declaration))
@@ -1981,6 +2073,18 @@ fn locals_of(node: &Syn) -> Vec<(&Syn, &Syn)> {
         "enhanced_for_statement" => {
             if let Some(name) = node.child("name") {
                 declarations.push((node, name));
+            }
+        }
+        // A local of one `case` is in scope in the cases after it.
+        "switch_block" => {
+            for group in node.children.iter().filter(|child| child.kind == "switch_block_statement_group") {
+                for statement in group.children.iter().filter(|child| child.kind == "local_variable_declaration") {
+                    for declarator in statement.all("variable_declarator") {
+                        if let Some(name) = declarator.child("name") {
+                            declarations.push((statement, name));
+                        }
+                    }
+                }
             }
         }
         "catch_clause" => {
@@ -3218,7 +3322,7 @@ impl Snapshot {
                 .map(|parameter| {
                     // `String name` or `java.lang.String`: the type, simply named.
                     let written = parameter.split_whitespace().next().unwrap_or(parameter);
-                    let raw = written.split('<').next().unwrap_or(written);
+                    let raw = written.split('<').next().unwrap_or(written).trim_end_matches("...");
                     let simple = raw.rsplit('.').next().unwrap_or(raw);
                     format!("{simple}{}", if written.ends_with("...") { "..." } else { "" })
                 })

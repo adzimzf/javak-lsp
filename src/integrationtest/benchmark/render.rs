@@ -279,11 +279,14 @@ impl View<'_> {
         let legend = self.session.semantic_legend();
         let types = legend["tokenTypes"].as_array().cloned().unwrap_or_default();
         let modifiers = legend["tokenModifiers"].as_array().cloned().unwrap_or_default();
-        let data: Vec<u64> = items(&answer["data"]).filter_map(Value::as_u64).collect();
-        let (mut line, mut character) = (0, 0);
-        let mut lines = Vec::new();
+        // Read as signed: jdtls sends a token out of order now and then (a
+        // type parameter's `extends` after its bound), a negative delta.
+        // Tokens are then compared by place, not by the order sent.
+        let data: Vec<i64> = items(&answer["data"]).filter_map(Value::as_i64).collect();
+        let (mut line, mut character) = (0i64, 0i64);
+        let mut placed = Vec::new();
         for token in data.chunks_exact(5) {
-            if token[0] > 0 {
+            if token[0] != 0 {
                 line += token[0];
                 character = token[1];
             } else {
@@ -300,15 +303,13 @@ impl View<'_> {
                 .filter_map(|(_, modifier)| modifier.as_str())
                 .collect();
             set.sort();
-            lines.push(format!(
-                "{}:{} len {} {kind} {}",
-                line + 1,
-                character + 1,
-                token[2],
-                set.join(",")
+            placed.push((
+                (line, character),
+                format!("{}:{} len {} {kind} {}", line + 1, character + 1, token[2], set.join(",")),
             ));
         }
-        lines
+        placed.sort_by_key(|(at, _)| *at);
+        placed.into_iter().map(|(_, rendered)| rendered).collect()
     }
 }
 

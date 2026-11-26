@@ -634,6 +634,23 @@ impl LanguageServer for Backend {
                     resolve_provider: Some(true),
                 }),
                 inlay_hint_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        legend: SemanticTokensLegend {
+                            token_types: crate::feature::semantic::TOKEN_TYPES
+                                .iter()
+                                .map(|name| SemanticTokenType::new(name))
+                                .collect(),
+                            token_modifiers: crate::feature::semantic::TOKEN_MODIFIERS
+                                .iter()
+                                .map(|name| SemanticTokenModifier::new(name))
+                                .collect(),
+                        },
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                        range: Some(false),
+                        ..SemanticTokensOptions::default()
+                    },
+                )),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
@@ -1495,6 +1512,32 @@ impl LanguageServer for Backend {
                 })
                 .collect(),
         ))
+    }
+
+    async fn semantic_tokens_full(&self, params: SemanticTokensParams) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
+        if self.indexer.language(&uri) != Some(Language::Java) {
+            return Ok(None);
+        }
+        let snapshot = self.indexer.snapshot();
+        let Some(file) = snapshot.file(&uri) else {
+            return Ok(None);
+        };
+        let mut data = Vec::new();
+        let (mut line, mut column) = (0, 0);
+        for token in snapshot.semantic_tokens(file) {
+            let delta_line = token.at.line - line;
+            let delta_start = if delta_line == 0 { token.at.column - column } else { token.at.column };
+            data.push(SemanticToken {
+                delta_line,
+                delta_start,
+                length: token.length,
+                token_type: token.kind,
+                token_modifiers_bitset: token.modifiers,
+            });
+            (line, column) = (token.at.line, token.at.column);
+        }
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens { result_id: None, data })))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
