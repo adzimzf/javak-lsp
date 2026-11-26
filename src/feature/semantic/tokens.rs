@@ -302,13 +302,9 @@ impl Snapshot {
             } else {
                 kinds.of(self, &found).0
             };
-            let generic = if is_type_declaration(found.node) && found.node.child("type_parameters").is_some() && with_type_arguments(&path, name) {
-                GENERIC
-            } else if found.node.kind == "constructor_declaration" && kinds.of(self, &found).1 & GENERIC != 0 {
-                GENERIC
-            } else {
-                0
-            };
+            let generic_type = is_type_declaration(found.node) && found.node.child("type_parameters").is_some() && with_type_arguments(&path, name);
+            let generic_constructor = found.node.kind == "constructor_declaration" && kinds.of(self, &found).1 & GENERIC != 0;
+            let generic = if generic_type || generic_constructor { GENERIC } else { 0 };
             return Some(token(name, kind, CONSTRUCTOR | visibility | declaration | generic | (context & TYPE_ARGUMENT)));
         }
         let (kind, mut modifiers) = kinds.of(self, &found);

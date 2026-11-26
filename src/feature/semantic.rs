@@ -1201,14 +1201,14 @@ impl Snapshot {
     /// What declares the members a name inside `node` may mean: a type,
     /// an anonymous class, an enum constant's own body.
     fn member_scope<'a>(&'a self, file: &'a FileView, node: &'a Syn) -> Option<Found<'a>> {
+        let declares_members = (node.kind == "enum_constant" && node.child("body").is_some())
+            || matches!(
+                node.kind.as_str(),
+                "class_declaration" | "record_declaration" | "interface_declaration" | "enum_declaration"
+            );
         let name = if is_anonymous_class(node) {
             node.child("type")?
-        } else if node.kind == "enum_constant" && node.child("body").is_some() {
-            node.child("name")?
-        } else if matches!(
-            node.kind.as_str(),
-            "class_declaration" | "record_declaration" | "interface_declaration" | "enum_declaration"
-        ) {
+        } else if declares_members {
             node.child("name")?
         } else {
             return None;
