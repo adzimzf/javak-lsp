@@ -1,0 +1,151 @@
+name: release-candidate
+
+# Every pull request merged into main publishes a release candidate: a
+# GitHub pre-release tagged `v<Cargo.toml version>-rc.<n>` on the merge
+# commit, with one archive per platform. An archive holds the `javak-lsp`
+# binary and `javak-debug-server.jar` next to it, where the server looks
+# for the jar.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One candidate at a time, so two merges never pick the same rc number.
+concurrency:
+  group: release-candidate
+  cancel-in-progress: false
+
+jobs:
+  version:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Pick the next rc tag
+        id: tag
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          last=$(git tag --list "v${version}-rc.*" | sed "s/^v${version}-rc\.//" | sort -n | tail -n1)
+          tag="v${version}-rc.$(( ${last:-0} + 1 ))"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Release candidate: $tag"
+
+  debug-server:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build javak-debug-server.jar
+        working-directory: java-sidecar/debug-server
+        run: mvn -q -B package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: javak-debug-server
+          path: java-sidecar/debug-server/target/javak-debug-server.jar
+          if-no-files-found: error
+
+  build:
+    needs: [version, debug-server]
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build javak-lsp
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: javak-debug-server
+          path: debug-server
+
+      - name: Package
+        run: |
+          name="javak-lsp-${{ needs.version.outputs.tag }}-${{ matrix.target }}"
+          mkdir "$name"
+          cp "target/${{ matrix.target }}/release/javak-lsp" "$name/"
+          cp debug-server/javak-debug-server.jar README.md LICENSE "$name/"
+          tar -czf "$name.tar.gz" "$name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: javak-lsp-${{ matrix.target }}
+          path: javak-lsp-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: javak-lsp-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Publish the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          SHA: ${{ needs.version.outputs.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            notes="Release candidate built from #${PR_NUMBER}: ${PR_TITLE}"
+          else
+            notes="Release candidate built from ${SHA}"
+          fi
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "$TAG" \
+            --notes "$notes" \
+            --prerelease
