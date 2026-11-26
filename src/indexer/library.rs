@@ -87,6 +87,9 @@ pub struct Libraries {
     /// Each jar opened once: opening reads its whole directory, fifteen
     /// thousand entries for the JDK.
     archives: DashMap<PathBuf, Arc<std::sync::Mutex<zip::ZipArchive<std::fs::File>>>>,
+    /// Each sources jar's entries its jar ships no class of
+    /// ([`unshipped_entries`]), worked out when first asked.
+    unshipped: DashMap<PathBuf, Arc<Vec<String>>>,
 }
 
 impl Default for Libraries {
@@ -109,7 +112,23 @@ impl Libraries {
             jars: RwLock::default(),
             words: DashMap::new(),
             archives: DashMap::new(),
+            unshipped: DashMap::new(),
         }
+    }
+
+    /// Whether `entry` of the sources jar `jar` is a class its jar ships:
+    /// a source of a class no jar holds (Lombok keeps its own classes as
+    /// `.SCL.lombok` resources) can be used by nothing.
+    fn ships(&self, jar: &Path, entry: &str) -> bool {
+        let unshipped = match self.unshipped.get(jar) {
+            Some(known) => known.clone(),
+            None => {
+                let entries = Arc::new(unshipped_entries(jar));
+                self.unshipped.insert(jar.to_path_buf(), entries.clone());
+                entries
+            }
+        };
+        unshipped.binary_search_by(|hidden| hidden.as_str().cmp(entry)).is_err()
     }
 
     /// Index these sources jars, replacing what was indexed before.
@@ -206,7 +225,7 @@ impl Libraries {
                 };
                 // Examples kept beside the JDK's documentation, never
                 // compiled: no class of theirs is searched.
-                if entry.contains("/snippet-files/") || entry.contains("/doc-files/") {
+                if entry.contains("/snippet-files/") || entry.contains("/doc-files/") || !self.ships(&jar, entry) {
                     continue;
                 }
                 let Some(text) = self.read_entry(&jar, entry) else {
@@ -239,6 +258,7 @@ impl Libraries {
             for (declared, entry) in index.declared_types() {
                 if Language::of_path(entry) != Some(Language::Java)
                     || is_anonymous(&declared.name)
+                    || !self.ships(&jar, entry)
                     || !crate::feature::query::matches(query, &declared.name)
                     || entry.contains("/snippet-files/")
                     || entry.contains("/doc-files/")
@@ -402,7 +422,62 @@ impl Libraries {
 const NOT_DECLARING: &[&str] = &["module-info", "package-info"];
 
 /// Every Java/Kotlin file of a jar, by the types and functions it declares.
+/// The entries of a Maven sources jar (`x-1.0-sources.jar`) its jar
+/// (`x-1.0.jar`, beside it) ships no class of: a Java file without its
+/// `Name.class` (a source-only annotation a library drops when it shades),
+/// any file of a package without a class (Lombok keeps its own as
+/// `.SCL.lombok` resources). They are sources of nothing on the classpath.
+/// Nothing where there is no such jar, or where no package is in both (a
+/// sources jar laid out another way). Sorted.
+fn unshipped_entries(sources: &Path) -> Vec<String> {
+    let name = sources.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let Some(stem) = name.strip_suffix("-sources.jar") else {
+        return Vec::new();
+    };
+    let jar = sources.with_file_name(format!("{stem}.jar"));
+    let names = |archive: &Path| -> Option<Vec<String>> {
+        let file = std::fs::File::open(archive).ok()?;
+        let zip = zip::ZipArchive::new(file).ok()?;
+        Some(zip.file_names().map(str::to_owned).collect())
+    };
+    let (Some(binary), Some(source_entries)) = (names(&jar), names(sources)) else {
+        return Vec::new();
+    };
+    let directory = |entry: &str| entry.rsplit_once('/').map_or("", |(directory, _)| directory).to_owned();
+    let classes: std::collections::HashSet<&str> = binary
+        .iter()
+        .filter_map(|entry| entry.strip_suffix(".class"))
+        .collect();
+    let class_packages: std::collections::HashSet<String> = classes.iter().map(|class| directory(class)).collect();
+    let source_entries: Vec<&String> = source_entries
+        .iter()
+        .filter(|entry| Language::of_path(entry).is_some())
+        .collect();
+    if !source_entries.iter().any(|entry| class_packages.contains(&directory(entry))) {
+        return Vec::new();
+    }
+    let mut unshipped: Vec<String> = source_entries
+        .into_iter()
+        .filter(|entry| {
+            if !class_packages.contains(&directory(entry)) {
+                return true;
+            }
+            let Some(class) = entry.strip_suffix(".java") else {
+                return false;
+            };
+            let stem = Path::new(class).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            // `package-info.java` and `module-info.java` compile to
+            // classes of those names, where they compile to any.
+            !classes.contains(class) && stem != "package-info" && stem != "module-info"
+        })
+        .cloned()
+        .collect();
+    unshipped.sort();
+    unshipped
+}
+
 fn list_jar(jar: &Path, listing: &mut Listing) -> Result<(), String> {
+    let unshipped = unshipped_entries(jar);
     let file = std::fs::File::open(jar).map_err(|error| error.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
     for index in 0..archive.len() {
@@ -413,6 +488,9 @@ fn list_jar(jar: &Path, listing: &mut Listing) -> Result<(), String> {
         let Some(language) = Language::of_path(&name) else {
             continue;
         };
+        if unshipped.binary_search(&name).is_ok() {
+            continue;
+        }
         let stem = Path::new(&name)
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -644,5 +722,48 @@ mod anonymous_tests {
         assert!(!super::is_anonymous("StringModel"));
         assert!(!super::is_anonymous("Flags$StringJoiner"));
         assert!(!super::is_anonymous("Price$"));
+    }
+}
+
+#[cfg(test)]
+mod unshipped_tests {
+    use std::io::Write;
+
+    fn zip_of(path: &std::path::Path, entries: &[&str]) {
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for entry in entries {
+            zip.start_file(*entry, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(b"x").unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn a_source_its_jar_has_no_class_of_is_unshipped() {
+        let directory = tempfile::tempdir().unwrap();
+        let jar = directory.path().join("lombok-1.0.jar");
+        let sources = directory.path().join("lombok-1.0-sources.jar");
+        zip_of(&jar, &["lombok/Data.class", "lombok/launch/Main.class", "lombok/launch/Main$1.class", "lombok/core/Agent.SCL.lombok"]);
+        zip_of(
+            &sources,
+            &["lombok/Data.java", "lombok/launch/Main.java", "lombok/launch/Dropped.java", "lombok/launch/package-info.java", "lombok/core/Agent.java", "lombok/core/Util.kt"],
+        );
+        assert_eq!(
+            super::unshipped_entries(&sources),
+            vec!["lombok/core/Agent.java".to_owned(), "lombok/core/Util.kt".to_owned(), "lombok/launch/Dropped.java".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_sources_jar_laid_out_otherwise_is_left_whole() {
+        let directory = tempfile::tempdir().unwrap();
+        let jar = directory.path().join("odd-1.0.jar");
+        let sources = directory.path().join("odd-1.0-sources.jar");
+        zip_of(&jar, &["a/A.class"]);
+        zip_of(&sources, &["src/main/java/a/A.java"]);
+        assert!(super::unshipped_entries(&sources).is_empty());
+        let alone = directory.path().join("alone-1.0-sources.jar");
+        zip_of(&alone, &["a/A.java"]);
+        assert!(super::unshipped_entries(&alone).is_empty());
     }
 }
