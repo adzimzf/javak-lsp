@@ -7,3 +7,13 @@ public class A {
 	public String publicName;$1
 }
 //= expected
+Add Javadoc comment
+Change modifier for 'publicName'
+Generate Getter and Setter for 'publicName'
+Generate Getter for 'publicName'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'publicName'
+Generate Setters
+Sort Members for 'A.java'
+Sort Selected Members

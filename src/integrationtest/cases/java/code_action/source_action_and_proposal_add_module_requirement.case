@@ -5,3 +5,6 @@ module demo {
 $0package demo;
 class App { One one; }
 //= expected
+Generate Getters
+Generate Getters and Setters
+Generate Setters

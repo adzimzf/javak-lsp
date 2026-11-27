@@ -8,3 +8,9 @@ $0public class Foo {
 	}
 }
 //= expected
+5:20  s0:
+5:29  s1:
+5:39  s2:
+6:19  s2:
+6:28  s3:
+6:38  s4:

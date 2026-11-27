@@ -9,3 +9,4 @@ public class E {
 	}
 }
 //= expected
+foo([String s])

@@ -10,3 +10,4 @@ public class E {
 	}
 }
 //= expected
+demo(String s, [String... s2])

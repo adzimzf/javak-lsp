@@ -4,3 +4,10 @@ public class Foo {
 		Integer $0bar$1 = 2000;	}
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'bar'
+Change modifiers to final where possible
+Extract to field
+Generate toString()
+Split variable declaration
+Surround with try/catch

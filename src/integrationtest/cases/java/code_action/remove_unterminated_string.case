@@ -5,3 +5,5 @@ String s = "$0some str$1
 	}
 }
 //= expected
+Add Javadoc comment
+Generate toString()

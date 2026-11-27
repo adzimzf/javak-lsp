@@ -6,3 +6,4 @@ public class E {
    }
 }
 //= expected
+RuntimeException(String message, [Throwable cause])

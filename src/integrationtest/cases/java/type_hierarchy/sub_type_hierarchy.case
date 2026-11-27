@@ -250,3 +250,5 @@ public class TestJavadoc {
 	}
 }
 //= expected
+item CallHierarchy  /src/main/java/org/sample/CallHierarchy.java:6:14  public class CallHierarchy {
+supertype Object  <library>/java.base/java/lang/Object.java

@@ -14,3 +14,10 @@ public class E {
     }
 }
 //= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Change signature for 'method'
+Convert anonymous to nested class
+Convert to lambda expression
+Sort Members for 'E.java'
+Surround with try/catch

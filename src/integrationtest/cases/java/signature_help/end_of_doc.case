@@ -4,3 +4,4 @@ public class E {
    public int bar(String s) {  }
 }$0
 //= expected
+(nothing)

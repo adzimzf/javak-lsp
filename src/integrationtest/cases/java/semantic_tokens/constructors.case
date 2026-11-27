@@ -40,3 +40,99 @@ public class Constructors {
 	final class TestPermits implements TestSealedInterface{}
 }
 //= expected
+1:9  foo  namespace
+3:1  public  modifier
+3:8  class  modifier
+3:14  Constructors  class [declaration, public]
+5:2  private  modifier
+5:10  Constructors  class [declaration, private, constructor]
+6:3  Constructors  class [public]
+6:16  c1  variable [declaration]
+6:25  Constructors  class [private, constructor]
+7:3  Constructors  class [public]
+7:16  c2  variable [declaration]
+7:26  String  class [readonly, public, typeArgument]
+7:33  Constructors  class [private, constructor]
+8:3  Constructors  class [public]
+8:16  InnerClass  class [protected]
+8:27  i1  variable [declaration]
+8:36  Constructors  class [public]
+8:49  InnerClass  class [protected, constructor]
+9:3  Constructors  class [public]
+9:16  InnerClass  class [protected]
+9:27  i2  variable [declaration]
+9:37  SomeAnnotation  class
+9:52  Constructors  class [public]
+9:65  InnerClass  class [protected, constructor]
+10:3  Constructors  class [public]
+10:16  InnerClass  class [protected, generic]
+10:27  String  class [readonly, public, typeArgument]
+10:35  i3  variable [declaration]
+10:44  Constructors  class [public]
+10:57  InnerClass  class [protected, generic, constructor]
+10:68  String  class [readonly, public, typeArgument]
+11:3  InnerClass  class [protected, generic]
+11:14  Integer  class [readonly, public, typeArgument]
+11:23  i4  variable [declaration]
+11:32  InnerClass  class [protected, generic, constructor]
+12:3  GenericConstructor  class [private]
+12:22  g1  variable [declaration]
+12:32  String  class [readonly, public, typeArgument]
+12:39  GenericConstructor  class [protected, generic, constructor]
+13:3  Constructors  class [public]
+13:16  InnerRecord  record [static, readonly, private]
+13:28  r1  variable [declaration]
+13:37  Constructors  class [public]
+13:50  InnerRecord  record [private, constructor]
+14:7  InnerRecord  record [protected, constructor]
+17:2  protected  modifier
+17:12  class  modifier
+17:18  InnerClass  class [declaration, protected, generic]
+17:29  T  typeParameter [declaration]
+18:2  private  modifier
+18:10  class  modifier
+18:16  GenericConstructor  class [declaration, private]
+19:3  protected  modifier
+19:14  T  typeParameter [declaration]
+19:17  GenericConstructor  class [declaration, protected, generic, constructor]
+22:2  public  modifier
+22:14  InnerEnum  enum [static, readonly, declaration, public]
+23:3  FOO  enumMember [static, readonly, declaration, public]
+25:3  InnerEnum  enum [declaration, private, constructor]
+25:13  String  class [readonly, public]
+25:20  string  parameter [declaration]
+28:2  private  modifier
+28:10  record  modifier
+28:17  InnerRecord  record [static, readonly, declaration, private]
+28:29  String  class [readonly, public]
+28:36  string  recordComponent [declaration]
+28:48  integer  recordComponent [declaration]
+29:3  protected  modifier
+29:13  InnerRecord  record [declaration, protected, constructor]
+34:2  public  modifier
+34:9  interface  modifier
+34:19  TestInterface  interface [static, declaration, public]
+35:2  class  modifier
+35:8  TestClass  class [declaration]
+35:18  implements  modifier
+35:29  TestInterface  interface [static, public]
+36:2  class  modifier
+36:8  TestExtends  class [declaration]
+36:20  extends  modifier
+36:28  TestClass  class
+37:2  class  modifier
+37:8  TestCombo  class [declaration]
+37:18  extends  modifier
+37:26  TestClass  class
+37:36  implements  modifier
+37:47  TestInterface  interface [static, public]
+38:2  sealed  modifier
+38:9  interface  modifier
+38:19  TestSealedInterface  interface [static, declaration]
+38:39  permits  modifier
+38:47  TestPermits  class [readonly]
+39:2  final  modifier
+39:8  class  modifier
+39:14  TestPermits  class [readonly, declaration]
+39:26  implements  modifier
+39:37  TestSealedInterface  interface [static]

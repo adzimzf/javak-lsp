@@ -14,3 +14,4 @@ class MovingObject {
    public void speed(int x, int y, int z) {}
 }
 //= expected
+speed([int x])

@@ -24,3 +24,40 @@ public class Fields {
 
 }
 //= expected
+1:9  foo  namespace
+3:1  public  modifier
+3:8  class  modifier
+3:14  Fields  class [declaration, public]
+5:2  public  modifier
+5:9  String  class [readonly, public]
+5:16  bar1  property [declaration, public]
+6:2  private  modifier
+6:14  bar2  property [declaration, private]
+7:2  protected  modifier
+7:19  bar3  property [declaration, protected]
+7:26  bar2  property [private]
+8:2  final  modifier
+8:8  String  class [readonly, public]
+8:15  bar4  property [readonly, declaration]
+9:2  static  modifier
+9:13  bar5  property [static, declaration]
+10:2  public  modifier
+10:9  static  modifier
+10:16  final  modifier
+10:26  bar6  property [static, readonly, declaration, public]
+12:7  SomeEnum  enum [static, readonly, declaration]
+13:3  FIRST  enumMember [static, readonly, declaration, public]
+14:3  SECOND  enumMember [static, readonly, declaration, public]
+17:2  record  modifier
+17:9  SomeRecord  record [static, readonly, declaration]
+17:20  Integer  class [readonly, public]
+17:28  i  recordComponent [declaration]
+17:31  Float  class [readonly, public]
+17:37  f  recordComponent [declaration]
+18:8  foo  method [declaration]
+18:12  Object  class [public]
+18:19  foo  parameter [declaration]
+19:4  foo  method
+19:8  i  property [readonly, private]
+20:4  foo  method
+20:8  f  property [readonly, private]

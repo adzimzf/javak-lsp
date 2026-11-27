@@ -7,3 +7,4 @@ $0public class Foo {
 	}
 }
 //= expected
+(nothing)

@@ -6,3 +6,10 @@ public class A {
 	private String name1 = "b";$1
 }
 //= expected
+Add Javadoc comment
+Change modifier for 'name'
+Change modifiers to final
+Change modifiers to final where possible
+Generate Getters
+Generate Getters and Setters
+Generate Setters

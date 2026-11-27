@@ -790,3 +790,7 @@ public class Test{
     }
 }
 //= expected
+/src/java/Bar.java:6:14  public class Bar extends Foo {
+/src/java/Bar.java:8:12  public Bar () {
+/src/java/Bar.java:17:17  public void somethingFromJPAModelGen(){}
+/src/java/Bar.java:23:17  public void foo(String input) {

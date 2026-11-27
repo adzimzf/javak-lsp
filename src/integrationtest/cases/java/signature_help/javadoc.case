@@ -7,3 +7,4 @@ public class E {
    public int test() {}
 }
 //= expected
+substring([int beginIndex])

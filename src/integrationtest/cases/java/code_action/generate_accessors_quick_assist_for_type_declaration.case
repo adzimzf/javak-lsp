@@ -6,3 +6,7 @@ public class $0A$1 {
 	public String pet = "pet";
 }
 //= expected
+Add Javadoc comment
+Generate Getters
+Generate Getters and Setters
+Generate Setters

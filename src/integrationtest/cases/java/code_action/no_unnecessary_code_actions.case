@@ -12,3 +12,6 @@ public class Foo {
 	}
 }
 //= expected
+Add Javadoc comment
+Change modifier for 'foo'
+Change modifiers to final where possible

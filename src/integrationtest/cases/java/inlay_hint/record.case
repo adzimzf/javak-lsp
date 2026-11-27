@@ -29,3 +29,9 @@ permits Bar {
 }
 record Bar(String name) implements Foo { }
 //= expected
+12:12  fromNodeId:
+12:15  toNodeId:
+12:18  fromPoint:
+12:21  toPoint:
+12:24  length:
+12:27  profile:

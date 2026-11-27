@@ -8,3 +8,8 @@ public class A {
 	}
 }
 //= expected
+Add Javadoc comment
+Change modifiers to final
+Change modifiers to final where possible
+Generate toString()
+Surround with try/catch

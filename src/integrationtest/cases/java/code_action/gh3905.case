@@ -7,3 +7,7 @@ public class E {
     }
 }
 //= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate toString()
+Sort Members for 'E.java'

@@ -4,3 +4,9 @@ public class E {
     }
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'count'
+Assign parameter to new field
+Change modifiers to final where possible
+Change signature for 'E'
+Generate toString()

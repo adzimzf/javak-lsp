@@ -5,3 +5,11 @@ public $0class A$1 {
 	static String name;
 }
 //= expected
+Add Javadoc comment
+Generate Getter and Setter for 'name'
+Generate Getter for 'name'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'name'
+Generate Setters
+Generate toString()

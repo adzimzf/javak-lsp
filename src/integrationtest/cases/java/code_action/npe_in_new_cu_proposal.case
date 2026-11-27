@@ -6,3 +6,9 @@ public class Foo {
 	}
 }
 //= expected
+Add Javadoc comment
+Add import
+Assign statement to new field
+Assign statement to new local variable
+Generate toString()
+Surround with try/catch

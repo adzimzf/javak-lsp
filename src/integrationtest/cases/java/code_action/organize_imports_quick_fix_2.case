@@ -5,3 +5,9 @@ public class Foo {
 		$0String bar$1 = "astring";	}
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'bar'
+Change modifiers to final where possible
+Generate toString()
+Organize imports
+Surround with try/catch

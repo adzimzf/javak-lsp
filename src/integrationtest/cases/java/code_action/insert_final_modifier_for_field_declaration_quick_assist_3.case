@@ -6,3 +6,13 @@ public class A {
 	private String $0test;$1
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'test'
+Change modifier for 'test'
+Change modifiers to final where possible
+Generate Getter and Setter for 'test'
+Generate Getter for 'test'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'test'
+Generate Setters

@@ -8,3 +8,11 @@ public class A {
 	}
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'c'
+Change modifiers to final where possible
+Change type of 'c' to 'var'
+Extract to field
+Generate toString()
+Split variable declaration
+Surround with try/catch

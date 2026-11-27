@@ -8,3 +8,9 @@ public class A {
 	}
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'd'
+Change modifiers to final where possible
+Extract to field
+Generate toString()
+Surround with try/catch

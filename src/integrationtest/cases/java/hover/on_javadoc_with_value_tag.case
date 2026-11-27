@@ -57,3 +57,4 @@ public class Foo2 {
 
 }
 //= expected
+String mySimpleString = "SimpleStringData"

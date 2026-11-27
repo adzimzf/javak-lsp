@@ -4,3 +4,7 @@ public class Foo {
 $0;$1	}
 }
 //= expected
+Add Javadoc comment
+Extract to method
+Generate toString()
+Surround with try/catch

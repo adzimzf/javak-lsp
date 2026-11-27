@@ -7,3 +7,17 @@ public class GenericClassWithBoundedTypeParameterAndSupertype<T extends Number> 
 	ArrayList<T> {
 }
 //= expected
+1:9  foo  namespace
+3:8  java  namespace [importDeclaration]
+3:13  util  namespace [importDeclaration]
+3:18  ArrayList  class [public, generic, importDeclaration]
+5:1  public  modifier
+5:8  class  modifier
+5:14  GenericClassWithBoundedTypeParameterAndSupertype  class [declaration, public, generic]
+5:63  T  typeParameter [declaration]
+5:73  Number  class [abstract, public]
+5:80   extends //  namespace [abstract]
+6:10  t  ?
+16:2    ? [declaration, public]
+23:12    class [abstract]
+32:2    namespace [static, deprecated]

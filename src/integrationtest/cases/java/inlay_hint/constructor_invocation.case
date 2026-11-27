@@ -7,3 +7,5 @@ $0public class Foo {
 	}
 }
 //= expected
+3:8  a:
+3:11  b:

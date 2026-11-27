@@ -9,3 +9,9 @@ class Foo {
     }
 }
 //= expected
+Add Javadoc comment
+Add missing method 'action' to class 'Foo'
+Change modifiers to final where possible
+Convert to lambda expression
+Generate toString()
+Sort Members for 'Foo.java'

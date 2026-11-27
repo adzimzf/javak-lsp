@@ -790,3 +790,6 @@ public clas Test{
 	private x x;
 }
 //= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate toString()

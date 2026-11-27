@@ -11,3 +11,8 @@ public class A {
 	}
 }
 //= expected
+Add Javadoc comment
+Change signature for 'run'
+Convert anonymous to nested class
+Convert to lambda expression
+Surround with try/catch

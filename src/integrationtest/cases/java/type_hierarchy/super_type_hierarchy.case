@@ -250,3 +250,5 @@ public class TestJavadoc {
 	}
 }
 //= expected
+item CallHierarchy$FooBuilder  /src/main/java/org/sample/CallHierarchy.java:8:23  public static class FooBuilder implements Builder<Object> {
+supertype Object  <library>/java.base/java/lang/Object.java

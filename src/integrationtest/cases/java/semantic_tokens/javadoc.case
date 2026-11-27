@@ -27,3 +27,45 @@ public class Javadoc {
 
 }
 //= expected
+1:9  foo  namespace
+4:4  @implNote  keyword [documentation]
+4:27  @link  keyword [documentation]
+4:33  java  namespace [documentation]
+4:38  lang  namespace [documentation]
+4:43  String  class [readonly, documentation, public]
+6:1  public  modifier
+6:8  class  modifier
+6:14  Javadoc  class [declaration, public]
+9:14  @code  keyword [documentation]
+10:5  @param  keyword [documentation]
+10:12  arg1  parameter [documentation]
+10:21  @link  keyword [documentation]
+10:27  Integer  class [readonly, documentation, public]
+11:5  @param  keyword [documentation]
+11:12  arg2  parameter [documentation]
+11:20  @link  keyword [documentation]
+11:26  Double  class [readonly, documentation, public]
+12:5  @return  keyword [documentation]
+12:16  @link  keyword [documentation]
+12:22  String  class [readonly, documentation, public]
+14:2  public  modifier
+14:9  String  class [readonly, public]
+14:16  getString  method [declaration, public]
+14:26  Integer  class [readonly, public]
+14:34  arg1  parameter [declaration]
+14:40  Double  class [readonly, public]
+14:47  arg2  parameter [declaration]
+19:18  @link  keyword [documentation]
+19:24  Javadoc  class [documentation, public]
+19:32  getString  method [documentation, public]
+19:42  Integer  class [readonly, documentation, public]
+19:51  Double  class [readonly, documentation, public]
+20:5  @see  keyword [documentation]
+20:11  getString  method [documentation, public]
+20:21  Integer  class [readonly, documentation, public]
+20:30  Double  class [readonly, documentation, public]
+21:5  @return  keyword [documentation]
+21:17  @link  keyword [documentation]
+21:23  Integer  class [readonly, documentation, public]
+23:2  private  modifier
+23:14  getInt  method [declaration, private]
