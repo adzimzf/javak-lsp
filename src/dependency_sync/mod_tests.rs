@@ -474,8 +474,8 @@ fn gradle_module_lines_say_where_each_project_keeps_its_sources() {
 fn decompile_option_is_part_of_the_fingerprint() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "pom.xml", "<project/>");
-    let on = sync_fingerprint(dir.path(), SyncOptions { decompile: true }).unwrap();
-    let off = sync_fingerprint(dir.path(), SyncOptions { decompile: false }).unwrap();
+    let on = sync_fingerprint(dir.path(), SyncOptions { decompile: DecompileMode::OnDemand }).unwrap();
+    let off = sync_fingerprint(dir.path(), SyncOptions { decompile: DecompileMode::Off }).unwrap();
     assert_ne!(on, off, "toggling decompileLibraries must re-sync");
 }
 
@@ -766,4 +766,25 @@ fn a_kotlin_sources_jar_laid_out_by_source_set_lacks_no_package() {
         decompile::missing_packages(&jar, &sources).unwrap(),
         vec!["kotlinx/coroutines/internal/shaded".to_owned()]
     );
+}
+
+#[test]
+fn the_decompile_setting_takes_a_mode_or_a_bool() {
+    use serde_json::json;
+    assert_eq!(DecompileMode::default(), DecompileMode::OnDemand);
+    assert_eq!(DecompileMode::parse(&json!("onDemand")), Some(DecompileMode::OnDemand));
+    assert_eq!(DecompileMode::parse(&json!("EAGER")), Some(DecompileMode::Eager));
+    assert_eq!(DecompileMode::parse(&json!("off")), Some(DecompileMode::Off));
+    assert_eq!(DecompileMode::parse(&json!(true)), Some(DecompileMode::OnDemand));
+    assert_eq!(DecompileMode::parse(&json!(false)), Some(DecompileMode::Off));
+    assert_eq!(DecompileMode::parse(&json!("sometimes")), None);
+}
+
+#[test]
+fn switching_between_the_modes_that_decompile_needs_no_new_sync() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
+    let fingerprint = |decompile| sync_fingerprint(dir.path(), SyncOptions { decompile }).unwrap();
+    assert_eq!(fingerprint(DecompileMode::OnDemand), fingerprint(DecompileMode::Eager));
+    assert_ne!(fingerprint(DecompileMode::OnDemand), fingerprint(DecompileMode::Off));
 }

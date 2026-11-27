@@ -9,10 +9,13 @@
 //! `javak-lsp-dependencies.gradle`), Maven copies it with `dependency:copy`.
 //! It runs on the user's own `java`.
 //!
-//! Each library is decompiled once per jar version into a cached
-//! `…-decompiled-sources.jar`, which the JAR pipeline mounts like any
-//! sources jar: go-to-definition, hover and find-references then work on
-//! real code. A library that fails to decompile keeps the signature stub.
+//! In [`DecompileMode::OnDemand`] (the default) a library gets a
+//! `…-stubs-N.jar` of its declarations read from the class files
+//! ([`super::stubs`], no JVM), and [`decompile_class`] decompiles one class
+//! when go to definition opens it. A Kotlin library, and every library in
+//! [`DecompileMode::Eager`], is decompiled whole, once per jar version, into
+//! a cached `…-decompiled-sources.jar`. The JAR pipeline mounts either like
+//! any sources jar. A library that fails stays without sources.
 //!
 //! A sources jar does not always hold every class of its jar: what a
 //! library shades into its own jar (assertj's ByteBuddy, MapStruct's
@@ -25,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{
-    installed_tool, launch, login_shell_environment, login_shell_path, run_tool, search_dirs,
+    DecompileMode, installed_tool, launch, login_shell_environment, login_shell_path, run_tool, search_dirs,
     InstallLocations, ResolvedDependency,
 };
 
@@ -138,19 +141,62 @@ pub(crate) enum Missing {
     Packages(Vec<String>),
 }
 
-/// What of `dependency` is still to decompile: it has no sources for it,
-/// and decompiling it has not failed before.
-pub(crate) fn to_decompile(dependency: &ResolvedDependency) -> Option<Missing> {
-    let missing = missing_sources(dependency)?;
-    is_decompilable(dependency.jar.as_deref()?, &missing).then_some(missing)
+/// What a library without (all its) sources is given in their place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Output {
+    /// The decompiled classes.
+    Decompiled,
+    /// The declarations read from the class files ([`super::stubs`]).
+    Stubs,
 }
 
-/// The sources an earlier sync decompiled of `dependency`, where they are
-/// still in the cache.
-pub(crate) fn already_decompiled(dependency: &ResolvedDependency) -> Option<PathBuf> {
+/// What of `dependency` is still to do in `mode`: it has no sources for
+/// it, and making them has not failed before.
+pub(crate) fn to_decompile(dependency: &ResolvedDependency, mode: DecompileMode) -> Option<Missing> {
+    let jar = dependency.jar.as_deref()?;
+    if !mode.is_on() || !is_decompilable_jar(jar) {
+        return None;
+    }
     let missing = missing_sources(dependency)?;
-    decompiled_jar_path(dependency.jar.as_deref()?, &missing).filter(|path| path.is_file())
+    let failed = failed_before(jar, &missing, Output::Decompiled)
+        || (mode == DecompileMode::OnDemand && failed_before(jar, &missing, Output::Stubs));
+    (!failed).then_some(missing)
 }
+
+/// Whether `dependency` already has what `mode` gives it: decompiled
+/// sources, or in [`DecompileMode::OnDemand`] stubs.
+pub(crate) fn is_done(dependency: &ResolvedDependency, mode: DecompileMode) -> bool {
+    dependency
+        .decompiled
+        .as_deref()
+        .is_some_and(|path| path.is_file() && (mode != DecompileMode::Eager || !is_stubs_jar(path)))
+}
+
+/// What an earlier sync made of `dependency` for `mode`, where it is still
+/// in the cache: decompiled sources first, as they hold everything stubs
+/// do and the bodies too.
+pub(crate) fn already_decompiled(dependency: &ResolvedDependency, mode: DecompileMode) -> Option<PathBuf> {
+    let jar = dependency.jar.as_deref()?;
+    let missing = missing_sources(dependency)?;
+    let mut outputs = vec![Output::Decompiled];
+    if mode == DecompileMode::OnDemand {
+        outputs.push(Output::Stubs);
+    }
+    outputs
+        .into_iter()
+        .filter_map(|output| output_path(jar, &missing, output))
+        .find(|path| path.is_file())
+}
+
+/// Whether `jar` is a stubs jar ([`Output::Stubs`]).
+pub(crate) fn is_stubs_jar(jar: &Path) -> bool {
+    jar.file_name()
+        .is_some_and(|name| name.to_string_lossy().ends_with(STUBS_SUFFIX))
+}
+
+/// The end of a stubs jar's name. The number is the stubs' format: a
+/// javak-lsp that writes them otherwise writes them again.
+const STUBS_SUFFIX: &str = "-stubs-1.jar";
 
 /// What of `dependency` has no sources, where something has none.
 pub(crate) fn missing_sources(dependency: &ResolvedDependency) -> Option<Missing> {
@@ -242,26 +288,62 @@ fn jvm_package_name(text: &str) -> Option<&str> {
     })
 }
 
-/// Decompile what of every dependency has no sources — the whole jar of
-/// one without a sources jar, the packages its sources jar lacks of
-/// another — recording each result in `decompiled`. Failures are logged and
-/// leave the dependency as it was.
+/// Give every dependency what `mode` gives it of what has no sources —
+/// the whole jar of one without a sources jar, the packages its sources
+/// jar lacks of another — recording each result in `decompiled`.
+/// [`DecompileMode::OnDemand`] reads the class files in-process and leaves
+/// the JVM to the Kotlin libraries; [`DecompileMode::Eager`] decompiles.
+/// `decompiler` is asked for only when a JVM is needed. Failures are
+/// logged and leave the dependency as it was.
 pub(crate) fn decompile_missing_sources(
     dependencies: &mut [ResolvedDependency],
-    java: &Path,
-    decompiler: &Path,
+    mode: DecompileMode,
+    decompiler: impl FnOnce() -> Result<(PathBuf, PathBuf), String>,
 ) {
-    let candidates: Vec<(usize, PathBuf, Missing)> = dependencies
+    let mut candidates: Vec<(usize, PathBuf, Missing)> = dependencies
         .iter()
         .enumerate()
-        .filter_map(|(index, dependency)| {
-            Some((index, dependency.jar.clone()?, to_decompile(dependency)?))
-        })
-        .take(MAX_DECOMPILED_JARS)
+        .filter(|(_, dependency)| !is_done(dependency, mode))
+        .filter_map(|(index, dependency)| Some((index, dependency.jar.clone()?, to_decompile(dependency, mode)?)))
         .collect();
     if candidates.is_empty() {
         return;
     }
+    if mode == DecompileMode::OnDemand {
+        let mut kotlin = Vec::new();
+        let mut written = 0usize;
+        for (index, jar, missing) in candidates {
+            match write_stubs_of(&jar, &missing) {
+                Ok(Some(stubs)) => {
+                    dependencies[index].decompiled = Some(stubs);
+                    written += 1;
+                }
+                Ok(None) => kotlin.push((index, jar, missing)),
+                Err(message) => {
+                    remember_failure(&jar, &missing, Output::Stubs, &message);
+                    log::warn!("dependency sync: cannot read the classes of {}: {message}", jar.display());
+                }
+            }
+        }
+        log::info!(
+            "dependency sync: read the declarations of {written} libraries without (all their) sources; \
+             {} Kotlin libraries to decompile",
+            kotlin.len()
+        );
+        candidates = kotlin;
+        if candidates.is_empty() {
+            return;
+        }
+    }
+    candidates.truncate(MAX_DECOMPILED_JARS);
+    let (java, decompiler) = match decompiler() {
+        Ok(found) => found,
+        Err(message) => {
+            log::warn!("dependency sync: not decompiling libraries without sources: {message}");
+            return;
+        }
+    };
+    let (java, decompiler) = (java.as_path(), decompiler.as_path());
     log::info!(
         "dependency sync: decompiling {} libraries without (all their) sources",
         candidates.len()
@@ -280,7 +362,7 @@ pub(crate) fn decompile_missing_sources(
                         .filter_map(|(index, jar, missing)| match decompile_jar(java, decompiler, jar, missing) {
                             Ok(sources) => Some((*index, sources)),
                             Err(message) => {
-                                remember_failure(jar, missing, &message);
+                                remember_failure(jar, missing, Output::Decompiled, &message);
                                 log::warn!(
                                     "dependency sync: cannot decompile {}: {message}",
                                     jar.display()
@@ -302,51 +384,67 @@ pub(crate) fn decompile_missing_sources(
     }
 }
 
-/// A plain `.jar` (an `.aar` wraps its classes in another archive) small
-/// enough to decompile, that has not failed to decompile before.
-fn is_decompilable(jar: &Path, missing: &Missing) -> bool {
-    is_decompilable_jar(jar) && !failed_before(jar, missing)
+/// The stubs of what of `jar` is `missing`, written once per jar version;
+/// `None` for a Kotlin library.
+fn write_stubs_of(jar: &Path, missing: &Missing) -> Result<Option<PathBuf>, String> {
+    let destination = output_path(jar, missing, Output::Stubs).ok_or_else(|| "cannot read the jar's metadata".to_owned())?;
+    if destination.is_file() {
+        return Ok(Some(destination));
+    }
+    let packages = match missing {
+        Missing::Everything => None,
+        Missing::Packages(packages) => Some(packages.as_slice()),
+    };
+    match super::stubs::write_stubs(jar, packages, &destination)? {
+        super::stubs::Stubbed::Written(_) => Ok(Some(destination)),
+        super::stubs::Stubbed::Kotlin => Ok(None),
+    }
 }
 
+/// A plain `.jar` (an `.aar` wraps its classes in another archive) small
+/// enough to decompile.
 fn is_decompilable_jar(jar: &Path) -> bool {
     let is_jar = jar.extension().is_some_and(|extension| extension == "jar");
     let size_ok = std::fs::metadata(jar).is_ok_and(|metadata| metadata.len() <= MAX_JAR_BYTES);
     is_jar && size_ok
 }
 
-/// Where the decompiled sources of `jar` are cached: one file per jar
-/// version, and for a jar with a sources jar one per set of packages it
-/// lacks.
-fn decompiled_jar_path(jar: &Path, missing: &Missing) -> Option<PathBuf> {
+/// Where what is made of `jar` is cached: one file per jar version, and
+/// for a jar with a sources jar one per set of packages it lacks.
+fn output_path(jar: &Path, missing: &Missing, output: Output) -> Option<PathBuf> {
     let stem = jar.file_stem()?.to_string_lossy().into_owned();
     let fingerprint = crate::indexer::library::jar_fingerprint(jar)?;
-    Some(match missing {
-        Missing::Everything => decompiled_dir().join(format!("{stem}-{fingerprint:016x}-decompiled-sources.jar")),
+    let base = match missing {
+        Missing::Everything => format!("{stem}-{fingerprint:016x}"),
         Missing::Packages(packages) => {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             std::hash::Hash::hash(packages, &mut hasher);
             let packages = std::hash::Hasher::finish(&hasher);
-            decompiled_dir().join(format!("{stem}-{fingerprint:016x}-{packages:016x}-missing-sources.jar"))
+            format!("{stem}-{fingerprint:016x}-{packages:016x}-missing")
         }
-    })
+    };
+    Some(decompiled_dir().join(match output {
+        Output::Decompiled if matches!(missing, Missing::Everything) => format!("{base}-decompiled-sources.jar"),
+        Output::Decompiled => format!("{base}-sources.jar"),
+        Output::Stubs => format!("{base}{STUBS_SUFFIX}"),
+    }))
 }
 
-/// Where a failure to decompile `jar` is recorded, beside the sources it
-/// would have given.
-fn failure_marker(jar: &Path, missing: &Missing) -> Option<PathBuf> {
-    decompiled_jar_path(jar, missing).map(|path| path.with_extension("failed"))
+/// Where a failure to make `output` of `jar` is recorded, beside it.
+fn failure_marker(jar: &Path, missing: &Missing, output: Output) -> Option<PathBuf> {
+    output_path(jar, missing, output).map(|path| path.with_extension("failed"))
 }
 
-/// Whether decompiling this version of `jar` failed before. A library the
-/// decompiler cannot read (or that ran out of time) is not decompiled
-/// again on every start, minutes of CPU each time for nothing; a new
-/// version of it, or clearing the cache, tries again.
-fn failed_before(jar: &Path, missing: &Missing) -> bool {
-    failure_marker(jar, missing).is_some_and(|marker| marker.is_file())
+/// Whether making `output` of this version of `jar` failed before. A
+/// library the decompiler cannot read (or that ran out of time) is not
+/// decompiled again on every start, minutes of CPU each time for nothing;
+/// a new version of it, or clearing the cache, tries again.
+fn failed_before(jar: &Path, missing: &Missing, output: Output) -> bool {
+    failure_marker(jar, missing, output).is_some_and(|marker| marker.is_file())
 }
 
-fn remember_failure(jar: &Path, missing: &Missing, message: &str) {
-    if let Some(marker) = failure_marker(jar, missing) {
+fn remember_failure(jar: &Path, missing: &Missing, output: Output, message: &str) {
+    if let Some(marker) = failure_marker(jar, missing, output) {
         let _ = std::fs::create_dir_all(decompiled_dir());
         let _ = std::fs::write(marker, message);
     }
@@ -356,7 +454,7 @@ fn remember_failure(jar: &Path, missing: &Missing, message: &str) {
 /// sources jar of `.kt` / `.java` files and return its path.
 fn decompile_jar(java: &Path, decompiler: &Path, jar: &Path, missing: &Missing) -> Result<PathBuf, String> {
     let destination =
-        decompiled_jar_path(jar, missing).ok_or_else(|| "cannot read the jar's metadata".to_owned())?;
+        output_path(jar, missing, Output::Decompiled).ok_or_else(|| "cannot read the jar's metadata".to_owned())?;
     if destination.is_file() {
         return Ok(destination);
     }
@@ -461,4 +559,103 @@ fn collect_sources(directory: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+/// One class is given at most this long to decompile: someone waits on it.
+const CLASS_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Where the decompiled class `entry` (`com/acme/Box.java`) of the stubs
+/// jar `stubs` is kept.
+pub(crate) fn decompiled_class_path(stubs: &Path, entry: &str) -> Option<PathBuf> {
+    let stem = stubs.file_stem()?.to_string_lossy().into_owned();
+    let relative: PathBuf = entry
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != "..")
+        .collect();
+    Some(decompiled_dir().join("classes").join(stem).join(relative))
+}
+
+/// Decompile the class whose stub is `entry` of the stubs jar `stubs`, its
+/// nested classes with it, once: what go to definition opens in place of
+/// the stub. Returns where the source is kept.
+pub(crate) fn decompile_class(stubs: &Path, entry: &str) -> Result<PathBuf, String> {
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let destination = decompiled_class_path(stubs, entry).ok_or_else(|| "not a stubs jar".to_owned())?;
+    let _guard = ONE_AT_A_TIME.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if destination.is_file() {
+        return Ok(destination);
+    }
+    let jar = stubs_origin(stubs)?;
+    let class = entry.strip_suffix(".java").ok_or_else(|| format!("{entry} is no stub"))?;
+    let java = java_executable().ok_or_else(|| "no `java` found".to_owned())?;
+    let decompiler = cached_decompiler().ok_or_else(|| "the decompiler isn't fetched yet".to_owned())?;
+    let work_dir = destination.with_extension("work");
+    let _ = std::fs::remove_dir_all(&work_dir);
+    std::fs::create_dir_all(work_dir.join("out")).map_err(|error| format!("cannot create {}: {error}", work_dir.display()))?;
+    let outcome = (|| {
+        let part = work_dir.join("class.jar");
+        copy_class(&jar, class, &part)?;
+        let mut command = std::process::Command::new(&java);
+        command
+            .args(DECOMPILER_JVM_OPTIONS)
+            .arg("-jar")
+            .arg(&decompiler)
+            .args(DECOMPILER_OPTIONS)
+            // The whole jar beside it, so what the class uses is known.
+            .arg(format!("-e={}", jar.display()))
+            .arg(&part)
+            .arg(work_dir.join("out"));
+        run_tool(command, "the decompiler", CLASS_TIMEOUT).map_err(|failure| failure.message())?;
+        let source = work_dir.join("out").join(entry);
+        if !source.is_file() {
+            return Err("the decompiler wrote no source of it".to_owned());
+        }
+        std::fs::create_dir_all(destination.parent().ok_or("no directory")?).map_err(|error| error.to_string())?;
+        std::fs::rename(&source, &destination).map_err(|error| error.to_string())
+    })();
+    let _ = std::fs::remove_dir_all(&work_dir);
+    outcome.map(|()| destination)
+}
+
+/// The jar a stubs jar was written from.
+fn stubs_origin(stubs: &Path) -> Result<PathBuf, String> {
+    use std::io::Read;
+    let file = std::fs::File::open(stubs).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let mut origin = String::new();
+    archive
+        .by_name(super::stubs::ORIGIN_ENTRY)
+        .map_err(|error| error.to_string())?
+        .read_to_string(&mut origin)
+        .map_err(|error| error.to_string())?;
+    let jar = PathBuf::from(origin);
+    if jar.is_file() {
+        Ok(jar)
+    } else {
+        Err(format!("{} is gone", jar.display()))
+    }
+}
+
+/// A jar of `class` (internal name) of `jar` and its nested classes.
+fn copy_class(jar: &Path, class: &str, destination: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(jar).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let output = std::fs::File::create(destination).map_err(|error| error.to_string())?;
+    let mut zip = zip::ZipWriter::new(output);
+    let own = format!("{class}.class");
+    let nested = format!("{class}$");
+    let mut copied = 0;
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index).map_err(|error| error.to_string())?;
+        let name = entry.name().to_owned();
+        if name == own || (name.starts_with(&nested) && name.ends_with(".class")) {
+            zip.raw_copy_file(entry).map_err(|error| error.to_string())?;
+            copied += 1;
+        }
+    }
+    zip.finish().map_err(|error| error.to_string())?;
+    if copied == 0 {
+        return Err(format!("{own} isn't in {}", jar.display()));
+    }
+    Ok(())
 }

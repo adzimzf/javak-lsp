@@ -355,13 +355,40 @@ impl Libraries {
         Url::from_file_path(self.extracted_path(&file.jar, &file.entry)?).ok()
     }
 
+    /// The library file a client opened at `uri` (where [`Self::uri_of`]
+    /// puts it).
+    pub fn file_at(&self, uri: &Url) -> Option<LibraryFile> {
+        let stem = Path::new(uri.path()).file_stem()?.to_str()?.to_owned();
+        self.declaring(&stem)
+            .into_iter()
+            .find(|file| self.uri_of(file).as_ref() == Some(uri))
+    }
+
+    /// Whether `file` is the stub of a compiled class
+    /// ([`crate::dependency_sync::stubs`]) not decompiled yet.
+    pub fn is_undecompiled_stub(&self, file: &LibraryFile) -> bool {
+        decompiled_class(&file.jar, &file.entry).is_some_and(|path| !path.is_file())
+    }
+
+    /// Reads `file` again: its class was decompiled in place of its stub.
+    /// The extracted copy a client opens is rewritten with it.
+    pub fn reread(&self, file: &LibraryFile) {
+        self.loaded.remove(file);
+        if let (Some(text), Some(path)) = (self.read_entry(&file.jar, &file.entry), self.extracted_path(&file.jar, &file.entry)) {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, text);
+        }
+    }
+
     /// Writes a library file into the cache where [`Self::uri_of`] says,
     /// so a client can open it.
     pub fn extract(&self, file: &LibraryFile, text: &str) {
         let Some(path) = self.extracted_path(&file.jar, &file.entry) else {
             return;
         };
-        if !path.is_file() {
+        if is_stale(&path, &file.jar, text) {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -456,7 +483,7 @@ impl Libraries {
         }
         let text = self.read_entry(&file.jar, &file.entry)?;
         let path = self.extracted_path(&file.jar, &file.entry)?;
-        if !path.is_file() {
+        if is_stale(&path, &file.jar, &text) {
             std::fs::create_dir_all(path.parent()?).ok()?;
             std::fs::write(&path, &text).ok()?;
         }
@@ -623,9 +650,33 @@ fn rank(entry: &str) -> u8 {
     rank
 }
 
+/// Where the decompiled class of the stub `entry` of `jar` is kept, where
+/// `jar` is a stubs jar.
+fn decompiled_class(jar: &Path, entry: &str) -> Option<PathBuf> {
+    use crate::dependency_sync::decompile;
+    decompile::is_stubs_jar(jar).then(|| decompile::decompiled_class_path(jar, entry)).flatten()
+}
+
+/// Whether the extracted copy at `path` is to be written: it is missing,
+/// or, for a stubs jar, whose files turn from stub to decompiled class,
+/// it holds other text.
+fn is_stale(path: &Path, jar: &Path, text: &str) -> bool {
+    if !path.is_file() {
+        return true;
+    }
+    crate::dependency_sync::decompile::is_stubs_jar(jar)
+        && std::fs::read_to_string(path).is_ok_and(|written| written != text)
+}
+
 impl Libraries {
-    /// An entry's text, through the jar opened once.
+    /// An entry's text, through the jar opened once: for a stub whose
+    /// class was decompiled, the decompiled class.
     fn read_entry(&self, jar: &Path, entry: &str) -> Option<String> {
+        if let Some(decompiled) = decompiled_class(jar, entry).filter(|path| path.is_file())
+            && let Ok(text) = std::fs::read_to_string(decompiled)
+        {
+            return Some(text);
+        }
         let archive = match self.archives.get(jar) {
             Some(archive) => archive.clone(),
             None => {

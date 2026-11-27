@@ -10,7 +10,8 @@
 //!
 //! Settings come from the client's `initializationOptions`:
 //! `{"dependencySync": "auto" | "off", "javaHome": "/path/to/jdk",
-//!   "indexingOptions": {"decompileLibraries": bool}}`.
+//!   "indexingOptions": {"decompileLibraries": "onDemand" | "eager" | "off"}}`
+//! (`true` is `"onDemand"`, `false` is `"off"`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,7 +55,7 @@ impl DependencySync {
         }
         if let Some(decompile) = options
             .pointer("/indexingOptions/decompileLibraries")
-            .and_then(Value::as_bool)
+            .and_then(dependency_sync::DecompileMode::parse)
         {
             settings.1.decompile = decompile;
         }

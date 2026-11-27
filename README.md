@@ -63,7 +63,27 @@ On startup the server asks the project's own build tool (Gradle or Maven) for
 its dependencies and their sources jars (`src/dependency_sync`), and resolves
 names into those sources: go to definition opens the library file, extracted
 under `~/.cache/javak-lsp/sources`. The sync runs again when a build file
-changes. Libraries without a sources jar are decompiled with Vineflower.
+changes.
+
+A library without a sources jar (or classes its sources jar lacks) is read
+as jdtls and IntelliJ read it, with `decompileLibraries` (below):
+
+- **`"onDemand"`** (the default) — the declarations are read from its class
+  files, in the server, without a JVM (`src/classfile.rs`,
+  `src/dependency_sync/stubs.rs`): types, generic signatures, constants,
+  parameter names where the class file kept them, annotations. Hover,
+  completion, types and checks answer from them at once (guava's 2,000
+  classes in 0.2 s). Go to definition decompiles the one class it opens with
+  Vineflower, about a second and a half the first time, shown as work in
+  progress, then kept. A Kotlin library is decompiled whole, in the
+  background, as a Java view of it would mislead Kotlin callers.
+- **`"eager"`** — every such library is decompiled once, in the background,
+  so the bodies are read too (find references inside them).
+- **`"off"`** — neither: such classes are unknown.
+
+The decompiler runs on the user's `java` (one thread, the client compiler,
+the serial collector), is fetched through the build tool, and what it writes
+is kept under `~/.cache/javak-lsp/decompiled`, once per jar version.
 
 The platform is read the same way, build tool or none
 (`src/dependency_sync/platform.rs`):
@@ -93,9 +113,12 @@ Client settings (`initializationOptions`):
 {
   "dependencySync": "auto",
   "javaHome": "/path/to/jdk",
-  "indexingOptions": { "decompileLibraries": true }
+  "indexingOptions": { "decompileLibraries": "onDemand" }
 }
 ```
+
+`decompileLibraries` is `"onDemand"`, `"eager"` or `"off"`; `true` is
+`"onDemand"` and `false` is `"off"`.
 
 `"dependencySync": "off"` never runs the build tool; the libraries of the last
 sync, and the platform's sources, are still read.
