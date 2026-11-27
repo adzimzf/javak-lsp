@@ -707,3 +707,39 @@ fn a_jar_with_sources_and_its_decompiled_rest_gives_both() {
     let jars: Vec<PathBuf> = manifest.sources_jars_by_artifact().into_iter().map(|(_, _, jar)| jar).collect();
     assert_eq!(jars, vec![sources, rest]);
 }
+
+#[test]
+fn a_kotlin_sources_jar_laid_out_by_source_set_lacks_no_package() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let jar = dir.path().join("kotlinx-coroutines-core-jvm.jar");
+    let sources = dir.path().join("kotlinx-coroutines-core-jvm-sources.jar");
+    zip_of(
+        &jar,
+        &[
+            "kotlinx/coroutines/Job.class",
+            "kotlinx/coroutines/flow/Flow.class",
+            "kotlinx/coroutines/flow/FlowKt.class",
+            "kotlinx/coroutines/internal/shaded/Hidden.class",
+            "kotlinx/coroutines/unsigned/UJobKt.class",
+        ],
+    );
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&sources).unwrap());
+    for (entry, text) in [
+        ("commonMain/Job.kt", "/* licence */\n@file:JvmName(\"JobKt\")\npackage kotlinx.coroutines\n\ninterface Job\n"),
+        ("commonMain/flow/Flow.kt", "package kotlinx.coroutines.flow\n\ninterface Flow<T>\n"),
+        (
+            "jvmMain/UJob.kt",
+            "@file:kotlin.jvm.JvmPackageName(\"kotlinx.coroutines.unsigned\")\npackage kotlinx.coroutines\n",
+        ),
+    ] {
+        zip.start_file(entry, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(text.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+    // Only the package no file declares is missing, not every package.
+    assert_eq!(
+        decompile::missing_packages(&jar, &sources).unwrap(),
+        vec!["kotlinx/coroutines/internal/shaded".to_owned()]
+    );
+}

@@ -814,7 +814,7 @@ pub(crate) fn decompile_pending(root: &Path, options: SyncOptions) -> bool {
         && load_manifest(root).is_some_and(|manifest| {
             manifest.dependencies.iter().any(|dependency| {
                 !dependency.decompiled.as_ref().is_some_and(|path| path.is_file())
-                    && decompile::missing_sources(dependency).is_some()
+                    && decompile::to_decompile(dependency).is_some()
             })
         })
 }
@@ -851,7 +851,7 @@ fn decompile_libraries_without_sources(root: &Path, tool: &BuildTool, resolved: 
     let any_without_sources = resolved
         .dependencies
         .iter()
-        .any(|dependency| decompile::missing_sources(dependency).is_some());
+        .any(|dependency| decompile::to_decompile(dependency).is_some());
     if !any_without_sources {
         return;
     }

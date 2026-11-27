@@ -39,8 +39,21 @@ const DECOMPILE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const MAX_DECOMPILED_JARS: usize = 100;
 /// …each no bigger than this.
 const MAX_JAR_BYTES: u64 = 64 * 1024 * 1024;
-/// Libraries decompiled at the same time.
-const PARALLEL_DECOMPILES: usize = 4;
+/// Libraries decompiled at the same time, at most: each decompiler runs on
+/// one core (see [`DECOMPILER_JVM_OPTIONS`]), and half the machine's cores
+/// stay free for the editor and the server.
+const MAX_PARALLEL_DECOMPILES: usize = 2;
+
+/// How the decompiler's JVM runs. Left to its defaults, one decompiler
+/// takes every core and ~1.7 GB for guava: a worker thread per core, C2
+/// compiler threads and G1's parallel collector. On one worker thread,
+/// with the client compiler (C1) and the serial collector, it writes the
+/// same files (byte for byte) with half the CPU time and a third of the
+/// memory. No heap limit: a tight one only makes the collector thrash, and
+/// a big library would fail to decompile.
+const DECOMPILER_JVM_OPTIONS: &[&str] = &["-XX:+UseSerialGC", "-XX:TieredStopAtLevel=1"];
+/// The decompiler's own options: warnings only, one worker thread.
+const DECOMPILER_OPTIONS: &[&str] = &["-log=WARN", "--thread-count=1"];
 
 pub(crate) const JAVA_INSTALL: InstallLocations = InstallLocations {
     home_variables: &["JAVA_HOME"],
@@ -125,6 +138,13 @@ pub(crate) enum Missing {
     Packages(Vec<String>),
 }
 
+/// What of `dependency` is still to decompile: it has no sources for it,
+/// and decompiling it has not failed before.
+pub(crate) fn to_decompile(dependency: &ResolvedDependency) -> Option<Missing> {
+    let missing = missing_sources(dependency)?;
+    is_decompilable(dependency.jar.as_deref()?, &missing).then_some(missing)
+}
+
 /// What of `dependency` has no sources, where something has none.
 pub(crate) fn missing_sources(dependency: &ResolvedDependency) -> Option<Missing> {
     let jar = dependency.jar.as_deref()?;
@@ -137,32 +157,82 @@ pub(crate) fn missing_sources(dependency: &ResolvedDependency) -> Option<Missing
 
 /// The packages `jar` has classes in and `sources` has no source file of.
 pub(crate) fn missing_packages(jar: &Path, sources: &Path) -> Result<Vec<String>, String> {
-    let class_packages = entry_directories(jar, |entry| {
-        entry.ends_with(".class")
-            && !entry.starts_with("META-INF/")
-            && !entry.ends_with("module-info.class")
-            && !entry.ends_with("package-info.class")
-    })?;
-    let source_packages = entry_directories(sources, |entry| entry.ends_with(".java") || entry.ends_with(".kt"))?;
+    let file = std::fs::File::open(jar).map_err(|error| error.to_string())?;
+    let zip = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let mut class_packages: Vec<String> = zip
+        .file_names()
+        .filter(|entry| {
+            entry.ends_with(".class")
+                && !entry.starts_with("META-INF/")
+                && !entry.ends_with("module-info.class")
+                && !entry.ends_with("package-info.class")
+        })
+        .map(|entry| directory_of(entry).to_owned())
+        .collect();
+    class_packages.sort();
+    class_packages.dedup();
+    let source_packages = source_packages(sources, &class_packages)?;
     Ok(class_packages
         .into_iter()
         .filter(|package| !source_packages.contains(package))
         .collect())
 }
 
-/// The directories of the entries of `archive` that `wanted` keeps,
-/// sorted, each once.
-fn entry_directories(archive: &Path, wanted: impl Fn(&str) -> bool) -> Result<Vec<String>, String> {
-    let file = std::fs::File::open(archive).map_err(|error| error.to_string())?;
-    let zip = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let mut directories: Vec<String> = zip
+fn directory_of(entry: &str) -> &str {
+    entry.rsplit_once('/').map_or("", |(directory, _)| directory)
+}
+
+/// The packages (`org/assertj/core/api`) of `class_packages` the source
+/// files of `sources` are compiled into. A file is first taken to be in the
+/// package of its directory. Where that leaves a package without sources,
+/// the Kotlin files are read: Kotlin libraries lay out their sources by
+/// source set and drop the common prefix (`commonMain/flow/Flow.kt` of
+/// `kotlinx.coroutines.flow`), and a file compiles into the package it
+/// declares, or the one `@file:JvmPackageName` names (the standard
+/// library's `kotlin.collections.unsigned`). A jar laid out the Java way
+/// is never read.
+fn source_packages(sources: &Path, class_packages: &[String]) -> Result<std::collections::HashSet<String>, String> {
+    use crate::language::Language;
+    use std::io::Read;
+    let file = std::fs::File::open(sources).map_err(|error| error.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    let mut packages: std::collections::HashSet<String> = zip
         .file_names()
-        .filter(|entry| wanted(entry))
-        .map(|entry| entry.rsplit_once('/').map_or("", |(directory, _)| directory).to_owned())
+        .filter(|entry| Language::of_path(entry).is_some())
+        .map(|entry| directory_of(entry).to_owned())
         .collect();
-    directories.sort();
-    directories.dedup();
-    Ok(directories)
+    if class_packages.iter().all(|package| packages.contains(package)) {
+        return Ok(packages);
+    }
+    for index in 0..zip.len() {
+        let Ok(mut entry) = zip.by_index(index) else {
+            continue;
+        };
+        if Language::of_path(entry.name()) != Some(Language::Kotlin) {
+            continue;
+        }
+        let name = entry.name().to_owned();
+        let mut text = String::new();
+        if entry.read_to_string(&mut text).is_err() {
+            continue;
+        }
+        let declared = crate::indexer::layout(Language::Kotlin).library_package(&name, &text);
+        packages.insert(declared.replace('.', "/"));
+        if let Some(jvm_package) = jvm_package_name(&text) {
+            packages.insert(jvm_package.replace('.', "/"));
+        }
+    }
+    Ok(packages)
+}
+
+/// The package `@file:JvmPackageName("…")` compiles a Kotlin file into.
+fn jvm_package_name(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find_map(|line| {
+        let rest = line
+            .strip_prefix("@file:JvmPackageName(\"")
+            .or_else(|| line.strip_prefix("@file:kotlin.jvm.JvmPackageName(\""))?;
+        rest.split_once('"').map(|(package, _)| package)
+    })
 }
 
 /// Decompile what of every dependency has no sources — the whole jar of
@@ -178,10 +248,8 @@ pub(crate) fn decompile_missing_sources(
         .iter()
         .enumerate()
         .filter_map(|(index, dependency)| {
-            let jar = dependency.jar.clone()?;
-            Some((index, jar, missing_sources(dependency)?))
+            Some((index, dependency.jar.clone()?, to_decompile(dependency)?))
         })
-        .filter(|(_, jar, _)| is_decompilable(jar))
         .take(MAX_DECOMPILED_JARS)
         .collect();
     if candidates.is_empty() {
@@ -191,7 +259,10 @@ pub(crate) fn decompile_missing_sources(
         "dependency sync: decompiling {} libraries without (all their) sources",
         candidates.len()
     );
-    let chunk_size = candidates.len().div_ceil(PARALLEL_DECOMPILES).max(1);
+    let parallel = std::thread::available_parallelism()
+        .map_or(1, |cores| cores.get() / 2)
+        .clamp(1, MAX_PARALLEL_DECOMPILES);
+    let chunk_size = candidates.len().div_ceil(parallel).max(1);
     let results: Vec<(usize, PathBuf)> = std::thread::scope(|scope| {
         let workers: Vec<_> = candidates
             .chunks(chunk_size)
@@ -202,6 +273,7 @@ pub(crate) fn decompile_missing_sources(
                         .filter_map(|(index, jar, missing)| match decompile_jar(java, decompiler, jar, missing) {
                             Ok(sources) => Some((*index, sources)),
                             Err(message) => {
+                                remember_failure(jar, missing, &message);
                                 log::warn!(
                                     "dependency sync: cannot decompile {}: {message}",
                                     jar.display()
@@ -224,8 +296,12 @@ pub(crate) fn decompile_missing_sources(
 }
 
 /// A plain `.jar` (an `.aar` wraps its classes in another archive) small
-/// enough to decompile.
-fn is_decompilable(jar: &Path) -> bool {
+/// enough to decompile, that has not failed to decompile before.
+fn is_decompilable(jar: &Path, missing: &Missing) -> bool {
+    is_decompilable_jar(jar) && !failed_before(jar, missing)
+}
+
+fn is_decompilable_jar(jar: &Path) -> bool {
     let is_jar = jar.extension().is_some_and(|extension| extension == "jar");
     let size_ok = std::fs::metadata(jar).is_ok_and(|metadata| metadata.len() <= MAX_JAR_BYTES);
     is_jar && size_ok
@@ -246,6 +322,27 @@ fn decompiled_jar_path(jar: &Path, missing: &Missing) -> Option<PathBuf> {
             decompiled_dir().join(format!("{stem}-{fingerprint:016x}-{packages:016x}-missing-sources.jar"))
         }
     })
+}
+
+/// Where a failure to decompile `jar` is recorded, beside the sources it
+/// would have given.
+fn failure_marker(jar: &Path, missing: &Missing) -> Option<PathBuf> {
+    decompiled_jar_path(jar, missing).map(|path| path.with_extension("failed"))
+}
+
+/// Whether decompiling this version of `jar` failed before. A library the
+/// decompiler cannot read (or that ran out of time) is not decompiled
+/// again on every start, minutes of CPU each time for nothing; a new
+/// version of it, or clearing the cache, tries again.
+fn failed_before(jar: &Path, missing: &Missing) -> bool {
+    failure_marker(jar, missing).is_some_and(|marker| marker.is_file())
+}
+
+fn remember_failure(jar: &Path, missing: &Missing, message: &str) {
+    if let Some(marker) = failure_marker(jar, missing) {
+        let _ = std::fs::create_dir_all(decompiled_dir());
+        let _ = std::fs::write(marker, message);
+    }
 }
 
 /// Decompile what of `jar` is `missing` (once per jar version) into a
@@ -270,7 +367,11 @@ fn decompile_into(java: &Path, decompiler: &Path, jar: &Path, missing: &Missing,
     let out = work_dir.join("out");
     std::fs::create_dir_all(&out).map_err(|error| format!("cannot create {}: {error}", out.display()))?;
     let mut command = std::process::Command::new(java);
-    command.arg("-jar").arg(decompiler).arg("-log=WARN");
+    command
+        .args(DECOMPILER_JVM_OPTIONS)
+        .arg("-jar")
+        .arg(decompiler)
+        .args(DECOMPILER_OPTIONS);
     match missing {
         Missing::Everything => {
             command.arg(jar);
