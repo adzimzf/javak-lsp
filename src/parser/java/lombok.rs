@@ -95,6 +95,7 @@ const MODELLED: &[&str] = &[
     "Builder",
     "Builder.Default",
     "Singular",
+    "experimental.SuperBuilder",
     "extern.slf4j.Slf4j",
     "extern.slf4j.XSlf4j",
     "extern.log4j.Log4j2",
@@ -405,6 +406,7 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
     let data = on_class("Data");
     let value = on_class("Value");
     let builder = on_class("Builder");
+    let super_builder = on_class("experimental.SuperBuilder");
     let mut taken: Vec<String> = written_methods.iter().map(|name| (*name).to_owned()).collect();
 
     // Loggers first: they are fields, and the order of members is the
@@ -510,7 +512,10 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
     if let Some(annotation) = on_class("AllArgsConstructor") {
         constructors.push((annotation, all.clone(), None));
     }
-    if !has_constructor && !any_explicit {
+    if let Some(annotation) = super_builder {
+        // What the builder's `build()` calls: the builder itself.
+        constructors.push((annotation, Vec::new(), Some("protected ")));
+    } else if !has_constructor && !any_explicit {
         if let Some(annotation) = value {
             constructors.push((annotation, all.clone(), None));
         } else if let Some(annotation) = builder {
@@ -522,6 +527,29 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
     }
     let mut arities: Vec<usize> = Vec::new();
     for (annotation, parameters, modifier) in constructors {
+        if super_builder.is_some_and(|written| std::ptr::eq(written, annotation)) {
+            let declared = class.child("type_parameters").map(|written| written.text.clone()).unwrap_or_default();
+            let arguments = wildcard_builder_arguments(&declared);
+            let builder_class = builder_argument(&annotation.arguments, "builderClassName")
+                .unwrap_or_else(|| format!("{}Builder", class_name.text));
+            plan.members.push(Member {
+                kind: MemberKind::Constructor,
+                source: format!("{}{}({builder_class}{arguments} b) {{}}", modifier.unwrap_or_default(), class_name.text),
+                whole: (annotation.whole.0, annotation.name_at.1),
+                name_at: (annotation.whole.0, annotation.name_at.1),
+                types_at: (annotation.whole.0, annotation.name_at.1),
+                parameters_at: (annotation.whole.0, annotation.name_at.1),
+            });
+            for field in &instance {
+                plan.uses.push(Use {
+                    field: field.name_at.0,
+                    start: annotation.whole.0,
+                    end: annotation.whole.1,
+                    access: Access::Write,
+                });
+            }
+            continue;
+        }
         // Two constructors with the same parameters would be one.
         if arities.contains(&parameters.len()) && parameters.is_empty() {
             continue;
@@ -560,7 +588,9 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
     }
 
     if let Some(annotation) = builder {
-        plan_builder(&mut plan, annotation, class, &class_name.text, &instance, &taken);
+        plan_builder(&mut plan, annotation, class, &class_name.text, &instance, &taken, false);
+    } else if let Some(annotation) = super_builder {
+        plan_builder(&mut plan, annotation, class, &class_name.text, &instance, &taken, true);
     }
 
     let to_string = data.or(value).or_else(|| on_class("ToString"));
@@ -594,7 +624,21 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
 /// `@Builder.Default` field's value and whether it was set), `build()` and
 /// `toString()`. jdtls puts all of them at the annotation, from its `@` to
 /// the end of its name.
-fn plan_builder(plan: &mut Plan, annotation: &Annotation, class: &Syn, class_name: &str, instance: &[&Field], taken: &[String]) {
+///
+/// `@SuperBuilder` (`hierarchical`) makes the builder an abstract class
+/// `XBuilder<C extends X, B extends XBuilder<C, B>>` that extends the
+/// superclass's builder, its setters returning `B`, with `self()`, an
+/// abstract `build()` and the `XBuilderImpl` that `builder()` returns.
+#[allow(clippy::too_many_arguments)]
+fn plan_builder(
+    plan: &mut Plan,
+    annotation: &Annotation,
+    class: &Syn,
+    class_name: &str,
+    instance: &[&Field],
+    taken: &[String],
+    hierarchical: bool,
+) {
     let at = (annotation.whole.0, annotation.name_at.1);
     let argument = |name: &str| builder_argument(&annotation.arguments, name);
     let builder_class = argument("builderClassName").unwrap_or_else(|| format!("{class_name}Builder"));
@@ -603,7 +647,12 @@ fn plan_builder(plan: &mut Plan, annotation: &Annotation, class: &Syn, class_nam
     let to_builder = argument("toBuilder").is_some_and(|value| value == "true");
     let declared = class.child("type_parameters").map(|written| written.text.clone()).unwrap_or_default();
     let arguments = type_parameter_names(&declared);
-    let builder_type = format!("{builder_class}{arguments}");
+    // What `builder()` and `toBuilder()` return, and what a setter does.
+    let (made_type, builder_type) = if hierarchical {
+        (format!("{builder_class}{}", wildcard_builder_arguments(&declared)), "B".to_owned())
+    } else {
+        (format!("{builder_class}{arguments}"), format!("{builder_class}{arguments}"))
+    };
     let generic = if declared.is_empty() { String::new() } else { format!("{declared} ") };
     let member = |kind: MemberKind, source: String| Member {
         kind,
@@ -616,11 +665,11 @@ fn plan_builder(plan: &mut Plan, annotation: &Annotation, class: &Syn, class_nam
     if !builder_method.is_empty() && !taken.contains(&builder_method) {
         plan.members.push(member(
             MemberKind::Method,
-            format!("public static {generic}{builder_type} {builder_method}() {{}}"),
+            format!("public static {generic}{made_type} {builder_method}() {{}}"),
         ));
     }
     if to_builder && !taken.iter().any(|name| name == "toBuilder") {
-        plan.members.push(member(MemberKind::Method, format!("public {builder_type} toBuilder() {{}}")));
+        plan.members.push(member(MemberKind::Method, format!("public {made_type} toBuilder() {{}}")));
         for field in instance {
             plan.uses.push(read(field, annotation.whole));
         }
@@ -669,6 +718,39 @@ fn plan_builder(plan: &mut Plan, annotation: &Annotation, class: &Syn, class_nam
             setters.push_str(&format!("public {builder_type} {name}({written} {name}) {{}}\n"));
         }
     }
+    if hierarchical {
+        let names = type_parameter_names(&declared);
+        let own = names.trim_start_matches('<').trim_end_matches('>');
+        let leading = if own.is_empty() { String::new() } else { format!("{own}, ") };
+        let parent = class
+            .child("superclass")
+            .and_then(|superclass| superclass.children.iter().find(|child| child.kind != "extends"))
+            .map(|written| {
+                let (raw, given) = match written.text.split_once('<') {
+                    Some((raw, rest)) => (raw.trim(), format!("{}, ", rest.trim_end().trim_end_matches('>'))),
+                    None => (written.text.trim(), String::new()),
+                };
+                let simple = raw.rsplit('.').next().unwrap_or(raw);
+                format!(" extends {raw}.{simple}Builder<{given}C, B>")
+            })
+            .unwrap_or_default();
+        let bounds = declared.trim().trim_start_matches('<').trim_end_matches('>').trim();
+        let bounds = if bounds.is_empty() { String::new() } else { format!("{bounds}, ") };
+        let source = format!(
+            "public static abstract class {builder_class}<{bounds}C extends {class_name}{arguments}, \
+             B extends {builder_class}<{leading}C, B>>{parent} {{\n{fields}public {builder_class}() {{}}\n{setters}\
+             protected abstract B self();\npublic abstract C {build_method}();\npublic String toString() {{}}\n}}"
+        );
+        plan.members.push(member(MemberKind::Type, source));
+        let own_type = format!("{class_name}{arguments}");
+        let implementation = format!("{builder_class}Impl");
+        let source = format!(
+            "private static final class {implementation}{declared} extends {builder_class}<{leading}{own_type}, {implementation}{arguments}> {{\n\
+             private {implementation}() {{}}\nprotected {implementation}{arguments} self() {{}}\npublic {own_type} {build_method}() {{}}\n}}"
+        );
+        plan.members.push(member(MemberKind::Type, source));
+        return;
+    }
     let source = format!(
         "public static class {builder_class}{declared} {{\n{fields}{builder_class}() {{}}\n{setters}\
          public {class_name}{arguments} {build_method}() {{}}\npublic String toString() {{}}\n}}"
@@ -688,6 +770,18 @@ fn builder_argument(arguments: &str, name: &str) -> Option<String> {
         let (key, value) = pair.split_once('=')?;
         (key.trim() == name).then(|| value.trim().trim_matches('"').to_owned())
     })
+}
+
+/// The arguments of the builder `@SuperBuilder`'s `builder()` returns:
+/// `<?, ?>`, after the class's own type parameters (`<K, V, ?, ?>`).
+fn wildcard_builder_arguments(declared: &str) -> String {
+    let names = type_parameter_names(declared);
+    let own = names.trim_start_matches('<').trim_end_matches('>');
+    if own.is_empty() {
+        "<?, ?>".to_owned()
+    } else {
+        format!("<{own}, ?, ?>")
+    }
 }
 
 /// `<K, V>` of a class's `<K extends Comparable<K>, V>`.
@@ -934,6 +1028,28 @@ mod tests {
         let members = generated("import lombok.Builder;\n@Builder\nclass Pair<K extends Comparable<K>, V> {\n  private K key;\n  private V value;\n}\n");
         assert!(members.contains(&"public static <K extends Comparable<K>, V> PairBuilder<K, V> builder() {}".to_owned()), "{members:?}");
         assert!(members.iter().any(|member| member.contains("public Pair<K, V> build() {}")), "{members:?}");
+    }
+
+    #[test]
+    fn super_builder_extends_the_superclass_s_builder() {
+        let members = generated(
+            "import lombok.experimental.SuperBuilder;\n@SuperBuilder(toBuilder = true)\nclass Customer extends Person {\n  private int points;\n}\n",
+        );
+        assert!(members.contains(&"public static CustomerBuilder<?, ?> builder() {}".to_owned()), "{members:?}");
+        assert!(members.contains(&"public CustomerBuilder<?, ?> toBuilder() {}".to_owned()), "{members:?}");
+        assert!(members.contains(&"protected Customer(CustomerBuilder<?, ?> b) {}".to_owned()), "{members:?}");
+        let builder = members.iter().find(|member| member.contains("abstract class CustomerBuilder")).expect("the builder");
+        for expected in [
+            "public static abstract class CustomerBuilder<C extends Customer, B extends CustomerBuilder<C, B>> extends Person.PersonBuilder<C, B> {",
+            "public B points(int points) {}",
+            "protected abstract B self();",
+            "public abstract C build();",
+        ] {
+            assert!(builder.contains(expected), "{expected} in {builder}");
+        }
+        assert!(members.iter().any(|member| member.starts_with(
+            "private static final class CustomerBuilderImpl extends CustomerBuilder<Customer, CustomerBuilderImpl> {"
+        )), "{members:?}");
     }
 
     #[test]
