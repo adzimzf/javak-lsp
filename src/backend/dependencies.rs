@@ -10,7 +10,8 @@
 //!
 //! Settings come from the client's `initializationOptions`:
 //! `{"dependencySync": "auto" | "off", "javaHome": "/path/to/jdk",
-//!   "indexingOptions": {"decompileLibraries": bool}}`.
+//!   "indexingOptions": {"decompileLibraries": "onDemand" | "eager" | "off"}}`
+//! (`true` is `"onDemand"`, `false` is `"off"`).
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,7 +55,7 @@ impl DependencySync {
         }
         if let Some(decompile) = options
             .pointer("/indexingOptions/decompileLibraries")
-            .and_then(Value::as_bool)
+            .and_then(dependency_sync::DecompileMode::parse)
         {
             settings.1.decompile = decompile;
         }
@@ -197,13 +198,18 @@ impl DependencySync {
             .await
             .ok()
             .flatten();
+        let Some((decompiled, _)) = decompiled.filter(|(_, new)| *new > 0) else {
+            // Nothing new (every candidate failed): the index already
+            // holds what there is.
+            return;
+        };
         let indexed = index_libraries(Some(root.to_path_buf()), self.java_home(), Arc::clone(indexer), client).await;
         client
             .log_message(
                 MessageType::INFO,
                 format!(
                     "javak-lsp: libraries decompiled — {} with decompiled sources; {} library types indexed",
-                    decompiled.unwrap_or(0),
+                    decompiled,
                     indexed.types
                 ),
             )
@@ -211,7 +217,8 @@ impl DependencySync {
     }
 
     /// Some sources failed to download for a transient reason: ask again
-    /// once the back-off has passed.
+    /// once the back-off has passed, which doubles with every retry that
+    /// fails again.
     fn retry_missing_sources(
         self: &Arc<Self>,
         root: &Path,
@@ -219,16 +226,19 @@ impl DependencySync {
         indexer: &Arc<Indexer>,
         client: &Client,
     ) {
-        let incomplete = load_manifest(root).is_some_and(|manifest| manifest.incomplete_sources);
-        if !incomplete {
+        let wait = sync_fingerprint(root, options)
+            .and_then(|fingerprint| dependency_sync::sources_retry_in(root, &fingerprint));
+        let Some(wait) = wait else {
             return;
-        }
+        };
         let this = Arc::clone(self);
         let root = root.to_path_buf();
         let indexer = Arc::clone(indexer);
         let client = client.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(RETRY_BACK_OFF).await;
+            // At least the shortest back-off: a retry that failed at once
+            // must not start the build tool again straight away.
+            tokio::time::sleep(wait.max(RETRY_BACK_OFF)).await;
             let due = sync_fingerprint(&root, options)
                 .is_some_and(|fingerprint| sources_retry_due(&root, &fingerprint));
             if due {
@@ -476,6 +486,7 @@ mod tests {
             incomplete_sources: false,
             saved_at: 0,
             modules: Vec::new(),
+            sources_retries: 0,
         };
         let (jars, stdlib) = manifest_sources(Some(&manifest));
         assert_eq!(jars, vec![directory.path().join("greeter-sources.jar")]);

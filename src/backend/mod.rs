@@ -51,6 +51,7 @@ pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
         dependencies: Arc::new(DependencySync::default()),
         debug: Arc::new(DebugCommands::new(indexer_for_debug)),
         symbol_tags: AtomicBool::new(false),
+        work_done_progress: AtomicBool::new(false),
     }
 }
 
@@ -63,9 +64,87 @@ pub struct Backend {
     /// Whether the client reads a symbol's `tags`; one that does not is
     /// told a symbol is deprecated by its `deprecated` field, as jdtls does.
     symbol_tags: AtomicBool,
+    /// Whether the client shows `$/progress` (`window.workDoneProgress`).
+    work_done_progress: AtomicBool,
 }
 
 impl Backend {
+    /// Decompile the class whose stub is at `uri`, telling the user while
+    /// it runs (a second or a few: a JVM starts). Whether it was.
+    async fn decompile_class_at(&self, uri: &Url) -> bool {
+        let libraries = Arc::clone(&self.indexer.libraries);
+        let Some(file) = libraries.file_at(uri).filter(|file| libraries.is_undecompiled_stub(file)) else {
+            return false;
+        };
+        let class = file.entry.trim_end_matches(".java").replace('/', ".");
+        let progress = self.begin_progress("Decompiling", &class).await;
+        let (jar, entry) = (file.jar.clone(), file.entry.clone());
+        let outcome = tokio::task::spawn_blocking(move || crate::dependency_sync::decompile::decompile_class(&jar, &entry))
+            .await
+            .unwrap_or_else(|error| Err(error.to_string()));
+        self.end_progress(progress).await;
+        match outcome {
+            Ok(_) => {
+                libraries.reread(&file);
+                true
+            }
+            Err(message) => {
+                log::warn!("decompiling {class}: {message}");
+                self.client
+                    .show_message(
+                        MessageType::WARNING,
+                        format!("javak-lsp: cannot decompile {class} ({message}); showing its declarations"),
+                    )
+                    .await;
+                false
+            }
+        }
+    }
+
+    /// Show `title: message` as work in progress: `$/progress` where the
+    /// client shows it, else a message.
+    async fn begin_progress(&self, title: &str, message: &str) -> Option<NumberOrString> {
+        if !self.work_done_progress.load(Ordering::Relaxed) {
+            self.client
+                .show_message(MessageType::INFO, format!("javak-lsp: {title} {message}\u{2026}"))
+                .await;
+            return None;
+        }
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let token = NumberOrString::String(format!("javak-lsp/{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+        let created = self
+            .client
+            .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams { token: token.clone() })
+            .await;
+        if created.is_err() {
+            return None;
+        }
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                    title: title.to_owned(),
+                    cancellable: Some(false),
+                    message: Some(message.to_owned()),
+                    percentage: None,
+                })),
+            })
+            .await;
+        Some(token)
+    }
+
+    async fn end_progress(&self, token: Option<NumberOrString>) {
+        let Some(token) = token else {
+            return;
+        };
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd { message: None })),
+            })
+            .await;
+    }
+
     fn prepared_type_hierarchy(
         &self,
         params: TypeHierarchyPrepareParams,
@@ -606,6 +685,13 @@ impl LanguageServer for Backend {
             .and_then(|symbols| symbols.tag_support.as_ref())
             .is_some_and(|support| support.value_set.contains(&SymbolTag::DEPRECATED));
         self.symbol_tags.store(tags, Ordering::Relaxed);
+        let progress = params
+            .capabilities
+            .window
+            .as_ref()
+            .and_then(|window| window.work_done_progress)
+            .unwrap_or(false);
+        self.work_done_progress.store(progress, Ordering::Relaxed);
         if !self.indexer.workspace_pinned.load(Ordering::Relaxed) {
             if let Some(root) = params
                 .root_uri
@@ -844,10 +930,21 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
-        Ok(Some(GotoDefinitionResponse::Scalar(Location {
-            uri: found.file.uri.clone(),
-            range: at_name(found.selection()),
-        })))
+        let target = found.file.uri.clone();
+        let location = Location { uri: target.clone(), range: at_name(found.selection()) };
+        drop(snapshot);
+        // A class read from its class file is decompiled when it is opened,
+        // as jdtls does; then the declaration is found again in the code.
+        if self.decompile_class_at(&target).await {
+            let snapshot = self.indexer.snapshot();
+            if let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position)) {
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: found.file.uri.clone(),
+                    range: at_name(found.selection()),
+                })));
+            }
+        }
+        Ok(Some(GotoDefinitionResponse::Scalar(location)))
     }
 
     /// The method the one at the cursor overrides, as jdtls answers: a

@@ -338,6 +338,7 @@ fn incomplete_manifest_is_retried_only_after_the_back_off() {
         incomplete_sources: true,
         saved_at: 1_000,
         modules: Vec::new(),
+        sources_retries: 0,
     };
     assert!(!manifest.is_due_for_retry(1_000 + 60));
     assert!(manifest.is_due_for_retry(1_000 + INCOMPLETE_RETRY_AFTER.as_secs()));
@@ -346,6 +347,27 @@ fn incomplete_manifest_is_retried_only_after_the_back_off() {
         ..manifest
     };
     assert!(!complete.is_due_for_retry(u64::MAX / 2));
+}
+
+#[test]
+fn every_retry_that_fails_again_doubles_the_back_off() {
+    let first = INCOMPLETE_RETRY_AFTER.as_secs();
+    let manifest = |sources_retries| DependencyManifest {
+        format: MANIFEST_FORMAT,
+        fingerprint: "f".to_owned(),
+        build_tool: "gradle".to_owned(),
+        dependencies: vec![],
+        incomplete_sources: true,
+        saved_at: 1_000,
+        modules: Vec::new(),
+        sources_retries,
+    };
+    assert!(manifest(0).is_due_for_retry(1_000 + first));
+    assert!(!manifest(1).is_due_for_retry(1_000 + first));
+    assert!(manifest(1).is_due_for_retry(1_000 + 2 * first));
+    assert!(!manifest(3).is_due_for_retry(1_000 + 7 * first));
+    // Never longer than a day, however many retries failed.
+    assert!(manifest(u32::MAX).is_due_for_retry(1_000 + MAX_INCOMPLETE_RETRY_AFTER.as_secs()));
 }
 
 #[test]
@@ -452,8 +474,8 @@ fn gradle_module_lines_say_where_each_project_keeps_its_sources() {
 fn decompile_option_is_part_of_the_fingerprint() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "pom.xml", "<project/>");
-    let on = sync_fingerprint(dir.path(), SyncOptions { decompile: true }).unwrap();
-    let off = sync_fingerprint(dir.path(), SyncOptions { decompile: false }).unwrap();
+    let on = sync_fingerprint(dir.path(), SyncOptions { decompile: DecompileMode::OnDemand }).unwrap();
+    let off = sync_fingerprint(dir.path(), SyncOptions { decompile: DecompileMode::Off }).unwrap();
     assert_ne!(on, off, "toggling decompileLibraries must re-sync");
 }
 
@@ -475,6 +497,7 @@ fn decompiled_sources_stand_in_for_missing_sources() {
         incomplete_sources: false,
         saved_at: 0,
         modules: Vec::new(),
+        sources_retries: 0,
     };
     assert_eq!(
         manifest.sources_jars_by_artifact(),
@@ -526,6 +549,7 @@ fn manifest_of(build_tool: &str, jar: Option<PathBuf>) -> DependencyManifest {
         incomplete_sources: false,
         saved_at: 0,
         modules: Vec::new(),
+        sources_retries: 0,
     }
 }
 
@@ -706,4 +730,61 @@ fn a_jar_with_sources_and_its_decompiled_rest_gives_both() {
     };
     let jars: Vec<PathBuf> = manifest.sources_jars_by_artifact().into_iter().map(|(_, _, jar)| jar).collect();
     assert_eq!(jars, vec![sources, rest]);
+}
+
+#[test]
+fn a_kotlin_sources_jar_laid_out_by_source_set_lacks_no_package() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let jar = dir.path().join("kotlinx-coroutines-core-jvm.jar");
+    let sources = dir.path().join("kotlinx-coroutines-core-jvm-sources.jar");
+    zip_of(
+        &jar,
+        &[
+            "kotlinx/coroutines/Job.class",
+            "kotlinx/coroutines/flow/Flow.class",
+            "kotlinx/coroutines/flow/FlowKt.class",
+            "kotlinx/coroutines/internal/shaded/Hidden.class",
+            "kotlinx/coroutines/unsigned/UJobKt.class",
+        ],
+    );
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(&sources).unwrap());
+    for (entry, text) in [
+        ("commonMain/Job.kt", "/* licence */\n@file:JvmName(\"JobKt\")\npackage kotlinx.coroutines\n\ninterface Job\n"),
+        ("commonMain/flow/Flow.kt", "package kotlinx.coroutines.flow\n\ninterface Flow<T>\n"),
+        (
+            "jvmMain/UJob.kt",
+            "@file:kotlin.jvm.JvmPackageName(\"kotlinx.coroutines.unsigned\")\npackage kotlinx.coroutines\n",
+        ),
+    ] {
+        zip.start_file(entry, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(text.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+    // Only the package no file declares is missing, not every package.
+    assert_eq!(
+        decompile::missing_packages(&jar, &sources).unwrap(),
+        vec!["kotlinx/coroutines/internal/shaded".to_owned()]
+    );
+}
+
+#[test]
+fn the_decompile_setting_takes_a_mode_or_a_bool() {
+    use serde_json::json;
+    assert_eq!(DecompileMode::default(), DecompileMode::OnDemand);
+    assert_eq!(DecompileMode::parse(&json!("onDemand")), Some(DecompileMode::OnDemand));
+    assert_eq!(DecompileMode::parse(&json!("EAGER")), Some(DecompileMode::Eager));
+    assert_eq!(DecompileMode::parse(&json!("off")), Some(DecompileMode::Off));
+    assert_eq!(DecompileMode::parse(&json!(true)), Some(DecompileMode::OnDemand));
+    assert_eq!(DecompileMode::parse(&json!(false)), Some(DecompileMode::Off));
+    assert_eq!(DecompileMode::parse(&json!("sometimes")), None);
+}
+
+#[test]
+fn switching_between_the_modes_that_decompile_needs_no_new_sync() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
+    let fingerprint = |decompile| sync_fingerprint(dir.path(), SyncOptions { decompile }).unwrap();
+    assert_eq!(fingerprint(DecompileMode::OnDemand), fingerprint(DecompileMode::Eager));
+    assert_ne!(fingerprint(DecompileMode::OnDemand), fingerprint(DecompileMode::Off));
 }

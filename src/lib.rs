@@ -16,6 +16,7 @@
 //! does, and runs Microsoft's java-debug behind them.
 
 pub mod backend;
+pub(crate) mod classfile;
 pub(crate) mod debugger;
 pub(crate) mod dependency_sync;
 pub mod feature;
