@@ -95,6 +95,8 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
         parameters: usize,
         index: usize,
         order: usize,
+        /// What JDT compares names by ([`completion_of`]).
+        completion: String,
     }
     let mut ranked = Vec::new();
     for (order, offer) in offers.into_iter().enumerate() {
@@ -121,13 +123,15 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
                 (None, Some(returns)) => format!("{} : {returns}", offer.name),
                 (None, None) => offer.name.clone(),
             };
+            let proposal = Proposal {
+                name: offer.name.clone(),
+                label,
+                kind: offer.kind,
+                sort: offer.rank.clone(),
+            };
             ranked.push(Ranked {
-                proposal: Proposal {
-                    name: offer.name.clone(),
-                    label,
-                    kind: offer.kind,
-                    sort: offer.rank.clone(),
-                },
+                completion: completion_of(&proposal),
+                proposal,
                 member: offer.member,
                 relevance: relevance + proposed.relevance,
                 parameters: proposed.parameters.as_ref().map_or(0, Vec::len),
@@ -143,7 +147,7 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
                 .relevance
                 .cmp(&left.relevance)
                 .then(left.proposal.kind.cmp(&right.proposal.kind))
-                .then_with(|| jdt_name_order(&left.proposal.name, &right.proposal.name))
+                .then_with(|| jdt_name_order(&left.completion, &right.completion))
                 .then(left.parameters.cmp(&right.parameters))
                 .then(right.index.cmp(&left.index))
         });
@@ -169,6 +173,16 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
         })
         .collect();
     (proposals, incomplete)
+}
+
+/// What JDT compares a proposal by: what it inserts, a method's
+/// parentheses included (`item()` before `items()`).
+fn completion_of(proposal: &Proposal) -> String {
+    if proposal.kind == OfferKind::Method {
+        format!("{}()", proposal.name)
+    } else {
+        proposal.name.clone()
+    }
 }
 
 /// How JDT orders two names of equal relevance and kind: character by

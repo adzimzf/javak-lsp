@@ -70,7 +70,7 @@ fn members(container: &Syn, header: Option<&Syn>) -> Vec<Symbol> {
     let listed = container
         .children
         .iter()
-        .filter(|child| !child.is_generated() || child.kind == "field_declaration");
+        .filter(|child| !child.is_generated() || matches!(child.kind.as_str(), "field_declaration" | "class_declaration"));
     for child in listed {
         if is_comment(child) {
             // A comment on the line the previous declaration or token ends

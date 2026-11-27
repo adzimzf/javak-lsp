@@ -65,7 +65,7 @@ pub struct Snapshot {
     searched_files: dashmap::DashMap<Url, LibraryFile>,
     /// The names of the methods a type and every type above it declare,
     /// by the type's place, for a type whose whole hierarchy is known.
-    method_names: dashmap::DashMap<(Url, u32, u32), Option<MethodNames>>,
+    method_names: dashmap::DashMap<(Url, u32, u32, usize), Option<MethodNames>>,
 }
 
 /// Where a type is declared: the address of its file, and the child
@@ -623,11 +623,8 @@ impl Snapshot {
             return Some(found);
         }
         let outer = self.type_named(qualifier, from)?;
-        let nested = outer
-            .node
-            .walk()
+        let nested = nested_types(outer.node)
             .into_iter()
-            .filter(|node| is_type_declaration(node))
             .find(|node| node.child("name").is_some_and(|named| named.text == name))?;
         self.declared(outer.file, nested)
     }
@@ -641,11 +638,8 @@ impl Snapshot {
     ) -> Option<Found<'a>> {
         let (package, outer) = qualifier.rsplit_once('.').unwrap_or(("", qualifier));
         let outer = self.type_in_package(outer, Some(package), from.language)?;
-        let nested = outer
-            .node
-            .walk()
+        let nested = nested_types(outer.node)
             .into_iter()
-            .filter(|node| is_type_declaration(node))
             .find(|node| node.child("name").is_some_and(|named| named.text == name))?;
         self.declared(outer.file, nested)
     }
@@ -756,6 +750,21 @@ impl Snapshot {
     ) -> Option<Found<'a>> {
         let mut candidates = Vec::new();
         self.members_named(of, name, &mut candidates, &mut 0);
+        // Java calls a Kotlin property's accessors: `getRadius()` of
+        // `val radius`, `isEmpty()` of `val isEmpty`, `setLabel(…)`.
+        if candidates.is_empty()
+            && of.file.language == Language::Kotlin
+            && call.is_some_and(|(_, from)| from.language == Language::Java)
+        {
+            for property in kotlin_properties_of_accessor(name) {
+                let mut found = Vec::new();
+                self.members_named(of, &property, &mut found, &mut 0);
+                found.retain(|candidate| is_kotlin_property(candidate.node));
+                if !found.is_empty() {
+                    return found.into_iter().next();
+                }
+            }
+        }
         // A call means a method, not a field of the same name.
         if call.is_some() && candidates.iter().any(|candidate| is_callable(candidate.node)) {
             candidates.retain(|candidate| is_callable(candidate.node));
@@ -1522,6 +1531,13 @@ impl Snapshot {
         let passed = arguments.map(|at| (at, file));
         if let Some(object) = call.child("object") {
             let Some(receiver) = self.type_of_expression(object, file) else {
+                // `ShapesKt.unitCircle()`: a Kotlin top-level function,
+                // through the class its file is compiled to.
+                if file.language == Language::Java
+                    && let Some(function) = self.facade_function(object, &name.text, arguments, file)
+                {
+                    return Some(function);
+                }
                 // `org.jsoup.parser.Tag.valueOf(…)`: a type named in full.
                 let written: String = object.text.split_whitespace().collect();
                 let owner = self.dotted_type(object, file).filter(|found| {
@@ -1583,6 +1599,38 @@ impl Snapshot {
         let class = self.type_named(&name.text, file)?;
         let constructor = self.member(&class, &class.name.text, passed);
         constructor.or(Some(class))
+    }
+
+    /// The Kotlin top-level function `name` a Java call through a file's
+    /// class (`ShapesKt`, or `com.demo.ShapesKt` in full) means.
+    fn facade_function<'a>(&'a self, object: &Syn, name: &str, arguments: Option<&Syn>, from: &'a FileView) -> Option<Found<'a>> {
+        if !matches!(object.kind.as_str(), "identifier" | "field_access" | "scoped_identifier") {
+            return None;
+        }
+        let written: String = object.text.split_whitespace().collect();
+        let (package, class) = match written.rsplit_once('.') {
+            Some((package, class)) => (vec![package.to_owned()], class.to_owned()),
+            None => (self.packages_seen(from, Some(&written)), written),
+        };
+        let mut candidates = Vec::new();
+        for file in self.every_file().filter(|file| file.language == Language::Kotlin) {
+            if !package.contains(&self.package(file).unwrap_or_default())
+                || facade_class_name(file).as_deref() != Some(class.as_str())
+            {
+                continue;
+            }
+            for function in top_level_functions(file).filter(|function| function.child("receiver").is_none()) {
+                if let Some(named) = function.child("name").filter(|named| named.text == name) {
+                    candidates.push(Found {
+                        file,
+                        node: function,
+                        name: named,
+                        bindings: Bindings::new(),
+                    });
+                }
+            }
+        }
+        self.chosen(candidates, arguments, from)
     }
 
     /// The constructor `new Circle(…)` calls, else — for a class that
@@ -1883,6 +1931,66 @@ fn is_expected(declaration: &Syn) -> bool {
 }
 
 /// The functions declared at the top of a file, outside any type.
+/// The Kotlin properties a Java accessor call may mean: `radius` of
+/// `getRadius`, `isEmpty` of `isEmpty`, `label` or `isLabel` of
+/// `setLabel`.
+fn kotlin_properties_of_accessor(name: &str) -> Vec<String> {
+    let decapitalized = |rest: &str| {
+        let mut characters = rest.chars();
+        characters
+            .next()
+            .filter(|first| first.is_uppercase())
+            .map(|first| format!("{}{}", first.to_lowercase(), characters.as_str()))
+    };
+    if let Some(rest) = name.strip_prefix("get") {
+        return decapitalized(rest).into_iter().collect();
+    }
+    if name.strip_prefix("is").is_some_and(|rest| rest.starts_with(char::is_uppercase)) {
+        return vec![name.to_owned()];
+    }
+    if let Some(rest) = name.strip_prefix("set") {
+        return decapitalized(rest).into_iter().chain(Some(format!("is{rest}"))).collect();
+    }
+    Vec::new()
+}
+
+/// A Kotlin property, lowered: a field of a class body, or a `val`/`var`
+/// parameter of a primary constructor.
+fn is_kotlin_property(node: &Syn) -> bool {
+    match node.kind.as_str() {
+        "field_declaration" => true,
+        "formal_parameter" | "class_parameter" => {
+            let written = node.text.trim_start();
+            written.starts_with("val ") || written.starts_with("var ") || node.children.iter().any(|child| matches!(child.text.as_str(), "val" | "var"))
+        }
+        _ => false,
+    }
+}
+
+/// The class Java sees a Kotlin file's top-level declarations in: the
+/// name `@file:JvmName` gives it, else the file's name and `Kt`
+/// (`Shapes.kt` is `ShapesKt`).
+pub fn facade_class_name(file: &FileView) -> Option<String> {
+    if file.language != Language::Kotlin {
+        return None;
+    }
+    // File annotations come before the package header.
+    let header = file.tree.first("package_declaration").map_or(file.text.len(), |package| {
+        file.text_between(Position { line: 0, column: 0 }, package.start).len()
+    });
+    if let Some(at) = file.text[..header].find("@file:JvmName(") {
+        let named = &file.text[at + "@file:JvmName(".len()..];
+        let named = named.split(')').next()?.trim().trim_matches('"');
+        if !named.is_empty() {
+            return Some(named.to_owned());
+        }
+    }
+    let stem = std::path::Path::new(file.uri.path()).file_stem()?.to_str()?;
+    let mut characters = stem.chars();
+    let first = characters.next()?;
+    Some(format!("{}{}Kt", first.to_uppercase(), characters.as_str()))
+}
+
 fn top_level_functions(file: &FileView) -> impl Iterator<Item = &Syn> {
     file.tree
         .children
@@ -2046,6 +2154,19 @@ fn type_paths(node: &Syn, path: &mut Vec<u32>, found: &mut Vec<TypePath>) {
         type_paths(child, path, found);
         path.pop();
     }
+}
+
+/// The types `node` declares, itself included: those written, then those
+/// Lombok generates (a builder class).
+fn nested_types(node: &Syn) -> Vec<&Syn> {
+    let written: Vec<&Syn> = node.walk().into_iter().filter(|node| is_type_declaration(node)).collect();
+    let generated = written
+        .iter()
+        .filter_map(|declaration| declaration.first("class_body"))
+        .flat_map(|body| body.children.iter())
+        .filter(|member| member.is_generated() && is_type_declaration(member));
+    let generated: Vec<&Syn> = generated.collect();
+    written.into_iter().chain(generated).collect()
 }
 
 /// Every type `file` declares, nested ones included, by name.
@@ -2256,13 +2377,17 @@ fn member_paths(declaration: &Syn) -> Vec<MemberPath> {
 }
 
 /// The child indices that lead from `root` to `target`, a node of its tree:
-/// only the children spanning `target` are entered.
+/// only the children spanning `target` are entered, and a class body
+/// holding members Lombok generates, which sit at their annotation,
+/// outside the body.
 fn indices_to(root: &Syn, target: &Syn) -> Option<Vec<u32>> {
     if std::ptr::eq(root, target) {
         return Some(Vec::new());
     }
     root.children.iter().enumerate().find_map(|(index, child)| {
-        if child.start > target.start || target.end > child.end {
+        let spans = child.start <= target.start && target.end <= child.end;
+        let holds_generated = || child.kind == "class_body" && child.children.iter().any(Syn::is_generated);
+        if !spans && !holds_generated() {
             return None;
         }
         let mut path = indices_to(child, target)?;
@@ -3366,9 +3491,28 @@ impl Snapshot {
     /// A type declaration's name with its package and the types it is
     /// nested in: `com.demo.Outer.Inner`.
     pub fn qualified_type_name(&self, file: &FileView, declaration: &Syn) -> String {
-        let mut names: Vec<String> = path_to(&file.tree, declaration.start)
+        // A type Lombok generates starts where the class holding it does.
+        let enclosing: Vec<&Syn> = if declaration.is_generated() {
+            indices_to(&file.tree, declaration)
+                .map(|path| {
+                    let mut node: &Syn = &file.tree;
+                    let mut above = Vec::new();
+                    for index in path {
+                        above.push(node);
+                        node = &node.children[index as usize];
+                    }
+                    above
+                })
+                .unwrap_or_default()
+        } else {
+            path_to(&file.tree, declaration.start)
+                .into_iter()
+                .filter(|node| node.start < declaration.start)
+                .collect()
+        };
+        let mut names: Vec<String> = enclosing
             .into_iter()
-            .filter(|node| is_type_declaration(node) && node.start < declaration.start)
+            .filter(|node| is_type_declaration(node))
             .filter_map(|node| node.child("name").map(|name| name.text.clone()))
             .collect();
         if let Some(name) = declaration.child("name") {
@@ -4247,6 +4391,14 @@ impl Snapshot {
         let plain_getter = getter
             .strip_prefix("is")
             .map_or_else(|| getter.clone(), |rest| format!("get{rest}"));
+        // `@Builder`'s setter of the field, named as the field is.
+        let builder_setters = nested_types(owner.node)
+            .into_iter()
+            .filter(|nested| nested.is_generated())
+            .flat_map(members_of)
+            .filter(|(member, named)| {
+                member.kind == "method_declaration" && parameters_of(member).len() == 1 && named.text == field.name.text
+            });
         members_of(owner.node)
             .into_iter()
             .filter(|(member, named)| {
@@ -4259,6 +4411,7 @@ impl Snapshot {
                         _ => false,
                     }
             })
+            .chain(builder_setters)
             .map(|(member, name)| Found {
                 file: field.file,
                 node: member,

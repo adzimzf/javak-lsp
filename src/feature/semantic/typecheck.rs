@@ -255,7 +255,9 @@ impl Snapshot {
     /// The names of the methods of a type and the types above it, once
     /// per type and snapshot; `None` where some of them are unknown.
     fn method_names_of(&self, of: &Found<'_>) -> Option<std::sync::Arc<std::collections::HashSet<String>>> {
-        let key = (of.file.uri.clone(), of.node.start.line, of.node.start.column);
+        // A builder Lombok generates starts where its class does: the node
+        // tells them apart.
+        let key = (of.file.uri.clone(), of.node.start.line, of.node.start.column, std::ptr::from_ref(of.node) as usize);
         if let Some(known) = self.method_names.get(&key) {
             return known.clone();
         }
@@ -636,12 +638,16 @@ fn promoted(left: &str, right: &str) -> Option<String> {
 
 /// A type's name with the types it is nested in: `Token.Doctype`.
 fn plain_name(of: &Found<'_>) -> String {
-    path_to(&of.file.tree, of.name.start)
+    let mut names: Vec<String> = path_to(&of.file.tree, of.name.start)
         .iter()
         .filter(|node| is_type_declaration(node))
         .filter_map(|node| node.child("name").map(|name| name.text.clone()))
-        .collect::<Vec<_>>()
-        .join(".")
+        .collect();
+    // A builder Lombok generates is no node the descent reaches.
+    if of.node.is_generated() {
+        names.push(of.name.text.clone());
+    }
+    names.join(".")
 }
 
 /// Whether a declaration says `@Deprecated`.
