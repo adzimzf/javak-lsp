@@ -1,0 +1,31 @@
+//- /src/main/java/com/demo/Circle.kt
+package com.demo
+
+class Circle(val radius: Double) {
+    var label: String = ""
+    val isUnit: Boolean = false
+
+    companion object {
+        fun unit(): Circle {
+            return Circle(1.0)
+        }
+    }
+}
+
+fun describe(circle: Circle): String {
+    return circle.label
+}
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+    String run(Circle circle) {
+        circle.setLabel("c");
+        double size = circle.getRadius();
+        boolean unit = circle.isUnit();
+        Circle other = Circle.Companion.unit();
+        return CircleKt.describe(other) + circle.getLabel() + size + unit;
+    }
+}
+//= expected (pending)
+(nothing)

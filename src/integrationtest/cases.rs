@@ -133,6 +133,18 @@ suites! {
         folding_range => FoldingRange,
         workspace_symbol => WorkspaceSymbol,
     }
+    // A fixture with both Java and Kotlin files, asked from either side:
+    // what one language sees of the other's declarations.
+    interop {
+        definition => Definition,
+        type_definition => TypeDefinition,
+        implementation => Implementation,
+        references => References,
+        completion => Completion,
+        rename => Rename,
+        workspace_symbol => WorkspaceSymbol,
+        diagnostics => Diagnostics,
+    }
 }
 
 /// A case directory no suite runs would hold cases nothing asks: the

@@ -1,0 +1,29 @@
+//- /com/demo/Shapes.kt
+package com.demo
+
+open class Shape
+
+class Circle : Shape() {
+    fun area(): Double {
+        return 3.14
+    }
+}
+
+class Square : Shape() {
+    fun area(): Double {
+        return 4.0
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun measure(shape: Shape): Double {
+        if (shape is Circle) {
+            return shape.ar$0ea()
+        }
+        return 0.0
+    }
+}
+//= expected (pending)
+/com/demo/Shapes.kt:6:9  fun area(): Double {

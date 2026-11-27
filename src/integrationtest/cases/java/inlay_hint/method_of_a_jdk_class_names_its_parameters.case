@@ -1,0 +1,17 @@
+//- /com/demo/Buffer.java
+$0package com.demo;
+
+import java.util.ArrayList;
+import java.util.List;
+
+class Buffer {
+	List<String> lines() {
+		List<String> lines = new ArrayList<>(16);
+		lines.add(0, "header");
+		return lines;
+	}
+}
+//= expected
+8:40  initialCapacity:
+9:13  index:
+9:16  element:

@@ -1,0 +1,23 @@
+//- /com/demo/Shape.kt
+package com.demo
+
+open class Shape {
+    fun describe(): String {
+        return "shape"
+    }
+}
+//- /com/demo/Circle.java
+package com.demo;
+
+class Circle extends Shape {
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    String run(Circle circle) {
+        return circle.descr$0ibe();
+    }
+}
+//= expected
+/com/demo/Shape.kt:4:9  fun describe(): String {

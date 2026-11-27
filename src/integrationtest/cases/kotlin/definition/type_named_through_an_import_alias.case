@@ -1,0 +1,20 @@
+//- /com/other/Circle.kt
+package com.other
+
+class Circle
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle
+//- /com/demo/Main.kt
+package com.demo
+
+import com.other.Circle as Round
+
+class Main {
+    fun make(): Round {
+        return Rou$0nd()
+    }
+}
+//= expected (pending)
+/com/other/Circle.kt:3:7  class Circle

@@ -1,0 +1,16 @@
+//- /com/demo/Shapes.kt
+package com.demo
+
+class Point(val x: Double, val y: Double)
+
+class Circle(val center: Point, val radius: Double)
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    Object run(Circle circle) {
+        return circle.getCen$0ter();
+    }
+}
+//= expected
+/com/demo/Shapes.kt:3:7  class Point(val x: Double, val y: Double)

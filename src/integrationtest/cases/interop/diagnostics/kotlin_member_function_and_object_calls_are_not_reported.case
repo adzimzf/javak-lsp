@@ -1,0 +1,28 @@
+//- /src/main/java/com/demo/Shapes.kt
+package com.demo
+
+class Circle {
+    fun area(): Double {
+        return 3.14
+    }
+
+    fun scaled(factor: Double): Circle {
+        return this
+    }
+}
+
+object Registry {
+    fun register(circle: Circle) {
+    }
+}
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+    double run(Circle circle) {
+        Registry.INSTANCE.register(circle);
+        return circle.scaled(2.0).area();
+    }
+}
+//= expected
+(nothing)

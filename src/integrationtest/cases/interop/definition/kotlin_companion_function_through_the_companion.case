@@ -1,0 +1,20 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    companion object {
+        fun unit(): Circle {
+            return Circle()
+        }
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    Circle make() {
+        return Circle.Companion.un$0it();
+    }
+}
+//= expected (pending)
+/com/demo/Circle.kt:5:13  fun unit(): Circle {

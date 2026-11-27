@@ -1,0 +1,16 @@
+//- /com/demo/Shape.java
+package com.demo;
+
+public interface Shape {
+    double ar$0ea();
+}
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle : Shape {
+    override fun area(): Double {
+        return 3.14
+    }
+}
+//= expected
+/com/demo/Circle.kt:4:18  override fun area(): Double {

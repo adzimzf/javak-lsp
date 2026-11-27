@@ -1,0 +1,20 @@
+//- /com/demo/Circle.java
+package com.demo;
+
+public class Circle {
+    public double getRa$0dius() {
+        return 1.0;
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun size(circle: Circle): Double {
+        return circle.radius + circle.getRadius()
+    }
+}
+//= expected (pending)
+/com/demo/Circle.java:4:19  public double getRadius() {
+/com/demo/Main.kt:5:23  return circle.radius + circle.getRadius()
+/com/demo/Main.kt:5:39  return circle.radius + circle.getRadius()

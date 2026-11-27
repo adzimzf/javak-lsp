@@ -1,0 +1,17 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle(val radius: Double)
+
+val Circle.diameter: Double
+    get() = radius * 2
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun size(circle: Circle): Double {
+        return circle.diam$0eter
+    }
+}
+//= expected (pending)
+/com/demo/Circle.kt:5:12  val Circle.diameter: Double

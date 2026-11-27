@@ -1,0 +1,17 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle
+//- /com/demo/CircleTest.java
+package com.demo;
+
+class CircleTest {
+    Cir$0cle circle;
+}
+//- /com/demo/Square.kt
+package com.demo
+
+class Square
+//= expected
+Circle  /com/demo/Circle.kt:3
+CircleTest  /com/demo/CircleTest.java:3

@@ -1,0 +1,18 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    companion object {
+        const val PI = 3.14
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun half(): Double {
+        return Circle.P$0I / 2
+    }
+}
+//= expected (pending)
+/com/demo/Circle.kt:5:19  const val PI = 3.14

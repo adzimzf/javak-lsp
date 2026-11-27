@@ -1,0 +1,17 @@
+//- /com/demo/Box.kt
+package com.demo
+
+class Box {
+    val isEmpty: Boolean = true
+    val size: Int = 0
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    boolean check(Box box) {
+        return box.getSize() == 0 && box.isEm$0pty();
+    }
+}
+//= expected
+/com/demo/Box.kt:4:9  val isEmpty: Boolean = true

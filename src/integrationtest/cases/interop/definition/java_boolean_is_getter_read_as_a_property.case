@@ -1,0 +1,18 @@
+//- /com/demo/Box.java
+package com.demo;
+
+public class Box {
+    public boolean isEmpty() {
+        return true;
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun check(box: Box): Boolean {
+        return box.isEm$0pty
+    }
+}
+//= expected
+/com/demo/Box.java:4:20  public boolean isEmpty() {

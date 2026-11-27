@@ -1,0 +1,17 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Cir$0cle
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    Circle copy(Circle circle) {
+        return new Circle();
+    }
+}
+//= expected
+/com/demo/Circle.kt:3:7  class Circle
+/com/demo/Main.java:4:5  Circle copy(Circle circle) {
+/com/demo/Main.java:4:17  Circle copy(Circle circle) {
+/com/demo/Main.java:5:20  return new Circle();

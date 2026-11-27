@@ -1,0 +1,32 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    fun area(): Double {
+        return 3.14
+    }
+
+    fun twice(): Double {
+        return area() * 2
+    }
+}
+//- /com/demo/Square.java
+package com.demo;
+
+class Square {
+    double area() {
+        return 4.0;
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    double total(Square square, Circle circle) {
+        return square.area() + circle.ar$0ea();
+    }
+}
+//= expected
+/com/demo/Circle.kt:4:9  fun area(): Double {
+/com/demo/Circle.kt:9:16  return area() * 2
+/com/demo/Main.java:5:39  return square.area() + circle.area();
