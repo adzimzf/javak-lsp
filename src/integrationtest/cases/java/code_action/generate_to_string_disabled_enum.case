@@ -7,3 +7,12 @@ public enum A {
 	private $0String name$1;
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'name'
+Change modifier for 'name'
+Generate Getter and Setter for 'name'
+Generate Getter for 'name'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'name'
+Generate Setters

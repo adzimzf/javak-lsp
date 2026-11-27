@@ -12,3 +12,4 @@ public class Test1 {
     }
 }
 //= expected
+Generate toString()

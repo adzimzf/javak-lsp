@@ -7,3 +7,14 @@ public class E {
     }
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'test'
+Change modifiers to final where possible
+Extract to constant
+Extract to field
+Extract to local variable
+Extract to local variable (replace all occurrences)
+Extract to method
+Generate toString()
+Introduce Parameter...
+Surround with try/catch

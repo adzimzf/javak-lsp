@@ -29,3 +29,47 @@ public class Types {
 
 }
 //= expected
+1:9  foo  namespace
+3:1  public  modifier
+3:8  class  modifier
+3:14  Types  class [declaration, public]
+5:2  public  modifier
+5:9  String  class [readonly, public]
+6:3  s1  property [declaration, public]
+7:3  s2  property [declaration, public]
+7:7  s3  property [declaration, public]
+9:2  protected  modifier
+9:12  final  modifier
+9:18  Class  class [readonly, public, generic]
+9:27  clazz  property [readonly, declaration, protected]
+9:35  java  namespace
+9:40  lang  namespace
+9:45  String  class [readonly, public]
+9:52  class  keyword
+11:2  public  modifier
+11:9  SomeClass  class [public, generic]
+11:19  String  class [readonly, public, typeArgument]
+11:27  SomeClass  class [public, generic, typeArgument]
+11:37  String  class [readonly, public, typeArgument]
+11:45  Integer  class [readonly, public, typeArgument]
+11:55  someClass  property [declaration, public]
+16:3  SomeAnnotation  decorator [static]
+16:18  Types  class [public]
+16:24  class  keyword
+18:2  public  modifier
+18:9  class  modifier
+18:15  SomeClass  class [declaration, public, generic]
+18:25  T1  typeParameter [declaration]
+18:29  T2  typeParameter [declaration]
+19:3  T1  typeParameter
+19:6  t1  property [declaration]
+20:3  T2  typeParameter
+20:6  t2  property [declaration]
+22:2  interface  modifier
+22:12  SomeInterface  interface [static, declaration]
+23:7  SomeEnum  enum [static, readonly, declaration]
+24:13  SomeAnnotation  decorator [static, declaration]
+25:3  Class  class [readonly, public, generic]
+25:12  value  annotationMember [abstract, declaration, public]
+27:2  record  modifier
+27:9  SomeRecord  record [static, readonly, declaration]

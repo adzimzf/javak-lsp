@@ -8,3 +8,4 @@ public class E {
 	}
 }
 //= expected
+collect([Collector<? super String,A,R> arg0])

@@ -5,3 +5,5 @@ public interface A {
 	final $0String name$1 = "test";
 }
 //= expected
+Add Javadoc comment
+Change modifier for 'name'

@@ -6,3 +6,5 @@ $0public class Foo {
 	}
 }
 //= expected
+4:26  pattern:
+4:38  ...args:

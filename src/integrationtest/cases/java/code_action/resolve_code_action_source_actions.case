@@ -4,3 +4,8 @@ public class E {
     }
 }
 //= expected
+Add Javadoc comment
+Change signature for 'hello'
+Generate toString()
+Inline Method
+Make Static

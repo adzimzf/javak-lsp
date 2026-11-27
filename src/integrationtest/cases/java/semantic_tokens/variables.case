@@ -11,3 +11,21 @@ public class Variables {
 
 }
 //= expected
+1:9  foo  namespace
+3:1  public  modifier
+3:8  class  modifier
+3:14  Variables  class [declaration, public]
+5:2  public  modifier
+5:9  static  modifier
+5:21  foo  method [static, declaration, public]
+5:25  String  class [readonly, public]
+5:32  string  parameter [declaration]
+6:3  String  class [readonly, public]
+6:10  bar1  variable [declaration]
+6:17  string  parameter
+7:3  String  class [readonly, public]
+7:10  bar2  variable [declaration]
+7:17  bar1  variable
+8:3  final  modifier
+8:9  String  class [readonly, public]
+8:16  bar3  variable [readonly, declaration]

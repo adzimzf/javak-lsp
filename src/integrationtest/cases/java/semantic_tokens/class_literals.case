@@ -14,3 +14,21 @@ public class ClassLiterals {
 
 }
 //= expected
+1:9  foo  namespace
+3:1  public  modifier
+3:8  class  modifier
+3:14  ClassLiterals  class [declaration, public]
+5:2  Class  class [readonly, public, generic]
+5:11  c  property [declaration]
+5:15  String  class [readonly, public]
+5:22  class  keyword
+7:2  public  modifier
+7:9  static  modifier
+7:21  main  method [static, declaration, public]
+7:26  String  class [readonly, public]
+7:35  args  parameter [declaration]
+8:3  Class  class [readonly, public, generic]
+8:12  clazz  variable [declaration]
+8:20  ClassLiterals  class [public]
+8:34  class  keyword
+9:7  clazz  class

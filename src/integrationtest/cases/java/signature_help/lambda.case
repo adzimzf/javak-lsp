@@ -13,3 +13,4 @@ public class SignatureHelp
   }
 }
 //= expected
+test([Function<String,String> f])

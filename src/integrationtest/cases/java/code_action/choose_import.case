@@ -15,3 +15,6 @@ public class B {
 	C c;
 }
 //= expected
+Generate Getters
+Generate Getters and Setters
+Generate Setters

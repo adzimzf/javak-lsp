@@ -10,3 +10,7 @@ public class MyTest {
     }
 }
 //= expected
+Add Javadoc comment
+Change signature for 'test'
+Generate toString()
+Make Static

@@ -6,3 +6,4 @@ import java.inte$0rnal.InternalBar;
 public class Baz extends InternalBar {
 }
 //= expected
+(nothing)

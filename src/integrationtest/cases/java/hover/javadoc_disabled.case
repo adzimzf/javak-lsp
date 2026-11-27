@@ -17,3 +17,4 @@ public class Fo$0o {
 	public void foo(String input) {}
 }
 //= expected
+(nothing)

@@ -5,3 +5,12 @@ public class A {
 	public java$0.lang.$1String name = "name";
 }
 //= expected
+Add Javadoc comment
+Add import
+Change modifier for 'name'
+Generate Getter and Setter for 'name'
+Generate Getter for 'name'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'name'
+Generate Setters

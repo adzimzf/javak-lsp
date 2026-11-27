@@ -18,3 +18,4 @@ public class Varargs {
     }
 }
 //= expected
+run([Class<?> clazz], String... args)

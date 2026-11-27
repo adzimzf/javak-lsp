@@ -12,3 +12,8 @@ public class E {
 	}
 }
 //= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Convert to anonymous class creation
+Generate toString()
+Sort Members for 'E.java'

@@ -6,3 +6,13 @@ public class App {
     }
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 's3'
+Assign all parameters to new fields
+Assign parameter to field 's'
+Assign parameter to new field
+Change modifiers to final where possible
+Change signature for 'App'
+Generate Getters
+Generate Getters and Setters
+Generate Setters

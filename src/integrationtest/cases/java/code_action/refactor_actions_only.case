@@ -4,3 +4,11 @@ public class Foo {
 		String $0bar$1 = "astring";	}
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'bar'
+Change modifiers to final where possible
+Change type of 'bar' to 'var'
+Extract to field
+Generate toString()
+Split variable declaration
+Surround with try/catch

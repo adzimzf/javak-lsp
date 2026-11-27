@@ -5,3 +5,11 @@ public class Foo {
 	$0List$1 foo;
 }
 //= expected
+Add Access Modifier
+Add Javadoc comment
+Generate Getter and Setter for 'foo'
+Generate Getter for 'foo'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'foo'
+Generate Setters

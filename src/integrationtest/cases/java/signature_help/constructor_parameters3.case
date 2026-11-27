@@ -7,3 +7,4 @@ public class E {
    }
 }
 //= expected
+StringCharacterIterator(String text, int begin, [int end], int pos)

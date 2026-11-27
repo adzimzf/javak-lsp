@@ -3,3 +3,4 @@ package test1;
 import j$0avax.xml.bind.Binder;
 public class E {}
 //= expected
+javax

@@ -20,3 +20,4 @@ public class Test {
     }
 }
 //= expected
+int subtract(int a, int b)

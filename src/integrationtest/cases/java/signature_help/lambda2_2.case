@@ -7,3 +7,4 @@ public class E {
 	}
 }
 //= expected
+filter([Predicate<? super String> arg0])

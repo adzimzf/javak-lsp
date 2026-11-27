@@ -13,3 +13,33 @@ public class Packages {
 	public java.lang.String string = new java.lang.String();
 }
 //= expected
+1:9  foo  namespace
+3:15  java  namespace [importDeclaration]
+3:20  lang  namespace [importDeclaration]
+3:25  Math  class [readonly, public, importDeclaration]
+3:30  PI  property [static, readonly, public, importDeclaration]
+4:8  java  namespace [importDeclaration]
+4:13  util  namespace [importDeclaration]
+4:18  List  interface [public, generic, importDeclaration]
+5:8  java  namespace [importDeclaration]
+5:13  NonExistentClass  class [importDeclaration]
+6:8  java  namespace [importDeclaration]
+6:13  nio  namespace [importDeclaration]
+7:8  java  namespace [importDeclaration]
+8:8  java  namespace [importDeclaration]
+8:13  lang  namespace [importDeclaration]
+8:18  Math  class [readonly, public, importDeclaration]
+9:15  java  namespace [importDeclaration]
+9:20  lang  namespace [importDeclaration]
+9:25  Math  class [readonly, public, importDeclaration]
+11:1  public  modifier
+11:8  class  modifier
+11:14  Packages  class [declaration, public]
+12:2  public  modifier
+12:9  java  namespace
+12:14  lang  namespace
+12:19  String  class [readonly, public]
+12:26  string  property [declaration, public]
+12:39  java  namespace
+12:44  lang  namespace
+12:49  String  class [public, constructor]

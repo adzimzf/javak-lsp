@@ -5,3 +5,7 @@ public class A {
 	public final $0String name$1 = "test";
 }
 //= expected
+Add Javadoc comment
+Change modifier for 'name'
+Generate Getter for 'name'
+Generate Getters

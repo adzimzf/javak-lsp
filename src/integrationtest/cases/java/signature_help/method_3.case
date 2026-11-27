@@ -48,3 +48,4 @@ class Result {
     }
 }
 //= expected
+fail([String msg], Object data)

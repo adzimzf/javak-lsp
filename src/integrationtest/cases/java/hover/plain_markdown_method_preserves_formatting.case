@@ -10,3 +10,4 @@ public class Test {
     void c$0alculate() {}
 }
 //= expected
+void calculate()

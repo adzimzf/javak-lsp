@@ -10,3 +10,12 @@ public class $0A$1 {
 	}
 }
 //= expected
+Add Javadoc comment
+Change modifiers to final where possible
+Generate Getter and Setter for 'name'
+Generate Getter for 'name'
+Generate Getters
+Generate Getters and Setters
+Generate Setter for 'name'
+Generate Setters
+Sort Members for 'A.java'

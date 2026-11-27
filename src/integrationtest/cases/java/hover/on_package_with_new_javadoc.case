@@ -7,3 +7,4 @@ public class Bar extends Foo {
 
 }
 //= expected
+(nothing)

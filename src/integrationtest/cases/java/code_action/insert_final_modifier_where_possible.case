@@ -6,3 +6,5 @@ public class A {
   }
 }
 //= expected
+Change modifiers to final where possible
+Generate toString()

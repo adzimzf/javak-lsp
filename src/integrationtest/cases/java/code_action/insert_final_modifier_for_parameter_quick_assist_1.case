@@ -5,3 +5,11 @@ public class A {
 	public String getName(String a, String $0b$1) {}
 }
 //= expected
+Add Javadoc comment
+Add final modifier for 'b'
+Assign all parameters to new fields
+Assign parameter to new field
+Change modifiers to final where possible
+Change signature for 'getName'
+Generate toString()
+Make Static

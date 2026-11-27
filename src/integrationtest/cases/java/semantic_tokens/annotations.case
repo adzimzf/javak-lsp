@@ -14,3 +14,17 @@ public class Annotations {
 
 }
 //= expected
+1:9  foo  namespace
+3:1  public  modifier
+3:8  class  modifier
+3:14  Annotations  class [declaration, public]
+5:3  SomeAnnotation  class
+6:2  public  modifier
+6:14  foo  method [declaration, public]
+8:3  SuppressWarnings  decorator [public]
+9:2  public  modifier
+9:14  bar  method [declaration, public]
+11:3  SuppressWarnings  decorator [public]
+11:20  value  annotationMember [abstract, public]
+12:2  public  modifier
+12:14  baz  method [declaration, public]

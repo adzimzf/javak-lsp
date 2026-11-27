@@ -6,3 +6,4 @@ public class E {
    }
 }
 //= expected
+String([byte[] bytes], Charset charset)

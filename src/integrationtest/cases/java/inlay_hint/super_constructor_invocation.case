@@ -8,3 +8,5 @@ class Bar extends Foo {
 	}
 }
 //= expected
+6:9  a:
+6:12  b:
