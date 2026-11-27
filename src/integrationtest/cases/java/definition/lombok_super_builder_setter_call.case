@@ -1,0 +1,55 @@
+//- /src/main/java/com/demo/Person.java
+package com.demo;
+
+import lombok.experimental.SuperBuilder;
+
+@SuperBuilder(toBuilder = true)
+public class Person {
+    private String name;
+}
+//- /src/main/java/com/demo/Customer.java
+package com.demo;
+
+import java.util.List;
+import lombok.Builder;
+import lombok.Singular;
+import lombok.experimental.SuperBuilder;
+
+@SuperBuilder(toBuilder = true)
+public class Customer extends Person {
+    private int points;
+    @Builder.Default
+    private boolean active = true;
+    @Singular
+    private List<String> tags;
+}
+//- /src/main/java/com/demo/Shop.java
+package com.demo;
+
+class Shop {
+    Customer sign() {
+        Customer customer = Customer.builder().name("ada").$0points(2).active(true).tag("vip").build();
+        return customer.toBuilder().points(3).build();
+    }
+}
+//- /src/main/java/lombok/Builder.java (not open)
+package lombok;
+
+public @interface Builder {
+    public @interface Default {
+    }
+}
+//- /src/main/java/lombok/Singular.java (not open)
+package lombok;
+
+public @interface Singular {
+    String value() default "";
+}
+//- /src/main/java/lombok/experimental/SuperBuilder.java (not open)
+package lombok.experimental;
+
+public @interface SuperBuilder {
+    boolean toBuilder() default false;
+}
+//= expected
+/src/main/java/com/demo/Customer.java:8:1  @SuperBuilder(toBuilder = true)

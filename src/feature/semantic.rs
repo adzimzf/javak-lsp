@@ -1023,10 +1023,10 @@ impl Snapshot {
                     return Some(Type::named(&method.name.text));
                 }
                 let returned = self.type_of_declaration(&method)?;
-                Some(
-                    self.inferred_from_arguments(&method, &returned, expression, from)
-                        .unwrap_or(returned),
-                )
+                let returned = self
+                    .inferred_from_arguments(&method, &returned, expression, from)
+                    .unwrap_or(returned);
+                Some(self.unbound_variable_erased(&method, returned))
             }
             "object_creation_expression" => expression.child("type").map(type_of_node),
             "cast_expression" => expression.child("type").map(type_of_node),
@@ -1403,7 +1403,53 @@ impl Snapshot {
             None => self.type_named(&written.name, from)?,
         };
         declaration.bindings = bound(declaration.node, &written.arguments);
+        // A bare `?` stands for its parameter's bound, as javac captures
+        // it: `Builder<?, ?>` of `Builder<C extends X, B extends Builder<C, B>>`
+        // has an `X` and a `Builder`.
+        let captured: Vec<(String, Type)> = declaration
+            .bindings
+            .iter()
+            .filter(|(_, given)| given.name == "?" && given.wildcard.is_none() && given.arguments.is_empty())
+            .filter_map(|(name, _)| Some((name.clone(), erased_bound(declaration.node, name)?)))
+            .collect();
+        for (name, bound) in captured {
+            let bound = self.anchored(bound, declaration.file, &[]);
+            declaration.bindings.insert(name, bound);
+        }
         Some(declaration)
+    }
+
+    /// What a call returns where it is a type variable nothing binds: the
+    /// erasure of its bound, as javac reads the raw type's member. `B
+    /// name(String)` of a raw `Builder<C, B extends Builder<C, B>>` is a
+    /// `Builder`.
+    fn unbound_variable_erased(&self, method: &Found<'_>, returned: Type) -> Type {
+        if returned.qualifier.is_some() || !returned.arguments.is_empty() || method.bindings.contains_key(&returned.name) {
+            return returned;
+        }
+        let written = method.node.child("type").map(type_of_node);
+        if written.is_none_or(|written| written.name != returned.name || written.dimensions != returned.dimensions) {
+            return returned;
+        }
+        // A member Lombok generates sits at its annotation, outside the
+        // builder class declaring it: that class is found as the one whose
+        // body holds the member.
+        let generated = method.node.is_generated();
+        let holder = nested_types(&method.file.tree).into_iter().rev().filter(|_| generated).find(|declaration| {
+            declaration
+                .child("body")
+                .is_some_and(|body| body.children.iter().any(|member| std::ptr::eq(member, method.node)))
+        });
+        let declaring = std::iter::once(method.node)
+            .chain(holder)
+            .chain(path_to(&method.file.tree, method.node.start).into_iter().rev())
+            .find(|node| type_parameter_names(node).contains(&returned.name));
+        let Some(bound) = declaring.and_then(|node| erased_bound(node, &returned.name)) else {
+            return returned;
+        };
+        let mut erased = self.anchored(bound, method.file, &[]);
+        erased.dimensions = returned.dimensions;
+        erased
     }
 
     /// The type the cursor's own class is, as a declaration.
@@ -3604,6 +3650,21 @@ pub fn parameters(declaration: &Syn, bindings: &Bindings) -> Vec<Parameter> {
             }
         })
         .collect()
+}
+
+/// The erasure of the first bound of `declaration`'s type parameter
+/// `name`: `Builder` of `B extends Builder<C, B>`; `None` for one
+/// without a bound.
+fn erased_bound(declaration: &Syn, name: &str) -> Option<Type> {
+    let parameter = declaration
+        .child("type_parameters")?
+        .all("type_parameter")
+        .find(|parameter| parameter.first("type_identifier").is_some_and(|named| named.text == name))?;
+    let bound = parameter.first("type_bound")?;
+    let first = bound.children.iter().find(|child| child.kind != "extends" && child.kind != "&")?;
+    let mut erased = type_of_node(first);
+    erased.arguments.clear();
+    Some(erased)
 }
 
 /// The names of the type parameters a declaration introduces.
