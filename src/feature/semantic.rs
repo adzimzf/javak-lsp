@@ -957,6 +957,14 @@ impl Snapshot {
                 self.type_of_declaration(&declaration)
             }
             "this" => Some(Type::named(&enclosing_type(&from.tree, at)?.0)),
+            // `String.class` is a `Class<String>`.
+            "class_literal" => {
+                let named = expression.children.first().map(type_of_node)?;
+                Some(Type {
+                    arguments: vec![named],
+                    ..Type::named("Class")
+                })
+            }
             "field_access" => {
                 let object = expression.child("object")?;
                 let field = expression.child("field")?;
@@ -1069,21 +1077,88 @@ impl Snapshot {
             .filter(|child| !matches!(child.kind.as_str(), "(" | ")" | ","))
             .collect();
         let mut bindings = Bindings::new();
-        for (parameter, argument) in parameters_of(method.node).iter().zip(&passed) {
-            let Some(written) = parameter.child("type").map(type_of_node) else {
+        let parameters = parameters_of(method.node);
+        for (index, argument) in passed.iter().enumerate() {
+            // The arguments past the last parameter go to its varargs.
+            let Some(parameter) = parameters.get(index.min(parameters.len().saturating_sub(1))) else {
+                continue;
+            };
+            let spread = parameter.kind == "spread_parameter";
+            if index >= parameters.len() && !spread {
+                continue;
+            }
+            let written = if spread {
+                parameter
+                    .children
+                    .iter()
+                    .find(|child| child.field.as_deref() == Some("type") || child.kind.ends_with("_type") || child.kind == "type_identifier")
+                    .map(type_of_node)
+            } else {
+                parameter.child("type").map(type_of_node)
+            };
+            let Some(mut written) = written else {
                 continue;
             };
             if !mentions(&written, &introduced) {
                 continue;
             }
-            if let Some(given) = self.type_of_expression(argument, from) {
-                unify(&written, &given, &introduced, &mut bindings);
+            // A lambda gives the type its body returns to what its
+            // interface's method returns: `map(m -> m.toString())` binds
+            // the `R` of `Function<? super T, ? extends R>` to `String`.
+            if argument.kind == "lambda_expression" {
+                if let Some(returned) = self.lambda_returns(&written, argument, method.file, from) {
+                    let wanted = self.functional_return(&written, method.file);
+                    if let Some(wanted) = wanted {
+                        unify(&wanted, &returned, &introduced, &mut bindings);
+                    }
+                }
+                continue;
             }
+            let Some(given) = self.type_of_expression(argument, from) else {
+                continue;
+            };
+            // One varargs argument may be the array itself.
+            if spread && given.dimensions > written.dimensions {
+                written.dimensions += 1;
+            }
+            unify(&written, &given, &introduced, &mut bindings);
         }
         if bindings.is_empty() {
             return None;
         }
         Some(substituted(returned.clone(), &bindings))
+    }
+
+    /// What the single abstract method of the functional interface
+    /// `written` returns, in the type arguments `written` gives it, a
+    /// wildcard's bound for a wildcard.
+    fn functional_return(&self, written: &Type, from: &FileView) -> Option<Type> {
+        let interface = self.of_type(written, from)?;
+        let method = self.with_supertypes(&interface).into_iter().find_map(|owner| {
+            members_of(owner.node)
+                .into_iter()
+                .find(|(member, _)| {
+                    member.kind == "method_declaration"
+                        && member.child("body").is_none()
+                        && !member
+                            .first("modifiers")
+                            .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|word| matches!(word, "static" | "default")))
+                })
+                .map(|(member, _)| (member, owner.bindings.clone()))
+        })?;
+        let returned = method.0.child("type").map(type_of_node)?;
+        let returned = substituted(returned, &method.1);
+        Some(Type { wildcard: None, ..returned })
+    }
+
+    /// The type an expression lambda's body has, where its parameters can
+    /// be read without the call around it: `m -> m.toString()`.
+    fn lambda_returns(&self, _written: &Type, lambda: &Syn, _declared_in: &FileView, from: &FileView) -> Option<Type> {
+        let body = lambda.child("body")?;
+        if body.kind == "block" {
+            return None;
+        }
+        self.type_of_expression(body, from)
     }
 
     /// The type of what a declaration declares: a field's or a local's
@@ -1156,6 +1231,11 @@ impl Snapshot {
         if declaration.node.kind == "lambda_expression" {
             return self.lambda_parameter_type(declaration);
         }
+        // `for (var name : names)`: what `names` holds.
+        if declaration.node.kind == "enhanced_for_statement" {
+            let iterated = self.type_of_expression(declaration.node.child("value")?, declaration.file)?;
+            return self.element_type(&iterated, declaration.file);
+        }
         let declarator = declaration
             .node
             .all("variable_declarator")
@@ -1166,6 +1246,26 @@ impl Snapshot {
             })?;
         let value = declarator.child("value")?;
         self.type_of_expression(value, declaration.file)
+    }
+
+    /// What an enhanced `for` takes out of a value of type `iterated`: an
+    /// array's element, or the `T` of the `Iterable<T>` it is.
+    fn element_type(&self, iterated: &Type, from: &FileView) -> Option<Type> {
+        if iterated.dimensions > 0 {
+            return Some(Type {
+                dimensions: iterated.dimensions - 1,
+                ..iterated.clone()
+            });
+        }
+        let declaration = self.of_type(iterated, from)?;
+        let iterable = self
+            .with_supertypes(&declaration)
+            .into_iter()
+            .find(|found| found.name.text == "Iterable" && found.file.library)?;
+        let parameter = type_parameter_names(iterable.node).into_iter().next()?;
+        let element = iterable.bindings.get(&parameter)?.clone();
+        // `Iterable<? extends Shape>` gives a `Shape`.
+        Some(Type { wildcard: None, ..element }).filter(|element| element.name != "?")
     }
 
     /// The type the functional interface of a lambda gives the parameter
@@ -2062,6 +2162,21 @@ pub(crate) fn imports(file: &FileView) -> Vec<Import> {
         .collect()
 }
 
+/// Whether `member` carries the `@Generated("lombok")` a delomboked
+/// source writes on what Lombok made (`javax.annotation.Generated` or any
+/// other `Generated`, its value given alone or as `value = …`).
+pub fn is_lombok_generated(member: &Syn) -> bool {
+    member.first("modifiers").is_some_and(|modifiers| {
+        modifiers.children.iter().any(|annotation| {
+            annotation.kind == "annotation"
+                && annotation
+                    .child("name")
+                    .is_some_and(|name| name.text.rsplit('.').next() == Some("Generated"))
+                && annotation.walk().into_iter().any(|node| node.kind == "string_literal" && node.text == "\"lombok\"")
+        })
+    })
+}
+
 /// The members a type declaration holds, each with the identifier that
 /// names it: a field declaration is one member per declarator.
 pub fn members_of(declaration: &Syn) -> Vec<(&Syn, &Syn)> {
@@ -2707,6 +2822,17 @@ impl Snapshot {
     /// it there and its documentation.
     pub fn hover_at(&self, uri: &Url, at: Position) -> Option<HoverText<'_>> {
         let found = self.declaration_at(uri, at)?;
+        // A type of the workspace in a `java` package (one only the JDK may
+        // declare) is none JDT's search finds, and jdtls shows nothing.
+        if found.file.language == Language::Java
+            && !found.file.library
+            && is_type_declaration(found.node)
+            && self
+                .package(found.file)
+                .is_some_and(|package| package == "java" || package.starts_with("java."))
+        {
+            return None;
+        }
         let mut signature = self.signature_of(&found)?;
         // jdtls names a Java type with its package and the types it is in,
         // and where it is used, with the type arguments written there.
@@ -2733,6 +2859,33 @@ impl Snapshot {
             signature,
             documentation,
         })
+    }
+}
+
+impl Snapshot {
+    /// The package a segment of an import's name names, dotted up to that
+    /// segment, where the package is there: jdtls shows a package by its
+    /// name (`javax` in `import javax.xml.bind.Binder`), and nothing for
+    /// one the project does not have.
+    pub fn package_at(&self, uri: &Url, at: Position) -> Option<String> {
+        let file = self.file(uri)?;
+        let name = identifier_at(&file.tree, at)?;
+        let path = path_to(&file.tree, name.start);
+        let import = path.iter().position(|node| node.kind == "import_declaration")?;
+        let dotted = path[import..].iter().find(|node| node.kind == "scoped_identifier" || node.kind == "identifier")?;
+        let prefix = file.text_between(dotted.start, name.end);
+        let package: String = prefix.chars().filter(|character| !character.is_whitespace()).collect();
+        // The last segment of a single-type import is the type.
+        if name.end == dotted.end && path[import].first("asterisk").is_none() {
+            return None;
+        }
+        let in_workspace = self.files.iter().any(|candidate| {
+            package_of(self, candidate).is_some_and(|declared| {
+                declared == package || declared.starts_with(&format!("{package}."))
+            })
+        });
+        let in_libraries = self.libraries.as_ref().is_some_and(|libraries| libraries.has_package(&package));
+        (in_workspace || in_libraries).then_some(package)
     }
 }
 
@@ -3116,14 +3269,22 @@ impl Snapshot {
                 Language::Java => Some(collapse_whitespace(&node.text)),
                 _ => Some(found.name.text.clone()),
             },
-            "field_declaration" | "constant_declaration" => {
-                let written = self.type_of_declaration(found)?.written();
-                let value = assigned_value(node, &found.name.text);
-                let is_constant = is_compile_time_constant(node, &found.name.text, &written);
-                match value.filter(|_| is_constant) {
-                    Some(value) => Some(format!("{written} {} = {value}", found.name.text)),
-                    None => Some(format!("{written} {}", found.name.text)),
-                }
+            "field_declaration" | "constant_declaration" => self.field_signature(found, node),
+            // A field's own name: the declaration it is a declarator of.
+            "variable_declarator"
+                if let Some(field) = path_to(&found.file.tree, node.start)
+                    .into_iter()
+                    .rev()
+                    .find(|around| around.children.iter().any(|child| std::ptr::eq(child, node)))
+                    .filter(|around| matches!(around.kind.as_str(), "field_declaration" | "constant_declaration")) =>
+            {
+                let field = Found {
+                    file: found.file,
+                    node: field,
+                    name: found.name,
+                    bindings: found.bindings.clone(),
+                };
+                self.field_signature(&field, field.node)
             }
             // A local or a parameter is shown with the method it is in.
             _ => {
@@ -3131,6 +3292,18 @@ impl Snapshot {
                 let owner = self.owning_method(found)?;
                 Some(format!("{written} {} - {owner}", found.name.text))
             }
+        }
+    }
+
+    /// A field as jdtls shows it: its type and name, and the value of a
+    /// constant.
+    fn field_signature(&self, found: &Found<'_>, node: &Syn) -> Option<String> {
+        let written = self.type_of_declaration(found)?.written();
+        let value = assigned_value(node, &found.name.text);
+        let is_constant = is_compile_time_constant(node, &found.name.text, &written);
+        match value.filter(|_| is_constant) {
+            Some(value) => Some(format!("{written} {} = {value}", found.name.text)),
+            None => Some(format!("{written} {}", found.name.text)),
         }
     }
 
@@ -4055,14 +4228,7 @@ impl Snapshot {
         members_of(owner.node)
             .into_iter()
             .filter(|(member, named)| {
-                let generated = member.is_generated()
-                    || member.first("modifiers").is_some_and(|modifiers| {
-                        modifiers.children.iter().any(|annotation| {
-                            annotation.kind == "annotation"
-                                && annotation.child("name").is_some_and(|name| name.text.ends_with("Generated"))
-                                && annotation.text.contains("lombok")
-                        })
-                    });
+                let generated = member.is_generated() || is_lombok_generated(member);
                 generated
                     && member.kind == "method_declaration"
                     && match parameters_of(member).len() {

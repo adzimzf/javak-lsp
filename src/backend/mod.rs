@@ -120,7 +120,17 @@ impl Backend {
         let related = if up {
             hierarchy::supertypes(&snapshot, &asked)
         } else {
-            hierarchy::subtypes(&snapshot, &asked)
+            let mut below = hierarchy::subtypes(&snapshot, &asked);
+            // A file no build compiles is in jdtls's invisible project,
+            // whose one source folder is the one its package implies: a
+            // subtype in another such folder is in no project it sees.
+            if !indexer.on_source_root(&asked.of.file.uri) {
+                let root = package_root(&snapshot, asked.of.file);
+                below.retain(|related| {
+                    related.of.file.library || package_root(&snapshot, related.of.file) == root
+                });
+            }
+            below
         };
         Ok(Some(
             related
@@ -320,9 +330,27 @@ fn type_item(
 /// The names jdtls puts a code lens on: each type, nested ones too, and
 /// each method, constructor or annotation element a type declares — not
 /// what is declared inside a method.
+/// The folder a file's packages start at: its own folder less the
+/// folders its `package` names.
+fn package_root(snapshot: &crate::feature::semantic::Snapshot, file: &crate::feature::semantic::FileView) -> Option<std::path::PathBuf> {
+    let mut folder = file.uri.to_file_path().ok()?.parent()?.to_path_buf();
+    let package = crate::feature::semantic::package_of(snapshot, file).unwrap_or_default();
+    for segment in package.split('.').filter(|segment| !segment.is_empty()).rev() {
+        if !folder.ends_with(segment) {
+            return None;
+        }
+        folder.pop();
+    }
+    Some(folder)
+}
+
 fn lens_names<'a>(node: &'a crate::parser::Syn, names: &mut Vec<&'a crate::parser::Syn>) {
     // What Lombok generates has no lens, as in jdtls.
-    for child in node.children.iter().filter(|child| !child.is_generated()) {
+    for child in node
+        .children
+        .iter()
+        .filter(|child| !child.is_generated() && !crate::feature::semantic::is_lombok_generated(child))
+    {
         let is_type = crate::feature::semantic::is_type_declaration(child);
         let is_member = matches!(
             child.kind.as_str(),
@@ -906,7 +934,14 @@ impl LanguageServer for Backend {
         let at = params.text_document_position_params;
         let snapshot = self.indexer.snapshot();
         let Some(hover) = snapshot.hover_at(&at.text_document.uri, cursor(at.position)) else {
-            return Ok(None);
+            let package = snapshot.package_at(&at.text_document.uri, cursor(at.position));
+            return Ok(package.map(|package| Hover {
+                contents: HoverContents::Array(vec![MarkedString::LanguageString(LanguageString {
+                    language: "java".to_owned(),
+                    value: package,
+                })]),
+                range: None,
+            }));
         };
         let signature = MarkedString::LanguageString(LanguageString {
             language: protocol(hover.found.file.language).language_id().to_owned(),
