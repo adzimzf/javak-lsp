@@ -338,6 +338,7 @@ fn incomplete_manifest_is_retried_only_after_the_back_off() {
         incomplete_sources: true,
         saved_at: 1_000,
         modules: Vec::new(),
+        sources_retries: 0,
     };
     assert!(!manifest.is_due_for_retry(1_000 + 60));
     assert!(manifest.is_due_for_retry(1_000 + INCOMPLETE_RETRY_AFTER.as_secs()));
@@ -346,6 +347,27 @@ fn incomplete_manifest_is_retried_only_after_the_back_off() {
         ..manifest
     };
     assert!(!complete.is_due_for_retry(u64::MAX / 2));
+}
+
+#[test]
+fn every_retry_that_fails_again_doubles_the_back_off() {
+    let first = INCOMPLETE_RETRY_AFTER.as_secs();
+    let manifest = |sources_retries| DependencyManifest {
+        format: MANIFEST_FORMAT,
+        fingerprint: "f".to_owned(),
+        build_tool: "gradle".to_owned(),
+        dependencies: vec![],
+        incomplete_sources: true,
+        saved_at: 1_000,
+        modules: Vec::new(),
+        sources_retries,
+    };
+    assert!(manifest(0).is_due_for_retry(1_000 + first));
+    assert!(!manifest(1).is_due_for_retry(1_000 + first));
+    assert!(manifest(1).is_due_for_retry(1_000 + 2 * first));
+    assert!(!manifest(3).is_due_for_retry(1_000 + 7 * first));
+    // Never longer than a day, however many retries failed.
+    assert!(manifest(u32::MAX).is_due_for_retry(1_000 + MAX_INCOMPLETE_RETRY_AFTER.as_secs()));
 }
 
 #[test]
@@ -475,6 +497,7 @@ fn decompiled_sources_stand_in_for_missing_sources() {
         incomplete_sources: false,
         saved_at: 0,
         modules: Vec::new(),
+        sources_retries: 0,
     };
     assert_eq!(
         manifest.sources_jars_by_artifact(),
@@ -526,6 +549,7 @@ fn manifest_of(build_tool: &str, jar: Option<PathBuf>) -> DependencyManifest {
         incomplete_sources: false,
         saved_at: 0,
         modules: Vec::new(),
+        sources_retries: 0,
     }
 }
 

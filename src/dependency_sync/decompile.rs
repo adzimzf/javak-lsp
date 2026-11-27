@@ -145,6 +145,13 @@ pub(crate) fn to_decompile(dependency: &ResolvedDependency) -> Option<Missing> {
     is_decompilable(dependency.jar.as_deref()?, &missing).then_some(missing)
 }
 
+/// The sources an earlier sync decompiled of `dependency`, where they are
+/// still in the cache.
+pub(crate) fn already_decompiled(dependency: &ResolvedDependency) -> Option<PathBuf> {
+    let missing = missing_sources(dependency)?;
+    decompiled_jar_path(dependency.jar.as_deref()?, &missing).filter(|path| path.is_file())
+}
+
 /// What of `dependency` has no sources, where something has none.
 pub(crate) fn missing_sources(dependency: &ResolvedDependency) -> Option<Missing> {
     let jar = dependency.jar.as_deref()?;

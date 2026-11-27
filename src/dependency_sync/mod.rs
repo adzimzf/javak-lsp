@@ -40,8 +40,12 @@ pub(crate) const MANIFEST_FORMAT: u32 = 3;
 pub(super) const SYNC_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// How long a manifest with failed sources downloads is trusted before the
-/// sync runs again.
+/// sync runs again the first time. Each retry that fails again doubles it,
+/// up to [`MAX_INCOMPLETE_RETRY_AFTER`]: offline, or behind a repository
+/// that keeps refusing, the build tool (a JVM) is not started every ten
+/// minutes all day.
 const INCOMPLETE_RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
+const MAX_INCOMPLETE_RETRY_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Directory names never searched for build files: build output, VCS and
 /// tool caches.
@@ -436,6 +440,11 @@ pub(crate) struct DependencyManifest {
     /// The projects the build tool reported, with their source roots.
     #[serde(default)]
     pub(crate) modules: Vec<ReportedModule>,
+    /// How many syncs in a row of these build files left sources missing
+    /// for a transient reason, the one that wrote this manifest included
+    /// less one: what the wait before the next retry doubles with.
+    #[serde(default)]
+    pub(crate) sources_retries: u32,
 }
 
 // `covers_whole_classpath` serves a scan of the shared Gradle cache, which
@@ -721,9 +730,27 @@ pub(crate) fn sources_retry_due(root: &Path, fingerprint: &str) -> bool {
 /// downloads, also applied when a retry itself fails.
 pub(crate) const RETRY_BACK_OFF: Duration = INCOMPLETE_RETRY_AFTER;
 
+/// How long until the saved manifest of these build files is due for a
+/// retry of its failed sources downloads; `None` where nothing failed.
+pub(crate) fn sources_retry_in(root: &Path, fingerprint: &str) -> Option<Duration> {
+    let manifest = load_manifest(root).filter(|manifest| manifest.fingerprint == fingerprint)?;
+    manifest.incomplete_sources.then(|| {
+        let due = manifest.saved_at + manifest.retry_after().as_secs();
+        Duration::from_secs(due.saturating_sub(unix_now()))
+    })
+}
+
 impl DependencyManifest {
     fn is_due_for_retry(&self, now: u64) -> bool {
-        self.incomplete_sources && now >= self.saved_at + INCOMPLETE_RETRY_AFTER.as_secs()
+        self.incomplete_sources && now >= self.saved_at + self.retry_after().as_secs()
+    }
+
+    /// The wait before the next retry: doubled for every retry in a row
+    /// that failed again.
+    fn retry_after(&self) -> Duration {
+        INCOMPLETE_RETRY_AFTER
+            .saturating_mul(1 << self.sources_retries.min(16))
+            .min(MAX_INCOMPLETE_RETRY_AFTER)
     }
 }
 
@@ -784,14 +811,30 @@ pub(crate) fn sync(root: &Path, force: bool, options: SyncOptions) -> SyncOutcom
             decompile::remember_decompiler(resolved_decompiler);
         }
     }
+    let previous = load_manifest(root).filter(|previous| previous.fingerprint == fingerprint);
+    let sources_retries = match previous {
+        Some(previous) if resolved.incomplete_sources && previous.incomplete_sources => {
+            previous.sources_retries.saturating_add(1)
+        }
+        _ => 0,
+    };
+    let mut dependencies = resolved.dependencies;
+    if options.decompile {
+        // What an earlier sync already decompiled is used right away: a
+        // changed build file then re-indexes the libraries once, not twice.
+        for dependency in &mut dependencies {
+            dependency.decompiled = decompile::already_decompiled(dependency);
+        }
+    }
     let manifest = DependencyManifest {
         format: MANIFEST_FORMAT,
         fingerprint,
         build_tool: tool.name().to_owned(),
-        dependencies: resolved.dependencies,
+        dependencies,
         incomplete_sources: resolved.incomplete_sources,
         saved_at: unix_now(),
         modules: resolved.modules,
+        sources_retries,
     };
     if let Err(error) = save_manifest(root, &manifest) {
         return SyncOutcome::Failed(format!("cannot save the dependency manifest: {error}"));
@@ -822,8 +865,9 @@ pub(crate) fn decompile_pending(root: &Path, options: SyncOptions) -> bool {
 /// Decompiles what [`decompile_pending`] finds and saves the manifest with
 /// it. A sync saves the manifest first, so the sources jars are read while
 /// this runs: decompiling a few libraries takes minutes the first time.
-/// Returns how many libraries have decompiled sources now.
-pub(crate) fn decompile_saved(root: &Path, options: SyncOptions) -> Option<usize> {
+/// Returns how many libraries have decompiled sources now, and how many of
+/// them were decompiled by this call.
+pub(crate) fn decompile_saved(root: &Path, options: SyncOptions) -> Option<(usize, usize)> {
     if !decompile_pending(root, options) {
         return None;
     }
@@ -833,15 +877,15 @@ pub(crate) fn decompile_saved(root: &Path, options: SyncOptions) -> Option<usize
         dependencies: std::mem::take(&mut manifest.dependencies),
         ..Resolved::default()
     };
+    let count = |dependencies: &[ResolvedDependency]| {
+        dependencies.iter().filter(|dependency| dependency.decompiled.is_some()).count()
+    };
+    let before = count(&resolved.dependencies);
     decompile_libraries_without_sources(root, &tool, &mut resolved);
     manifest.dependencies = resolved.dependencies;
-    let decompiled = manifest
-        .dependencies
-        .iter()
-        .filter(|dependency| dependency.decompiled.is_some())
-        .count();
+    let decompiled = count(&manifest.dependencies);
     save_manifest(root, &manifest).ok()?;
-    Some(decompiled)
+    Some((decompiled, decompiled.saturating_sub(before)))
 }
 
 /// Decompile the dependencies that have no sources jar (see [`decompile`]).
