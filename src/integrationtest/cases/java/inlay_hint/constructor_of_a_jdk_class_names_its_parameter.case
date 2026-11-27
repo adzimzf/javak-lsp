@@ -1,0 +1,14 @@
+//- /com/demo/Reader.java
+$0package com.demo;
+
+import java.io.IOException;
+
+class Reader {
+	void check(boolean interrupted) throws IOException {
+		if (interrupted) {
+			throw new IOException("Read timeout");
+		}
+	}
+}
+//= expected
+8:26  message:

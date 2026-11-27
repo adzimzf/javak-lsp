@@ -1,0 +1,26 @@
+//- /com/demo/Limited.java
+package com.demo;
+
+class Source {
+    int read() {
+        return 0;
+    }
+
+    int read(byte[] b) {
+        return 0;
+    }
+
+    int read(byte[] b, int off, int len) {
+        return 0;
+    }
+}
+
+class Limited extends Source {
+    @Override
+    int read(byte[] b, int off, int len) {
+        int read = super.read(b$0, off, len);
+        return read;
+    }
+}
+//= expected
+read([byte[] b], int off, int len)
