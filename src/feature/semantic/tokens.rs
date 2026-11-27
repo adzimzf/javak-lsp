@@ -75,6 +75,7 @@ const KEYWORD: u32 = 12;
 const DECORATOR: u32 = 13;
 const ANNOTATION_MEMBER: u32 = 14;
 const RECORD: u32 = 15;
+const RECORD_COMPONENT: u32 = 16;
 
 const ABSTRACT: u32 = 1 << 0;
 const STATIC: u32 = 1 << 1;
@@ -133,9 +134,9 @@ impl Snapshot {
                         }
                     }
                 }
-                "class_declaration" | "interface_declaration" => {
+                "class_declaration" | "interface_declaration" | "record_declaration" => {
                     for word in &node.children {
-                        if matches!(word.kind.as_str(), "class" | "interface") {
+                        if matches!(word.kind.as_str(), "class" | "interface" | "record") {
                             tokens.push(keyword(word, MODIFIER));
                         }
                     }
@@ -145,13 +146,13 @@ impl Snapshot {
                     let supertypes: Vec<&Syn> = node
                         .children
                         .iter()
-                        .filter(|child| matches!(child.kind.as_str(), "superclass" | "super_interfaces" | "extends_interfaces"))
+                        .filter(|child| matches!(child.kind.as_str(), "superclass" | "super_interfaces" | "extends_interfaces" | "permits"))
                         .collect();
                     if !supertypes.is_empty() {
                         let header: Vec<&Syn> = node
                             .children
                             .iter()
-                            .filter(|child| matches!(child.kind.as_str(), "type_parameters" | "superclass" | "super_interfaces" | "extends_interfaces"))
+                            .filter(|child| matches!(child.kind.as_str(), "type_parameters" | "superclass" | "super_interfaces" | "extends_interfaces" | "permits"))
                             .collect();
                         let first_extends = header
                             .iter()
@@ -233,7 +234,37 @@ impl Snapshot {
         if let Some(namespace) = self.package_part(file, &path, name, context) {
             return Some(namespace);
         }
-        let found = self.declaration_at(&file.uri, name.start)?;
+        let parent = path.iter().rev().nth(1).copied();
+        // `clazz.` with nothing after the dot: JDT's recovery reads the
+        // name as a type's.
+        let dangling_dot = parent.is_some_and(|parent| {
+            parent
+                .children
+                .iter()
+                .position(|child| child.start == name.start && child.kind == name.kind)
+                .and_then(|index| parent.children.get(index + 1))
+                .is_some_and(|next| next.kind == "ERROR" && next.text.trim() == ".")
+        });
+        if dangling_dot {
+            return Some(token(name, CLASS, 0));
+        }
+        // A type's name in a type's place that means a variable is a type
+        // nothing declares to JDT: `m` of `new int[m[]]`.
+        if name.kind == "type_identifier"
+            && path.iter().any(|node| node.kind == "ERROR")
+            && self.declaration_at(&file.uri, name.start).is_some_and(|found| !is_type_declaration(found.node) && found.node.kind != "type_parameter")
+        {
+            return Some(token(name, CLASS, 0));
+        }
+        let Some(found) = self.declaration_at(&file.uri, name.start) else {
+            // An annotation of a type nothing declares is still a type to
+            // JDT.
+            let names_annotation = parent.is_some_and(|parent| {
+                matches!(parent.kind.as_str(), "marker_annotation" | "annotation")
+                    && parent.child("name").is_some_and(|named| named.start == name.start)
+            });
+            return names_annotation.then(|| token(name, CLASS, 0));
+        };
         // A name standing for a package: `java.util.List` in code.
         if found.node.kind == "package_declaration" {
             return Some(token(name, NAMESPACE, context));
@@ -298,8 +329,22 @@ impl Snapshot {
             } else {
                 creation
                     .filter(|creation| creation.kind == "object_creation_expression")
-                    .and_then(|creation| self.created(creation, file))
-                    .filter(|created| created.node.kind == "constructor_declaration")
+                    .and_then(|creation| self.created(creation, file).map(|created| (creation, created)))
+                    .filter(|(_, created)| created.node.kind == "constructor_declaration")
+                    // A record's canonical constructor, which it does not
+                    // write, is not one of fewer parameters it does.
+                    .filter(|(creation, created)| {
+                        let given = creation.child("arguments").map_or(0, |arguments| {
+                            arguments.children.iter().filter(|child| !matches!(child.kind.as_str(), "(" | ")" | ",")).count()
+                        });
+                        let owner_is_record = path_to(&created.file.tree, created.node.start)
+                            .into_iter()
+                            .rev()
+                            .find(|node| is_type_declaration(node) && !std::ptr::eq(*node, created.node))
+                            .is_some_and(|owner| owner.kind == "record_declaration");
+                        !owner_is_record || super::parameters_of(created.node).len() == given
+                    })
+                    .map(|(_, created)| created)
             };
             let visibility = match &constructor {
                 Some(constructor) => kinds.of(self, constructor).1 & (PUBLIC | PRIVATE | PROTECTED | DEPRECATED),
@@ -319,11 +364,19 @@ impl Snapshot {
                 kinds.of(self, &found).0
             };
             let generic_type = is_type_declaration(found.node) && found.node.child("type_parameters").is_some() && with_type_arguments(&path, name);
-            let generic_constructor = found.node.kind == "constructor_declaration" && kinds.of(self, &found).1 & GENERIC != 0;
+            let generic_constructor = constructor
+                .as_ref()
+                .is_some_and(|constructor| constructor.node.child("type_parameters").is_some())
+                || found.node.kind == "constructor_declaration" && kinds.of(self, &found).1 & GENERIC != 0;
             let generic = if generic_type || generic_constructor { GENERIC } else { 0 };
             return Some(token(name, kind, CONSTRUCTOR | visibility | declaration | generic | (context & TYPE_ARGUMENT)));
         }
-        let (kind, mut modifiers) = kinds.of(self, &found);
+        let (mut kind, mut modifiers) = kinds.of(self, &found);
+        // A component read in its record's body is the field it makes.
+        if kind == RECORD_COMPONENT && !declares {
+            kind = PROPERTY;
+            modifiers = READONLY | PRIVATE;
+        }
         if is_type_declaration(found.node) && !declares && !with_type_arguments(&path, name) {
             modifiers &= !GENERIC;
         }
@@ -433,6 +486,12 @@ impl Snapshot {
                     let found = self.member(&owner_type, member, None)?;
                     let (kind, modifiers) = Kinds::default().of(self, &found);
                     return Some(token(name, kind, modifiers | context));
+                }
+                // The last name of a single-type import is a type, found
+                // or not.
+                let is_static = header.children.iter().any(|child| child.kind == "static");
+                if upto == written && !is_static {
+                    return Some(token(name, CLASS, context));
                 }
                 Some(token(name, NAMESPACE, context))
             }
@@ -824,7 +883,7 @@ fn kind_and_modifiers(found: &Found<'_>) -> (u32, u32) {
         "constructor_declaration" | "compact_constructor_declaration" => {
             // An enum's constructors are private.
             let implied = if owner.is_some_and(|owner| owner.kind == "enum_declaration") { PRIVATE } else { 0 };
-            let generic = if generic_owner { GENERIC } else { 0 };
+            let generic = if generic_owner || node.child("type_parameters").is_some() { GENERIC } else { 0 };
             (CLASS, visibility(node) | implied | deprecated(node) | generic)
         }
         "enum_constant" => (ENUM_MEMBER, PUBLIC | STATIC | READONLY | deprecated(node)),
@@ -860,6 +919,17 @@ fn kind_and_modifiers(found: &Found<'_>) -> (u32, u32) {
             let union = node.kind == "catch_formal_parameter"
                 && node.walk().into_iter().any(|child| child.kind == "|");
             (VARIABLE, if says(node, "final") || union { READONLY } else { 0 })
+        }
+        // A record's header declares its components.
+        "formal_parameter"
+            if path
+                .iter()
+                .rev()
+                .skip_while(|around| !std::ptr::eq(**around, node))
+                .nth(2)
+                .is_some_and(|record| record.kind == "record_declaration") =>
+        {
+            (RECORD_COMPONENT, 0)
         }
         "formal_parameter" | "spread_parameter" | "lambda_expression" | "inferred_parameters" => {
             (PARAMETER, if says(node, "final") { READONLY } else { 0 })

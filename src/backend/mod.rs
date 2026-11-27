@@ -1396,7 +1396,7 @@ impl LanguageServer for Backend {
         let Some(file) = snapshot.file(&uri) else {
             return Ok(None);
         };
-        let actions = crate::feature::code_action::actions(&snapshot, file, cursor(params.range.start));
+        let actions = crate::feature::code_action::actions(&snapshot, file, cursor(params.range.start), cursor(params.range.end));
         Ok(Some(
             actions
                 .into_iter()

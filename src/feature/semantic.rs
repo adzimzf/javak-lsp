@@ -2879,13 +2879,17 @@ impl Snapshot {
         if name.end == dotted.end && path[import].first("asterisk").is_none() {
             return None;
         }
+        self.package_exists(&package).then_some(package)
+    }
+
+    /// Whether a file of the workspace or of a library is in `package` or
+    /// below it.
+    pub fn package_exists(&self, package: &str) -> bool {
+        let below = format!("{package}.");
         let in_workspace = self.files.iter().any(|candidate| {
-            package_of(self, candidate).is_some_and(|declared| {
-                declared == package || declared.starts_with(&format!("{package}."))
-            })
+            package_of(self, candidate).is_some_and(|declared| declared == package || declared.starts_with(&below))
         });
-        let in_libraries = self.libraries.as_ref().is_some_and(|libraries| libraries.has_package(&package));
-        (in_workspace || in_libraries).then_some(package)
+        in_workspace || self.libraries.as_ref().is_some_and(|libraries| libraries.has_package(package))
     }
 }
 

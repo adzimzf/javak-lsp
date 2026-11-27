@@ -43,10 +43,10 @@ pub fn help_at(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<Hel
         let patch = if commas_after(&file.text, at).is_some() { "null" } else { ");" };
         if let Some(closed) = closed_at(file, at, patch) {
             let closed_path = path_to(&closed.tree, at);
-            if closed_path.iter().any(|node| node.kind == "argument_list" && node.start < at && at < node.end) {
-                if let Some(help) = help_in(snapshot, &closed, at, &closed_path) {
-                    return Some(help);
-                }
+            if closed_path.iter().any(|node| node.kind == "argument_list" && node.start < at && at < node.end)
+                && let Some(help) = help_in(snapshot, &closed, at, &closed_path)
+            {
+                return Some(help);
             }
         }
     }
@@ -602,9 +602,7 @@ fn fit_score(snapshot: &Snapshot, file: &FileView, candidate: &Found<'_>, call: 
     let mut score = 0;
     for (at, argument) in passed.iter().enumerate() {
         let spread = is_varargs(candidate.node) && at + 1 >= parameters.len();
-        let Some(parameter) = parameters.get(at.min(parameters.len().saturating_sub(1))) else {
-            return None;
-        };
+        let parameter = parameters.get(at.min(parameters.len().saturating_sub(1)))?;
         if at >= parameters.len() && !spread {
             return None;
         }
