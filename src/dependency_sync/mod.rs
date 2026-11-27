@@ -19,6 +19,7 @@
 //! watcher (`backend::dependency_watcher`) re-syncs when build files change.
 
 pub(crate) mod decompile;
+pub(crate) mod stubs;
 pub(crate) mod gradle;
 pub(crate) mod maven;
 pub(crate) mod platform;
