@@ -21,8 +21,9 @@
 //! process, and nothing is written to disk ([`server`]). Each case is the
 //! smallest program that shows one rule, so a new rule is a new case file
 //! and no Rust at all: `cases/<language>/<request>/<name>.case`, where
-//! `<language>` is `java` or `kotlin` and `<request>` is the request asked
-//! ([`cases`] lists them). One `#[test]` runs a whole directory.
+//! `<language>` is `java` or `kotlin`, or `interop` for a fixture that
+//! mixes the two, and `<request>` is the request asked ([`cases`] lists
+//! them). One `#[test]` runs a whole directory.
 //!
 //! A case starts a server of its own, so the suites are off unless asked
 //! for: without `INTEGRATION=1` each one prints why it did nothing and
