@@ -10,6 +10,9 @@
 //! - a getter's or setter's name is the field's name (definition, call
 //!   hierarchy), a constructor's or a logger field's the whole annotation
 //!   (`@RequiredArgsConstructor`, `@Slf4j`);
+//! - everything `@Builder` makes — `builder()`, `toBuilder()`, the builder
+//!   class and all of its members — sits at the annotation, from its `@`
+//!   to the end of its name;
 //! - the types a member mentions are the annotation's name (`Data`),
 //!   except `toString`'s `String`, the whole annotation (`@Data`), and a
 //!   setter's parameter, which is the field's own type where it is
@@ -61,7 +64,7 @@ pub fn folds(tree: &Syn) -> Vec<(u32, u32)> {
     let mut folds = Vec::new();
     for class in classes(tree) {
         for member in plan(tree, class).members {
-            if member.kind != MemberKind::Field {
+            if matches!(member.kind, MemberKind::Method | MemberKind::Constructor) {
                 folds.push((member.whole.0.line, member.whole.1.line));
             }
         }
@@ -89,6 +92,9 @@ const MODELLED: &[&str] = &[
     "NoArgsConstructor",
     "RequiredArgsConstructor",
     "AllArgsConstructor",
+    "Builder",
+    "Builder.Default",
+    "Singular",
     "extern.slf4j.Slf4j",
     "extern.slf4j.XSlf4j",
     "extern.log4j.Log4j2",
@@ -148,6 +154,8 @@ enum MemberKind {
     Method,
     Constructor,
     Field,
+    /// A nested class, every member of it generated as well.
+    Type,
 }
 
 /// One member Lombok generates: its source, and where jdtls puts it.
@@ -228,8 +236,12 @@ fn lombok_name(written: &str, imports: &[String]) -> Option<String> {
     if let Some(name) = written.strip_prefix("lombok.") {
         return Some(name.to_owned());
     }
-    if written.contains('.') {
-        return None;
+    // `@Builder.Default`: a member of an annotation of Lombok's.
+    if let Some((outer, inner)) = written.split_once('.') {
+        if !outer.starts_with(char::is_uppercase) {
+            return None;
+        }
+        return Some(format!("{}.{inner}", lombok_name(outer, imports)?));
     }
     imports.iter().find_map(|import| {
         let name = import.strip_prefix("lombok.")?;
@@ -392,6 +404,7 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
     let on_class = |name: &str| annotations.iter().find(|annotation| annotation.name == name);
     let data = on_class("Data");
     let value = on_class("Value");
+    let builder = on_class("Builder");
     let mut taken: Vec<String> = written_methods.iter().map(|name| (*name).to_owned()).collect();
 
     // Loggers first: they are fields, and the order of members is the
@@ -486,31 +499,35 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
         .collect();
     let explicit = ["NoArgsConstructor", "RequiredArgsConstructor", "AllArgsConstructor"];
     let any_explicit = explicit.iter().any(|name| on_class(name).is_some());
-    let mut constructors: Vec<(&Annotation, Vec<&Field>)> = Vec::new();
+    // `None` for the access level the annotation's arguments ask for.
+    let mut constructors: Vec<(&Annotation, Vec<&Field>, Option<&'static str>)> = Vec::new();
     if let Some(annotation) = on_class("NoArgsConstructor") {
-        constructors.push((annotation, Vec::new()));
+        constructors.push((annotation, Vec::new(), None));
     }
     if let Some(annotation) = on_class("RequiredArgsConstructor") {
-        constructors.push((annotation, required.clone()));
+        constructors.push((annotation, required.clone(), None));
     }
     if let Some(annotation) = on_class("AllArgsConstructor") {
-        constructors.push((annotation, all.clone()));
+        constructors.push((annotation, all.clone(), None));
     }
     if !has_constructor && !any_explicit {
         if let Some(annotation) = value {
-            constructors.push((annotation, all.clone()));
+            constructors.push((annotation, all.clone(), None));
+        } else if let Some(annotation) = builder {
+            // What `build()` calls: every field, package-private.
+            constructors.push((annotation, all.clone(), Some("")));
         } else if let Some(annotation) = data {
-            constructors.push((annotation, required.clone()));
+            constructors.push((annotation, required.clone(), None));
         }
     }
     let mut arities: Vec<usize> = Vec::new();
-    for (annotation, parameters) in constructors {
+    for (annotation, parameters, modifier) in constructors {
         // Two constructors with the same parameters would be one.
         if arities.contains(&parameters.len()) && parameters.is_empty() {
             continue;
         }
         arities.push(parameters.len());
-        let Some(modifier) = access(&annotation.arguments) else {
+        let Some(modifier) = modifier.or_else(|| access(&annotation.arguments)) else {
             continue;
         };
         let written: Vec<String> = parameters
@@ -542,6 +559,10 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
         }
     }
 
+    if let Some(annotation) = builder {
+        plan_builder(&mut plan, annotation, class, &class_name.text, &instance, &taken);
+    }
+
     let to_string = data.or(value).or_else(|| on_class("ToString"));
     if let Some(annotation) = to_string.filter(|_| !taken.iter().any(|name| name == "toString")) {
         plan.members.push(method(annotation, "public String toString() {}"));
@@ -565,6 +586,166 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
         }
     }
     plan
+}
+
+/// What `@Builder` on a class generates: `builder()`, `toBuilder()` where
+/// asked for, and the builder class, with a field and a setter named as
+/// each field is (a `@Singular` collection's adders and `clear…`, a
+/// `@Builder.Default` field's value and whether it was set), `build()` and
+/// `toString()`. jdtls puts all of them at the annotation, from its `@` to
+/// the end of its name.
+fn plan_builder(plan: &mut Plan, annotation: &Annotation, class: &Syn, class_name: &str, instance: &[&Field], taken: &[String]) {
+    let at = (annotation.whole.0, annotation.name_at.1);
+    let argument = |name: &str| builder_argument(&annotation.arguments, name);
+    let builder_class = argument("builderClassName").unwrap_or_else(|| format!("{class_name}Builder"));
+    let builder_method = argument("builderMethodName").unwrap_or_else(|| "builder".to_owned());
+    let build_method = argument("buildMethodName").unwrap_or_else(|| "build".to_owned());
+    let to_builder = argument("toBuilder").is_some_and(|value| value == "true");
+    let declared = class.child("type_parameters").map(|written| written.text.clone()).unwrap_or_default();
+    let arguments = type_parameter_names(&declared);
+    let builder_type = format!("{builder_class}{arguments}");
+    let generic = if declared.is_empty() { String::new() } else { format!("{declared} ") };
+    let member = |kind: MemberKind, source: String| Member {
+        kind,
+        source,
+        whole: at,
+        name_at: at,
+        types_at: at,
+        parameters_at: at,
+    };
+    if !builder_method.is_empty() && !taken.contains(&builder_method) {
+        plan.members.push(member(
+            MemberKind::Method,
+            format!("public static {generic}{builder_type} {builder_method}() {{}}"),
+        ));
+    }
+    if to_builder && !taken.iter().any(|name| name == "toBuilder") {
+        plan.members.push(member(MemberKind::Method, format!("public {builder_type} toBuilder() {{}}")));
+        for field in instance {
+            plan.uses.push(read(field, annotation.whole));
+        }
+    }
+    let mut fields = String::new();
+    let mut setters = String::new();
+    for field in instance.iter().filter(|field| !(field.is_final && field.initialized) || has(field, "Builder.Default")) {
+        let (name, written) = (&field.name, &field.written_type);
+        let singular = field.annotations.iter().find(|annotation| annotation.name == "Singular");
+        if let Some(singular) = singular {
+            let written_name = if singular.arguments.contains('=') {
+                builder_argument(&singular.arguments, "value")
+            } else {
+                Some(singular.arguments.trim_matches(|c: char| matches!(c, '(' | ')' | '"') || c.is_whitespace()).to_owned())
+            };
+            let one = written_name.filter(|one| !one.is_empty()).or_else(|| singular_of(name));
+            let Some(one) = one else {
+                continue;
+            };
+            let elements = type_arguments(written);
+            let clear = format!("clear{}", capitalized(name));
+            if written.split('<').next().is_some_and(|raw| raw.trim().ends_with("Map")) {
+                let key = elements.first().cloned().unwrap_or_else(|| "Object".to_owned());
+                let value = elements.get(1).cloned().unwrap_or_else(|| "Object".to_owned());
+                fields.push_str(&format!("private java.util.ArrayList<{key}> {name}$key;\nprivate java.util.ArrayList<{value}> {name}$value;\n"));
+                setters.push_str(&format!(
+                    "public {builder_type} {one}({key} {one}Key, {value} {one}Value) {{}}\n\
+                     public {builder_type} {name}(java.util.Map<? extends {key}, ? extends {value}> {name}) {{}}\n\
+                     public {builder_type} {clear}() {{}}\n"
+                ));
+            } else {
+                let element = elements.first().cloned().unwrap_or_else(|| "Object".to_owned());
+                fields.push_str(&format!("private java.util.ArrayList<{element}> {name};\n"));
+                setters.push_str(&format!(
+                    "public {builder_type} {one}({element} {one}) {{}}\n\
+                     public {builder_type} {name}(java.util.Collection<? extends {element}> {name}) {{}}\n\
+                     public {builder_type} {clear}() {{}}\n"
+                ));
+            }
+        } else {
+            if has(field, "Builder.Default") {
+                fields.push_str(&format!("private {written} {name}$value;\nprivate boolean {name}$set;\n"));
+            } else {
+                fields.push_str(&format!("private {written} {name};\n"));
+            }
+            setters.push_str(&format!("public {builder_type} {name}({written} {name}) {{}}\n"));
+        }
+    }
+    let source = format!(
+        "public static class {builder_class}{declared} {{\n{fields}{builder_class}() {{}}\n{setters}\
+         public {class_name}{arguments} {build_method}() {{}}\npublic String toString() {{}}\n}}"
+    );
+    plan.members.push(member(MemberKind::Type, source));
+}
+
+fn has(field: &Field, annotation: &str) -> bool {
+    field.annotations.iter().any(|written| written.name == annotation)
+}
+
+/// The value `name = …` is given in an annotation's arguments, quotes
+/// left out.
+fn builder_argument(arguments: &str, name: &str) -> Option<String> {
+    let inner = arguments.trim().strip_prefix('(')?.strip_suffix(')')?;
+    inner.split(',').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key.trim() == name).then(|| value.trim().trim_matches('"').to_owned())
+    })
+}
+
+/// `<K, V>` of a class's `<K extends Comparable<K>, V>`.
+fn type_parameter_names(declared: &str) -> String {
+    let inner = declared.trim().trim_start_matches('<').trim_end_matches('>');
+    if inner.trim().is_empty() {
+        return String::new();
+    }
+    let names: Vec<&str> = split_top_level(inner)
+        .into_iter()
+        .filter_map(|parameter| parameter.split_whitespace().next())
+        .collect();
+    format!("<{}>", names.join(", "))
+}
+
+/// The type arguments of `Map<String, List<Integer>>`, as written.
+fn type_arguments(written: &str) -> Vec<String> {
+    let Some((_, after)) = written.split_once('<') else {
+        return Vec::new();
+    };
+    let inner = after.trim_end().strip_suffix('>').unwrap_or(after);
+    split_top_level(inner).into_iter().map(|argument| argument.trim().to_owned()).collect()
+}
+
+/// `text` split at the commas no `<…>` holds.
+fn split_top_level(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let (mut depth, mut start) = (0usize, 0);
+    for (index, character) in text.char_indices() {
+        match character {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&text[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[start..]);
+    parts
+}
+
+/// The name of one element of a `@Singular` collection called `plural`,
+/// as Lombok makes it of an English plural; `None` where it cannot.
+fn singular_of(plural: &str) -> Option<String> {
+    if let Some(stem) = plural.strip_suffix("ies") {
+        return Some(format!("{stem}y"));
+    }
+    for ending in ["sses", "shes", "ches", "xes"] {
+        if plural.ends_with(ending) {
+            return Some(plural[..plural.len() - 2].to_owned());
+        }
+    }
+    plural
+        .strip_suffix('s')
+        .filter(|stem| !stem.is_empty() && !stem.ends_with('s'))
+        .map(str::to_owned)
 }
 
 fn method(annotation: &Annotation, source: &str) -> Member {
@@ -643,6 +824,14 @@ fn build(members: &[Member]) -> Vec<Syn> {
                     }
                 }
             }
+            if member.kind == MemberKind::Type {
+                // The builder's own members are generated too.
+                for body in node.children.iter_mut().filter(|child| child.kind == "class_body") {
+                    for inner in body.children.iter_mut().filter(|inner| !matches!(inner.kind.as_str(), "{" | "}")) {
+                        inner.field = Some(GENERATED.to_owned());
+                    }
+                }
+            }
             node.field = Some(GENERATED.to_owned());
             node
         })
@@ -714,6 +903,45 @@ mod tests {
     fn a_written_constructor_stops_the_one_data_would_add() {
         let members = generated("import lombok.*;\n@Data\nclass P {\n  private final Long id;\n  P() { id = 1L; }\n}\n");
         assert!(!members.iter().any(|member| member.starts_with("public P(")), "{members:?}");
+    }
+
+    #[test]
+    fn builder_generates_a_builder_class_with_a_setter_per_field() {
+        let members = generated(
+            "import java.util.List;\nimport lombok.Builder;\nimport lombok.Singular;\n@Builder(toBuilder = true)\nclass Order {\n  private String customer;\n  @Builder.Default\n  private boolean express = false;\n  @Singular\n  private List<String> items;\n}\n",
+        );
+        assert_eq!(members[0], "Order(String customer, boolean express, List<String> items) {}");
+        assert_eq!(members[1], "public static OrderBuilder builder() {}");
+        assert_eq!(members[2], "public OrderBuilder toBuilder() {}");
+        let builder = &members[3];
+        for expected in [
+            "public static class OrderBuilder {",
+            "private boolean express$value;",
+            "private boolean express$set;",
+            "private java.util.ArrayList<String> items;",
+            "public OrderBuilder customer(String customer) {}",
+            "public OrderBuilder item(String item) {}",
+            "public OrderBuilder items(java.util.Collection<? extends String> items) {}",
+            "public OrderBuilder clearItems() {}",
+            "public Order build() {}",
+        ] {
+            assert!(builder.contains(expected), "{expected} in {builder}");
+        }
+    }
+
+    #[test]
+    fn a_generic_class_has_a_generic_builder() {
+        let members = generated("import lombok.Builder;\n@Builder\nclass Pair<K extends Comparable<K>, V> {\n  private K key;\n  private V value;\n}\n");
+        assert!(members.contains(&"public static <K extends Comparable<K>, V> PairBuilder<K, V> builder() {}".to_owned()), "{members:?}");
+        assert!(members.iter().any(|member| member.contains("public Pair<K, V> build() {}")), "{members:?}");
+    }
+
+    #[test]
+    fn singular_names_one_element_of_a_plural() {
+        assert_eq!(singular_of("items").as_deref(), Some("item"));
+        assert_eq!(singular_of("entries").as_deref(), Some("entry"));
+        assert_eq!(singular_of("boxes").as_deref(), Some("box"));
+        assert_eq!(singular_of("data"), None);
     }
 
     #[test]

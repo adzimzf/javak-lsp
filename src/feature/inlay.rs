@@ -7,7 +7,11 @@
 //! argument that is a lambda or is named as its parameter is skipped; the
 //! varargs parameter reads `...name:`. A library method gets none: JDT reads
 //! its parameter names from the class file, which has only `arg0, arg1`,
-//! and jdtls hints no such name.
+//! and jdtls hints no such name. The JDK's are the exception: jdtls reads
+//! them from the JDK's `src.zip` (`new ArrayList<>(16)` shows
+//! `initialCapacity:`) — though not for a file of the unnamed package,
+//! which it opens outside any project of the workspace, in one whose JDK
+//! has no source attached (`String.format("%s", name)` shows nothing).
 
 use crate::feature::semantic::{parameters_of, FileView, Found, Snapshot};
 use crate::parser::{Position, Syn};
@@ -21,6 +25,7 @@ pub struct Hint {
 /// The hints of the calls in `file` between `from` and `to`.
 pub fn hints(snapshot: &Snapshot, file: &FileView, from: Position, to: Position) -> Vec<Hint> {
     let mut hints = Vec::new();
+    let in_a_package = file.tree.first("package_declaration").is_some();
     for node in file.tree.walk() {
         if node.end < from || node.start > to {
             continue;
@@ -42,6 +47,9 @@ pub fn hints(snapshot: &Snapshot, file: &FileView, from: Position, to: Position)
         let (Some(callee), Some(arguments)) = (callee, node.child("arguments")) else {
             continue;
         };
+        if callee.file.library && !(in_a_package && is_jdk_source(&callee.file.uri)) {
+            continue;
+        }
         hints.extend(of_call(&callee, arguments));
     }
     hints
@@ -55,9 +63,6 @@ fn constant_constructor<'a>(snapshot: &'a Snapshot, file: &'a FileView, constant
 }
 
 fn of_call(callee: &Found<'_>, arguments: &Syn) -> Vec<Hint> {
-    if callee.file.library {
-        return Vec::new();
-    }
     let parameters = parameters_of(callee.node);
     if parameters.is_empty() {
         return Vec::new();
@@ -100,6 +105,17 @@ fn of_call(callee: &Found<'_>, arguments: &Syn) -> Vec<Hint> {
             }
         })
         .collect()
+}
+
+/// Whether a library file is one of the JDK's `src.zip`: its entries sit
+/// below their module's directory (`java.base/java/util/List.java`).
+fn is_jdk_source(uri: &tower_lsp::lsp_types::Url) -> bool {
+    uri.path_segments().is_some_and(|mut segments| {
+        segments.any(|segment| {
+            let module = segment.strip_prefix("java.").or_else(|| segment.strip_prefix("jdk."));
+            module.is_some_and(|rest| !rest.is_empty() && rest.chars().all(|character| character.is_ascii_lowercase() || character == '.'))
+        })
+    })
 }
 
 /// A literal as JDT has them: a number, a string, a character, a boolean,

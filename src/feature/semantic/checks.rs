@@ -47,12 +47,33 @@ impl Snapshot {
         // A file calls hundreds of methods from a handful of classes: each
         // class's hierarchy is checked, and its methods listed, once.
         let mut callers: HashMap<usize, Option<Methods<'_>>> = HashMap::new();
+        // Calls on a value are checked only against Kotlin classes: no
+        // call is typed in a workspace without Kotlin sources.
+        let has_kotlin = self.every_file().any(|other| other.language == Language::Kotlin && !other.library);
         file.tree
             .walk()
             .into_iter()
             .filter(|node| node.kind == "method_invocation")
             .filter_map(|call| {
                 let name = call.child("name")?;
+                if let Some(object) = call.child("object").filter(|object| !matches!(object.kind.as_str(), "this" | "super")) {
+                    if !has_kotlin {
+                        return None;
+                    }
+                    // A call on a value of a Kotlin class: Java sees the
+                    // class's functions as methods, each with the one
+                    // signature it compiles to.
+                    let receiver = self.type_of_expression(object, file)?;
+                    let class = self.of_type(&receiver, file)?;
+                    if class.file.language != Language::Kotlin || class.file.library || class.node.kind != "class_declaration" {
+                        return None;
+                    }
+                    let methods = callers
+                        .entry(std::ptr::from_ref(class.node) as usize)
+                        .or_insert_with(|| self.methods_of_caller(class.node, class.file))
+                        .as_ref()?;
+                    return self.not_applicable(call, methods.get(&name.text)?, file);
+                }
                 let innermost = path_to(&file.tree, name.start)
                     .into_iter()
                     .rev()
@@ -83,9 +104,11 @@ impl Snapshot {
         let mut methods = Methods::new();
         for member in found {
             // A member list holds the methods of the classes nested in it
-            // too: those are not the caller's to call.
+            // too: those are not the caller's to call. What Lombok
+            // generates is always the type's own, and sits at its
+            // annotation, where a builder's members sit in the class.
             let declared_by = declaring_body(member.file, member.name);
-            if member.node.kind == "method_declaration" && hierarchy.contains(&declared_by) {
+            if member.node.kind == "method_declaration" && (member.node.is_generated() || hierarchy.contains(&declared_by)) {
                 methods
                     .entry(member.name.text.clone())
                     .or_default()
@@ -111,6 +134,17 @@ impl Snapshot {
         {
             return None;
         }
+        self.not_applicable(call, candidates, file)
+    }
+
+    /// A call of the one method of its name (`candidates`) with a number
+    /// of arguments it does not take.
+    fn not_applicable(
+        &self,
+        call: &Syn,
+        candidates: &[Found<'_>],
+        file: &FileView,
+    ) -> Option<Finding> {
         let name = call.child("name")?;
         if OBJECT_METHODS.contains(&name.text.as_str()) {
             return None;
@@ -131,14 +165,23 @@ impl Snapshot {
         if fits || method.node.child("type_parameters").is_some() {
             return None;
         }
+        let kotlin = method.file.language == Language::Kotlin;
+        // A Kotlin default value or `@JvmOverloads` gives Java more than one
+        // signature, a `vararg` or an extension another one.
+        if kotlin && (method.node.text.contains("@JvmOverloads") || method.node.child("receiver").is_some()
+            || declared.iter().any(|parameter| parameter.text.contains('=') || parameter.text.contains("vararg")))
+        {
+            return None;
+        }
         let owner = self.type_name_for_message(method)?;
         let wanted: Vec<String> = parameters(method.node, &Bindings::new())
             .into_iter()
             .map(|parameter| {
+                let written = if kotlin { java_type_of_kotlin(&parameter.written) } else { parameter.written };
                 if parameter.spread {
-                    format!("{}...", parameter.written)
+                    format!("{written}...")
                 } else {
-                    parameter.written
+                    written
                 }
             })
             .collect();
@@ -236,6 +279,38 @@ fn declaring_body(file: &FileView, name: &Syn) -> usize {
         .map_or(0, |node| std::ptr::from_ref(node) as usize)
 }
 
+/// A Kotlin type as Java sees it: `Int` is `int`, `Int?` `Integer`,
+/// `Any` `Object`; another type as written. A function type or one Java
+/// writes otherwise is `""`, which no message is made of.
+fn java_type_of_kotlin(written: &str) -> String {
+    let written = written.trim();
+    let (base, nullable) = match written.strip_suffix('?') {
+        Some(base) => (base.trim(), true),
+        None => (written, false),
+    };
+    let primitive = match base {
+        "Int" => Some(("int", "Integer")),
+        "Long" => Some(("long", "Long")),
+        "Short" => Some(("short", "Short")),
+        "Byte" => Some(("byte", "Byte")),
+        "Double" => Some(("double", "Double")),
+        "Float" => Some(("float", "Float")),
+        "Boolean" => Some(("boolean", "Boolean")),
+        "Char" => Some(("char", "Character")),
+        _ => None,
+    };
+    if let Some((plain, boxed)) = primitive {
+        return if nullable { boxed } else { plain }.to_owned();
+    }
+    match base {
+        "Any" => "Object".to_owned(),
+        "String" => "String".to_owned(),
+        _ if base.contains("->") || base.contains('(') => String::new(),
+        _ if base.starts_with(char::is_uppercase) && !base.contains('<') && !base.contains('.') && !base.starts_with("Array") => base.to_owned(),
+        _ => String::new(),
+    }
+}
+
 /// The expressions an argument list passes.
 fn arguments_of(arguments: &Syn) -> Vec<&Syn> {
     arguments
@@ -275,4 +350,19 @@ fn written_supertypes(declaration: &Syn) -> usize {
             )
         })
         .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::java_type_of_kotlin;
+
+    #[test]
+    fn a_kotlin_type_is_written_as_java_sees_it() {
+        assert_eq!(java_type_of_kotlin("Double"), "double");
+        assert_eq!(java_type_of_kotlin("Int?"), "Integer");
+        assert_eq!(java_type_of_kotlin("Any"), "Object");
+        assert_eq!(java_type_of_kotlin("Circle"), "Circle");
+        assert_eq!(java_type_of_kotlin("List<String>"), "");
+        assert_eq!(java_type_of_kotlin("(Int) -> Unit"), "");
+    }
 }

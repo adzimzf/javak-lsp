@@ -10,5 +10,5 @@ class Main {
         return circle.getRa$0dius();
     }
 }
-//= expected (pending)
+//= expected
 /com/demo/Circle.kt:3:18  class Circle(val radius: Double)
