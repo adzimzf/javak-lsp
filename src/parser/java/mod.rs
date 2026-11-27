@@ -3,6 +3,7 @@
 
 use tree_sitter::Node;
 
+mod recovery;
 mod errors;
 mod folds;
 pub mod lombok;
@@ -68,7 +69,7 @@ impl Syntax for Java {
     }
 
     fn tree(&self, text: &str) -> Syn {
-        let mut tree = GRAMMAR.snapshot(text).unwrap_or_else(empty_tree);
+        let mut tree = recovery::recovered(text, |text| GRAMMAR.snapshot(text)).unwrap_or_else(empty_tree);
         lombok::expand(&mut tree);
         tree
     }

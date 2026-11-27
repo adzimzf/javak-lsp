@@ -6,6 +6,7 @@ public final class Arrays {
     public static void sort(Object[] a) {}
     public static boolean equals(Object[] a, Object[] a2) { return false; }
     public static String toString(Object[] a) { return null; }
+    public static <T> java.util.stream.Stream<T> stream(T[] array) { return null; }
     @SafeVarargs
     public static <T> List<T> asList(T... a) { return null; }
 }

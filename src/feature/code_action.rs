@@ -20,6 +20,14 @@
 //!   type, `Inline Method` where JDT's inline refactoring succeeds,
 //!   `Invert conditions` on a boolean expression where a negation fits and
 //!   `Invert equals` on `a.equals(b)`.
+//! - What the selection covers ([`assists`]): the field assists, `final`
+//!   for several declarations; statements and expressions ([`refactor`]):
+//!   surround, split, extract; a method's header ([`methods`]): make
+//!   static, assign parameters, inline an unused method; anonymous classes,
+//!   lambdas and method references ([`functional`]); imports ([`imports`]).
+//!   An action that needs its user to answer something first (`Change
+//!   signature`, `Change modifier`, `Introduce Parameter...`) is offered
+//!   disabled, saying why.
 
 use tower_lsp::lsp_types::Url;
 
@@ -56,22 +64,54 @@ pub const QUICK_ASSIST: &str = "refactor";
 pub const INLINE: &str = "refactor.inline";
 pub const ASSIGN: &str = "refactor.assign";
 
-/// The actions at `at` in `file`.
-pub fn actions(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Action> {
+mod assists;
+mod functional;
+mod imports;
+mod methods;
+mod refactor;
+#[cfg(test)]
+mod tests;
+
+/// The actions for the selection from `at` to `end` in `file` (an empty
+/// one where they are the same).
+pub fn actions(snapshot: &Snapshot, file: &FileView, at: Position, end: Position) -> Vec<Action> {
     let mut actions = Vec::new();
+    // A file of a `java` package, which only the JDK may declare, is one
+    // JDT has no actions for.
+    let prohibited = !file.library && crate::feature::semantic::package_of(snapshot, file).is_some_and(|package| package == "java" || package.starts_with("java."));
+    if prohibited {
+        return actions;
+    }
+    let selection = assists::Selection { start: at, end: end.max(at) };
     let path = path_to(&file.tree, at);
     actions.extend(add_javadoc(file, &path));
-    actions.extend(static_import(snapshot, file, &path));
-    actions.extend(inline_method(snapshot, file, &path));
-    actions.extend(invert_conditions(snapshot, file, &path));
-    actions.extend(invert_equals(snapshot, file, &path));
-    actions.extend(add_final_here(snapshot, file, &path));
-    actions.extend(assign_to_variable(snapshot, file, &path));
+    // A statement the parser had to repair (an unterminated string) is
+    // one JDT's recovery leaves without assists.
+    let repaired = path
+        .iter()
+        .rev()
+        .find(|node| is_statement_or_member(&node.kind) && !node.kind.ends_with("_declaration"))
+        .or_else(|| path.iter().rev().find(|node| node.kind == "local_variable_declaration"))
+        .is_some_and(|node| node.text != file.text_between(node.start, node.end));
+    if !repaired {
+        actions.extend(static_import(snapshot, file, &path));
+        actions.extend(inline_method(snapshot, file, &path));
+        actions.extend(invert_conditions(snapshot, file, &path));
+        actions.extend(invert_equals(snapshot, file, &path));
+        actions.extend(assists::final_in_selection(snapshot, file, &selection).or_else(|| add_final_here(snapshot, file, &path)));
+        actions.extend(assists::field_assists(snapshot, file, &selection));
+        actions.extend(refactor::actions(snapshot, file, &selection));
+        actions.extend(methods::actions(snapshot, file, &selection));
+        actions.extend(functional::actions(snapshot, file, &selection));
+        actions.extend(imports::add_import(file, &selection));
+        actions.extend(assign_to_variable(snapshot, file, &path));
+    }
     actions.extend(change_to_final(snapshot, file));
     actions.extend(generate_accessors(snapshot, file, at));
     actions.extend(generate_to_string(snapshot, file, at));
-    actions.extend(organize_imports(file));
+    actions.extend(organize_imports(snapshot, file));
     actions.extend(sort_members(file));
+    actions.extend(sort_selected_members(file, at, end.max(at)));
     actions
 }
 
@@ -943,17 +983,34 @@ fn apply(text: &str, origin: Position, mut pieces: Vec<(Position, Position, Stri
 /// `Assign statement to new local variable` and `… new field` in an
 /// expression statement whose value is not void and not an assignment.
 fn assign_to_variable(snapshot: &Snapshot, file: &FileView, path: &[&Syn]) -> Vec<Action> {
-    let Some(statement) = path.iter().rev().find(|node| is_statement_or_member(&node.kind)) else {
+    // `new a.B` without its parentheses, which JDT reads as a creation.
+    let unfinished = path.iter().rev().find(|node| {
+        node.kind == "ERROR"
+            && node.children.first().is_some_and(|first| first.kind == "new")
+            && node.children.get(1).is_some_and(|created| created.kind.ends_with("type_identifier"))
+            && node.children.len() == 2
+    });
+    let Some(statement) = unfinished.or_else(|| path.iter().rev().find(|node| is_statement_or_member(&node.kind))) else {
         return Vec::new();
     };
-    if statement.kind != "expression_statement" {
+    if statement.kind != "expression_statement" && unfinished.is_none() {
         return Vec::new();
     }
-    let Some(expression) = statement.children.iter().find(|child| !matches!(child.kind.as_str(), ";") && !child.kind.ends_with("comment")) else {
+    let expression = if unfinished.is_some() {
+        Some(*statement)
+    } else {
+        statement.children.iter().find(|child| !matches!(child.kind.as_str(), ";") && !child.kind.ends_with("comment"))
+    };
+    let Some(expression) = expression else {
         return Vec::new();
     };
     // The type of the value as written, and a name for it.
     let (written, suggested) = match expression.kind.as_str() {
+        "ERROR" => {
+            let created = &expression.children[1];
+            let simple = created.text.rsplit('.').next().unwrap_or_default().to_owned();
+            (created.text.clone(), decapitalized(&simple))
+        }
         "object_creation_expression" => {
             let Some(created) = expression.child("type") else {
                 return Vec::new();
@@ -1236,7 +1293,9 @@ fn unparenthesized(expression: &Syn) -> &str {
 /// them; none where there is nothing to change.
 fn change_to_final(snapshot: &Snapshot, file: &FileView) -> Option<Action> {
     let edits = one_per_declaration(final_candidates(snapshot, file, None));
-    (!edits.is_empty()).then(|| single(file, "Change modifiers to final where possible", FINAL_MODIFIERS, edits))
+    // JDT's clean-up leaves a file with errors alone.
+    (!edits.is_empty() && !imports::has_errors(snapshot, file))
+        .then(|| single(file, "Change modifiers to final where possible", FINAL_MODIFIERS, edits))
 }
 
 /// `Add final modifier for 'x'` in the declaration of a variable that can
@@ -1273,6 +1332,16 @@ fn add_final_here(snapshot: &Snapshot, file: &FileView, path: &[&Syn]) -> Option
         }
     }
     let (declaration, names) = declaration?;
+    // A declaration of a type nothing declares is one JDT cannot read.
+    let written = declaration.child("type").or_else(|| {
+        path.iter()
+            .rev()
+            .find(|node| matches!(node.kind.as_str(), "local_variable_declaration" | "field_declaration"))
+            .and_then(|around| around.child("type"))
+    });
+    if written.is_some_and(|written| written.kind == "type_identifier" && snapshot.declaration_at(&file.uri, written.start).is_none()) {
+        return None;
+    }
     let edits = one_per_declaration(
         final_candidates(snapshot, file, Some(declaration))
             .into_iter()
@@ -1323,7 +1392,12 @@ struct FinalCandidate {
 
 /// Every variable of `file` that can be final, or only those declared in
 /// `within`.
+///
+/// Asked of one declaration (`within`), a private field never written
+/// takes it as JDT's quick assist offers it, initialized or not, static or
+/// not; the clean-up of the whole file wants it initialized and not static.
 fn final_candidates(snapshot: &Snapshot, file: &FileView, within: Option<&Syn>) -> Vec<FinalCandidate> {
+    let lenient = within.is_some();
     let mut candidates = Vec::new();
     let says = |node: &Syn, word: &str| {
         node.first("modifiers")
@@ -1380,6 +1454,18 @@ fn final_candidates(snapshot: &Snapshot, file: &FileView, within: Option<&Syn>) 
         // same way; JDT still adds `final` before it.
         let parent = path_to(&file.tree, node.start).into_iter().rev().nth(1);
         let parent_kind = parent.map(|parent| parent.kind.as_str()).unwrap_or_default();
+        // A record's components are not variables of a body.
+        if node.kind == "formal_parameter" {
+            let around = path_to(&file.tree, node.start);
+            let record_component = around
+                .iter()
+                .position(|candidate| std::ptr::eq(*candidate, node))
+                .and_then(|index| index.checked_sub(2))
+                .is_some_and(|index| around[index].kind == "record_declaration");
+            if record_component {
+                continue;
+            }
+        }
         if node.kind == "formal_parameter" {
             // A method's parameter only where the method has a body.
             if parent_kind == "formal_parameters" {
@@ -1387,6 +1473,7 @@ fn final_candidates(snapshot: &Snapshot, file: &FileView, within: Option<&Syn>) 
                 let bodiless = callable.is_some_and(|callable| {
                     matches!(callable.kind.as_str(), "method_declaration" | "constructor_declaration")
                         && callable.child("body").is_none()
+                        || callable.kind == "record_declaration"
                 });
                 if bodiless {
                     continue;
@@ -1403,7 +1490,7 @@ fn final_candidates(snapshot: &Snapshot, file: &FileView, within: Option<&Syn>) 
             continue;
         }
         if node.kind == "field_declaration" {
-            if !says(node, "private") || says(node, "static") {
+            if !says(node, "private") || says(node, "static") && !lenient {
                 continue;
             }
             let in_record_or_interface = parent.is_some_and(|parent| parent.kind == "interface_body");
@@ -1418,7 +1505,7 @@ fn final_candidates(snapshot: &Snapshot, file: &FileView, within: Option<&Syn>) 
             let can = if node.kind == "field_declaration" {
                 let initialized = name_initializer(node, name).is_some();
                 if writes.is_empty() {
-                    initialized
+                    initialized || lenient
                 } else {
                     !initialized && field_written_once_per_constructor(file, node, name, &writes)
                 }
@@ -1548,13 +1635,69 @@ fn name_initializer<'a>(declaration: &'a Syn, name: &Syn) -> Option<&'a Syn> {
 /// Getters and setters for the fields of the cursor's class that have
 /// none, at the end of the class.
 fn generate_accessors(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Action> {
-    let Some(class) = selection_type(snapshot, file, at) else {
+    let Some((plan, insert)) = accessor_plan(snapshot, file, at) else {
         return Vec::new();
     };
-    if !matches!(class.node.kind.as_str(), "class_declaration" | "enum_declaration") {
-        return Vec::new();
+    let getters: Vec<String> = plan.iter().filter_map(|field| field.getter.clone()).collect();
+    let setters: Vec<String> = plan.iter().filter_map(|field| field.setter.clone()).collect();
+    let mut actions = Vec::new();
+    if !getters.is_empty() {
+        actions.push(single(file, "Generate Getters", GENERATE_ACCESSORS, insert.edits(&getters)));
+    }
+    if !setters.is_empty() {
+        actions.push(single(file, "Generate Setters", GENERATE_ACCESSORS, insert.edits(&setters)));
+    }
+    if !getters.is_empty() && !setters.is_empty() {
+        let both: Vec<String> = getters.iter().chain(&setters).cloned().collect();
+        actions.push(single(file, "Generate Getters and Setters", GENERATE_ACCESSORS, insert.edits(&both)));
+    }
+    actions
+}
+
+/// The accessors one field lacks.
+struct FieldAccessors {
+    /// Where the field's name is.
+    name_at: Position,
+    name: String,
+    getter: Option<String>,
+    setter: Option<String>,
+}
+
+/// Where generated methods go: before the close of the class body.
+struct Insertion {
+    close: Position,
+}
+
+impl Insertion {
+    fn edits(&self, methods: &[String]) -> Vec<Edit> {
+        let at = Position {
+            line: self.close.line,
+            column: self.close.column.saturating_sub(1),
+        };
+        vec![Edit {
+            start: at,
+            end: at,
+            text: format!("\n{}\n", methods.iter().map(|method| format!("\n{method}")).collect::<String>().trim_start_matches('\n')),
+        }]
+    }
+}
+
+/// The getters and setters the fields of the cursor's class lack.
+fn accessor_plan(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<(Vec<FieldAccessors>, Insertion)> {
+    let class = selection_type(snapshot, file, at)?;
+    if !matches!(class.node.kind.as_str(), "class_declaration" | "enum_declaration" | "record_declaration") {
+        return None;
     }
     let members = members_of(class.node);
+    // A record's components are its final fields.
+    let components: Vec<(&Syn, &Syn)> = if class.node.kind == "record_declaration" {
+        parameters_of(class.node)
+            .into_iter()
+            .filter_map(|component| Some((component, component.child("name")?)))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // Each method by name, with the types of its parameters as written.
     let methods: Vec<(&str, Vec<String>)> = members
         .iter()
@@ -1572,20 +1715,23 @@ fn generate_accessors(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec
             .iter()
             .any(|(named, written)| *named == name && written.iter().map(String::as_str).eq(parameters.iter().copied()))
     };
-    let Some(body) = class.node.children.iter().find(|child| matches!(child.kind.as_str(), "class_body" | "enum_body")) else {
-        return Vec::new();
-    };
+    let body = class
+        .node
+        .children
+        .iter()
+        .find(|child| matches!(child.kind.as_str(), "class_body" | "enum_body" | "record_declaration_body"))
+        .or_else(|| class.node.child("body"))?;
     let indent = deeper(&indentation(file, class.node.start.line));
     let inner = deeper(&indent);
-    let mut getters = Vec::new();
-    let mut setters = Vec::new();
-    for (member, named) in &members {
-        if member.kind != "field_declaration" {
+    let mut plan = Vec::new();
+    for (member, named) in members.iter().chain(&components) {
+        let component = member.kind == "formal_parameter";
+        if member.kind != "field_declaration" && !component {
             continue;
         }
         let modifiers = member.first("modifiers").map(|modifiers| modifiers.text.as_str()).unwrap_or_default();
         let is_static = modifiers.split_whitespace().any(|word| word == "static");
-        let is_final = modifiers.split_whitespace().any(|word| word == "final");
+        let is_final = component || modifiers.split_whitespace().any(|word| word == "final");
         let written = written_type(member.child("type"));
         if written.is_empty() {
             continue;
@@ -1597,44 +1743,25 @@ fn generate_accessors(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec
         let has_getter = has_method(&names.getter, &[]) || (written == "boolean" && has_method(&names.get, &[]));
         let generate_getter = !has_getter;
         let generate_setter = !is_final && !has_method(&names.setter, &[written.as_str()]);
-        if generate_getter {
-            getters.push(format!(
-                "{indent}public {statically}{written} {}() {{\n{inner}return {};\n{indent}}}",
-                names.getter, named.text
-            ));
-        }
-        if generate_setter {
-            setters.push(format!(
-                "{indent}public {statically}void {}({written} {name}) {{\n{inner}{holder}.{name} = {name};\n{indent}}}",
-                names.setter,
-                name = named.text
-            ));
-        }
+        plan.push(FieldAccessors {
+            name_at: named.start,
+            name: named.text.clone(),
+            getter: generate_getter.then(|| {
+                format!(
+                    "{indent}public {statically}{written} {}() {{\n{inner}return {};\n{indent}}}",
+                    names.getter, named.text
+                )
+            }),
+            setter: generate_setter.then(|| {
+                format!(
+                    "{indent}public {statically}void {}({written} {name}) {{\n{inner}{holder}.{name} = {name};\n{indent}}}",
+                    names.setter,
+                    name = named.text
+                )
+            }),
+        });
     }
-    let insert = |methods: &[String]| -> Vec<Edit> {
-        let close = body.end;
-        let at = Position {
-            line: close.line,
-            column: close.column.saturating_sub(1),
-        };
-        vec![Edit {
-            start: at,
-            end: at,
-            text: format!("\n{}\n", methods.iter().map(|method| format!("\n{method}")).collect::<String>().trim_start_matches('\n')),
-        }]
-    };
-    let mut actions = Vec::new();
-    if !getters.is_empty() {
-        actions.push(single(file, "Generate Getters", GENERATE_ACCESSORS, insert(&getters)));
-    }
-    if !setters.is_empty() {
-        actions.push(single(file, "Generate Setters", GENERATE_ACCESSORS, insert(&setters)));
-    }
-    if !getters.is_empty() && !setters.is_empty() {
-        let both: Vec<String> = getters.iter().chain(&setters).cloned().collect();
-        actions.push(single(file, "Generate Getters and Setters", GENERATE_ACCESSORS, insert(&both)));
-    }
-    actions
+    Some((plan, Insertion { close: body.end }))
 }
 
 /// A field's type as written, its spaces gone.
@@ -1680,6 +1807,9 @@ impl AccessorNames {
 /// it at once, where a class with fields needs a prompt this client lacks.
 fn generate_to_string(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<Action> {
     let class = selection_type(snapshot, file, at)?;
+    if class.node.kind == "record_declaration" {
+        return record_to_string(file, &class);
+    }
     if class.node.kind != "class_declaration" {
         return None;
     }
@@ -1711,6 +1841,39 @@ fn generate_to_string(snapshot: &Snapshot, file: &FileView, at: Position) -> Opt
     ))
 }
 
+/// A record's `toString()` with each component, as JDT writes one:
+/// `"A [name=" + name + ", age=" + age + "]"`.
+fn record_to_string(file: &FileView, record: &Found<'_>) -> Option<Action> {
+    let body = record.node.child("body")?;
+    let components: Vec<String> = parameters_of(record.node)
+        .into_iter()
+        .filter_map(|component| component.child("name").map(|name| name.text.clone()))
+        .collect();
+    let has_own = members_of(record.node)
+        .iter()
+        .any(|(member, named)| member.kind == "method_declaration" && named.text == "toString" && parameters_of(member).is_empty());
+    if has_own {
+        return None;
+    }
+    let indent = deeper(&indentation(file, record.node.start.line));
+    let inner = deeper(&indent);
+    let fields: Vec<String> = components
+        .iter()
+        .enumerate()
+        .map(|(index, name)| format!("{}{name}=\" + {name} + \"", if index == 0 { "" } else { ", " }))
+        .collect();
+    let at = Position {
+        line: body.end.line,
+        column: body.end.column.saturating_sub(1),
+    };
+    let text = format!(
+        "\n{indent}@Override\n{indent}public String toString() {{\n{inner}return \"{} [{}]\";\n{indent}}}\n",
+        record.name.text,
+        fields.join("")
+    );
+    Some(single(file, "Generate toString()", GENERATE_TO_STRING, vec![Edit { start: at, end: at, text }]))
+}
+
 /// The type jdtls generates code into: the innermost one around the
 /// cursor, else the file's first.
 fn selection_type<'a>(snapshot: &'a Snapshot, file: &'a FileView, at: Position) -> Option<Found<'a>> {
@@ -1738,13 +1901,23 @@ fn capitalized(name: &str) -> String {
 /// The imports the file needs, each once, unused ones gone, in jdtls's
 /// order: static imports, then `java`, `javax`, `org`, `com` and the rest,
 /// a blank line between groups.
-fn organize_imports(file: &FileView) -> Option<Action> {
+fn organize_imports(snapshot: &Snapshot, file: &FileView) -> Vec<Action> {
     let declarations: Vec<&Syn> = file.tree.all("import_declaration").collect();
-    let (Some(first), Some(last)) = (declarations.first(), declarations.last()) else {
-        return None;
+    let missing = imports::missing(snapshot, file);
+    let (first, last) = match (declarations.first(), declarations.last()) {
+        (Some(first), Some(last)) => (first.start, last.end),
+        _ if missing.is_empty() => return Vec::new(),
+        // No import yet: after the package declaration, or at the top.
+        _ => {
+            let at = file
+                .tree
+                .first("package_declaration")
+                .map_or(Position { line: 0, column: 0 }, |package| package.end);
+            (at, at)
+        }
     };
     let used = used_names(file);
-    let mut kept: Vec<String> = Vec::new();
+    let mut kept: Vec<String> = missing.iter().map(|name| format!("import {name};")).collect();
     for import in imports(file) {
         let line = if import.is_static {
             format!("import static {}{};", import.name, if import.wildcard { ".*" } else { "" })
@@ -1771,21 +1944,29 @@ fn organize_imports(file: &FileView) -> Option<Action> {
         group = Some(this_group);
     }
     // Offered only where it changes something, as jdtls offers it: a
-    // wildcard import is always spelled out into the names it brings.
-    let wildcard = imports(file).iter().any(|import| import.wildcard);
-    if !wildcard && text == file.text_between(first.start, last.end) {
-        return None;
+    // wildcard import is always spelled out into the names it brings,
+    // where it names something there is.
+    let wildcard = imports(file).iter().any(|import| import.wildcard && imports::resolves(snapshot, file, import));
+    if !wildcard && missing.is_empty() && text == file.text_between(first, last) {
+        return Vec::new();
     }
-    Some(single(
+    if declarations.is_empty() {
+        text = format!("\n\n{text}");
+    }
+    let mut actions = vec![single(
         file,
         "Organize imports",
         ORGANIZE_IMPORTS,
         vec![Edit {
-            start: first.start,
-            end: last.end,
-            text,
+            start: first,
+            end: last,
+            text: text.clone(),
         }],
-    ))
+    )];
+    if !missing.is_empty() {
+        actions.push(single(file, "Add all missing imports", ORGANIZE_IMPORTS, vec![Edit { start: first, end: last, text }]));
+    }
+    actions
 }
 
 /// Where an import line sorts: its group (static, `java`, `javax`, `org`,
@@ -1851,15 +2032,42 @@ fn sort_members(file: &FileView) -> Option<Action> {
         file.uri.path().rsplit('/').next().unwrap_or_default()
     );
     let mut edits = Vec::new();
+    // The file's own types are sorted too.
     for body in file.tree.walk().into_iter().filter(|node| {
-        matches!(node.kind.as_str(), "class_body" | "interface_body" | "enum_body_declarations" | "annotation_type_body")
+        matches!(node.kind.as_str(), "program" | "class_body" | "interface_body" | "enum_body_declarations" | "annotation_type_body")
     }) {
-        edits.extend(sorted_body(file, body));
+        edits.extend(sorted_body(file, body, None));
     }
     (!edits.is_empty()).then(|| single(file, title, SORT_MEMBERS, edits))
 }
 
-fn sorted_body(file: &FileView, body: &Syn) -> Option<Edit> {
+/// `Sort Selected Members`: the members a selection spans, sorted among
+/// themselves, where there are two or more and their order changes.
+fn sort_selected_members(file: &FileView, start: Position, end: Position) -> Option<Action> {
+    if start >= end {
+        return None;
+    }
+    let path = path_to(&file.tree, start);
+    let body = path.iter().rev().find(|node| {
+        matches!(node.kind.as_str(), "class_body" | "interface_body" | "enum_body_declarations" | "annotation_type_body")
+            && node.start < start
+            && end < node.end
+    })?;
+    let touched = body
+        .children
+        .iter()
+        .filter(|child| !matches!(child.kind.as_str(), "{" | "}" | ";" | ",") && !child.kind.ends_with("comment"))
+        .filter(|child| child.start < end && start < child.end)
+        .count();
+    if touched < 2 {
+        return None;
+    }
+    let edit = sorted_body(file, body, Some((start, end)))?;
+    Some(single(file, "Sort Selected Members", SORT_MEMBERS, vec![edit]))
+}
+
+/// The members of `body` sorted, or only those `only` overlaps.
+fn sorted_body(file: &FileView, body: &Syn, only: Option<(Position, Position)>) -> Option<Edit> {
     // An interface's fields are static without saying so.
     let in_interface = matches!(body.kind.as_str(), "interface_body" | "annotation_type_body");
     // Each member with the comments that lead it, as one chunk.
@@ -1867,7 +2075,12 @@ fn sorted_body(file: &FileView, body: &Syn) -> Option<Edit> {
     let mut pending_start: Option<Position> = None;
     let mut index = 0;
     for child in &body.children {
-        if matches!(child.kind.as_str(), "{" | "}" | ";" | ",") {
+        if matches!(child.kind.as_str(), "{" | "}" | ";" | "," | "package_declaration" | "import_declaration" | "module_declaration") {
+            pending_start = None;
+            continue;
+        }
+        if only.is_some_and(|(start, end)| !(child.start < end && start < child.end)) {
+            pending_start = None;
             continue;
         }
         if matches!(child.kind.as_str(), "line_comment" | "block_comment") {

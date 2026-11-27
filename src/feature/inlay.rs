@@ -3,10 +3,11 @@
 //! of the parameter before each literal argument of a call.
 //!
 //! As jdtls's `InlayHintVisitor` does, a call whose arguments do not match
-//! its parameters in number (and that is not varargs) gets none, nor does
-//! one whose parameters are numbered (`s1, s2`); an argument that is a
-//! lambda or is named as its parameter is skipped; the varargs parameter
-//! reads `...name:`.
+//! its parameters in number (and that is not varargs) gets none; an
+//! argument that is a lambda or is named as its parameter is skipped; the
+//! varargs parameter reads `...name:`. A library method gets none: JDT reads
+//! its parameter names from the class file, which has only `arg0, arg1`,
+//! and jdtls hints no such name.
 
 use crate::feature::semantic::{parameters_of, FileView, Found, Snapshot};
 use crate::parser::{Position, Syn};
@@ -54,6 +55,9 @@ fn constant_constructor<'a>(snapshot: &'a Snapshot, file: &'a FileView, constant
 }
 
 fn of_call(callee: &Found<'_>, arguments: &Syn) -> Vec<Hint> {
+    if callee.file.library {
+        return Vec::new();
+    }
     let parameters = parameters_of(callee.node);
     if parameters.is_empty() {
         return Vec::new();
@@ -80,7 +84,7 @@ fn of_call(callee: &Found<'_>, arguments: &Syn) -> Vec<Hint> {
                 .unwrap_or_default()
         })
         .collect();
-    if names.iter().any(String::is_empty) || is_numbered(&names) {
+    if names.iter().any(String::is_empty) {
         return Vec::new();
     }
     passed
@@ -103,21 +107,4 @@ fn of_call(callee: &Found<'_>, arguments: &Syn) -> Vec<Hint> {
 fn is_literal(argument: &Syn) -> bool {
     argument.kind.ends_with("_literal") && argument.kind != "array_literal"
         || matches!(argument.kind.as_str(), "true" | "false" | "text_block")
-}
-
-/// `s1, s2, s3`: a prefix numbered from 1, which jdtls does not hint.
-fn is_numbered(names: &[String]) -> bool {
-    if names.len() < 2 {
-        return false;
-    }
-    let Some(prefix) = names[0].strip_suffix('1') else {
-        return false;
-    };
-    if prefix.is_empty() || prefix.chars().any(|character| character.is_ascii_digit()) {
-        return false;
-    }
-    names
-        .iter()
-        .enumerate()
-        .all(|(index, name)| *name == format!("{prefix}{}", index + 1))
 }

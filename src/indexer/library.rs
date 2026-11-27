@@ -405,6 +405,19 @@ impl Libraries {
         found
     }
 
+    /// Whether some library file is in `package` or in a package below it.
+    pub fn has_package(&self, package: &str) -> bool {
+        let Ok(indexed) = self.by_name.read() else {
+            return false;
+        };
+        let below = format!("{package}.");
+        indexed
+            .types
+            .values()
+            .flatten()
+            .any(|file| file.package == package || file.package.starts_with(&below))
+    }
+
     /// The simple names of the types the files of `package` declare.
     pub fn types_in_package(&self, package: &str) -> Vec<String> {
         let Ok(indexed) = self.by_name.read() else {
