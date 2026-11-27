@@ -104,6 +104,13 @@ Notes on how an answer is written down:
   the annotation's line, the outline lists a generated field and no
   generated method. A field's references include the calls of its
   generated accessors, never of hand-written ones (`include_accessors`).
+  The `lombok_builder_*` and `lombok_to_builder_call` cases share one
+  `@Builder(toBuilder = true)` class with a `@Builder.Default` and a
+  `@Singular` field: `builder()`, `toBuilder()`, the `OrderBuilder` class,
+  its setters, `item`/`items`/`clearItems` and `build()` are all defined
+  at the annotation, a field's references include its builder setter's
+  calls, and the outline lists `OrderBuilder` with its fields
+  (`express$value` and `express$set` for the default).
 - A case marked `//= expected (pending)` writes down what jdtls answers
   where javak-lsp has no such check yet: it passes while the two differ and
   fails the day the server answers it, so the marker comes off then.

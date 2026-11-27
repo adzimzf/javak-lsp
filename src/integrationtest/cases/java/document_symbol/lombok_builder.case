@@ -1,0 +1,56 @@
+//- /com/demo/Order.java
+package com.demo;
+
+import java.util.List;
+import lombok.Builder;
+import lombok.Singular;
+
+@Builder(toBuilder = true)
+public class O$0rder {
+    private String customer;
+    private int quantity;
+    @Builder.Default
+    private boolean express = false;
+    @Singular
+    private List<String> items;
+}
+//- /com/demo/Shop.java
+package com.demo;
+
+class Shop {
+    Order place() {
+        Order.OrderBuilder builder = Order.builder();
+        Order order = builder.customer("ada").quantity(2).express(true).item("tea").build();
+        return order.toBuilder().quantity(3).build();
+    }
+}
+//- /lombok/Builder.java (not open)
+package lombok;
+
+public @interface Builder {
+    boolean toBuilder() default false;
+
+    String builderMethodName() default "builder";
+
+    public @interface Default {
+    }
+}
+//- /lombok/Singular.java (not open)
+package lombok;
+
+public @interface Singular {
+    String value() default "";
+}
+//= expected
+package com.demo  1:1-18 at 1:1-18
+class Order  7:1-15:2 at 8:14-19
+  class OrderBuilder  7:1-9 at 7:1-9
+    field customer  7:1-9 at 7:1-9
+    field quantity  7:1-9 at 7:1-9
+    field express$value  7:1-9 at 7:1-9
+    field express$set  7:1-9 at 7:1-9
+    field items  7:1-9 at 7:1-9
+  field customer  9:5-29 at 9:20-28
+  field quantity  10:5-26 at 10:17-25
+  field express  11:5-12:37 at 12:21-28
+  field items  13:5-14:32 at 14:26-31

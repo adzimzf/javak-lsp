@@ -1,0 +1,45 @@
+//- /src/main/java/com/demo/Order.java
+package com.demo;
+
+import java.util.List;
+import lombok.Builder;
+import lombok.Singular;
+
+@Builder(toBuilder = true)
+public class Order {
+    private String customer;
+    private int quantity;
+    @Builder.Default
+    private boolean express = false;
+    @Singular
+    private List<String> items;
+}
+//- /src/main/java/com/demo/Shop.java
+package com.demo;
+
+class $0Shop {
+    Order place() {
+        Order.OrderBuilder builder = Order.builder();
+        Order order = builder.customer("ada").quantity(2).express(true).item("tea").build();
+        return order.toBuilder().quantity(3).build();
+    }
+}
+//- /src/main/java/lombok/Builder.java (not open)
+package lombok;
+
+public @interface Builder {
+    boolean toBuilder() default false;
+
+    String builderMethodName() default "builder";
+
+    public @interface Default {
+    }
+}
+//- /src/main/java/lombok/Singular.java (not open)
+package lombok;
+
+public @interface Singular {
+    String value() default "";
+}
+//= expected
+(nothing)
