@@ -1,0 +1,16 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    val radius: Double = 1.0
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun size(circle: Circle): Double {
+        return circle.rad$0ius
+    }
+}
+//= expected (pending)
+val radius: Double

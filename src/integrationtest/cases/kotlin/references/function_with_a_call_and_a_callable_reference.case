@@ -1,0 +1,21 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    fun ar$0ea(): Double {
+        return 3.14
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun run(circle: Circle): Double {
+        val measure = circle::area
+        return measure() + circle.area()
+    }
+}
+//= expected
+/com/demo/Circle.kt:4:9  fun area(): Double {
+/com/demo/Main.kt:5:31  val measure = circle::area
+/com/demo/Main.kt:6:35  return measure() + circle.area()

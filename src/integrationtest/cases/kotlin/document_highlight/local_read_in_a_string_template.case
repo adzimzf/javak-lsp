@@ -1,0 +1,14 @@
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun greet(first: String): String {
+        val na$0me = first
+        val loud = "${name}!"
+        return "Hello $name" + loud
+    }
+}
+//= expected (pending)
+/com/demo/Main.kt:5:13  val name = first
+/com/demo/Main.kt:6:23  val loud = "${name}!"
+/com/demo/Main.kt:7:24  return "Hello $name" + loud

@@ -1,0 +1,17 @@
+//- /com/demo/Point.java
+package com.demo;
+
+public class Point {
+    public int x;
+    public int y;
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun sum(point: Point): Int {
+        return point.x + point.$0y
+    }
+}
+//= expected
+/com/demo/Point.java:5:16  public int y;

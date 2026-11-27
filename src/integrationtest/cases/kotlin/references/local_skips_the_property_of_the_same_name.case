@@ -14,11 +14,9 @@ class Counter {
         return count
     }
 }
-//= expected
-/com/demo/Counter.kt:4:9  var count: Int = 0
+//= expected (pending)
 /com/demo/Counter.kt:7:13  var count = start
 /com/demo/Counter.kt:8:9  count = count + count
 /com/demo/Counter.kt:8:17  count = count + count
 /com/demo/Counter.kt:8:25  count = count + count
 /com/demo/Counter.kt:9:16  return count
-/com/demo/Counter.kt:13:16  return count

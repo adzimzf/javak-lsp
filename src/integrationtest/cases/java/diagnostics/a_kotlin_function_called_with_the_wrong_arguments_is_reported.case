@@ -1,0 +1,18 @@
+//- /src/main/java/com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    fun scaled(factor: Double): Circle {
+        return this
+    }
+}
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+    Circle run(Circle circle) {
+        return circle.scaled();
+    }
+}
+//= expected
+/src/main/java/com/demo/Main.java:5:23  The method scaled(double) in the type Circle is not applicable for the arguments ()

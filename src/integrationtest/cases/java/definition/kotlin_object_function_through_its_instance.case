@@ -1,0 +1,17 @@
+//- /com/demo/Registry.kt
+package com.demo
+
+object Registry {
+    fun register(name: String) {
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run() {
+        Registry.INSTANCE.regis$0ter("main");
+    }
+}
+//= expected (pending)
+/com/demo/Registry.kt:4:9  fun register(name: String) {

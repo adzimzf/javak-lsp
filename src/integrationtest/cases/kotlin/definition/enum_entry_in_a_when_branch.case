@@ -1,0 +1,20 @@
+//- /com/demo/Unit.kt
+package com.demo
+
+enum class Unit {
+    METRE,
+    FOOT
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun factor(unit: Unit): Double {
+        return when (unit) {
+            Unit.METRE -> 1.0
+            Unit.FO$0OT -> 0.3
+        }
+    }
+}
+//= expected
+/com/demo/Unit.kt:5:5  FOOT

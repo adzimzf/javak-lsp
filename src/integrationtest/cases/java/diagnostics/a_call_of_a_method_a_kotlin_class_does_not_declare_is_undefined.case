@@ -1,0 +1,14 @@
+//- /src/main/java/com/demo/Circle.kt
+package com.demo
+
+class Circle(val radius: Double)
+//- /src/main/java/com/demo/Main.java
+package com.demo;
+
+class Ma$0in {
+    double run(Circle circle) {
+        return circle.getDiameter();
+    }
+}
+//= expected
+/src/main/java/com/demo/Main.java:5:23  The method getDiameter() is undefined for the type Circle

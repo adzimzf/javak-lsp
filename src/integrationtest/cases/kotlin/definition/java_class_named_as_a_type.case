@@ -1,0 +1,15 @@
+//- /com/demo/Circle.java
+package com.demo;
+
+public class Circle {
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun same(circle: Cir$0cle): Circle {
+        return circle
+    }
+}
+//= expected
+/com/demo/Circle.java:3:14  public class Circle {

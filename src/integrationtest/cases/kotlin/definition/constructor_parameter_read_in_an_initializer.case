@@ -1,0 +1,8 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle(radius: Double) {
+    val diameter: Double = rad$0ius * 2
+}
+//= expected
+/com/demo/Circle.kt:3:14  class Circle(radius: Double) {

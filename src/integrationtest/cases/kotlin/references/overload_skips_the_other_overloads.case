@@ -1,0 +1,22 @@
+//- /com/demo/Printer.kt
+package com.demo
+
+class Printer {
+    fun print(number: Int) {
+    }
+
+    fun pri$0nt(text: String) {
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun run(printer: Printer) {
+        printer.print(2)
+        printer.print("page")
+    }
+}
+//= expected
+/com/demo/Main.kt:6:17  printer.print("page")
+/com/demo/Printer.kt:7:9  fun print(text: String) {

@@ -1,0 +1,17 @@
+//- /com/demo/Printer.kt
+package com.demo
+
+class Printer {
+    fun print(text: String, copies: Int) {
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun run(printer: Printer) {
+        printer.print(text = "page", cop$0ies = 2)
+    }
+}
+//= expected (pending)
+/com/demo/Printer.kt:4:29  fun print(text: String, copies: Int) {

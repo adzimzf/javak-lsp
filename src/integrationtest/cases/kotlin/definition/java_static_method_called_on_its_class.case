@@ -1,0 +1,23 @@
+//- /com/demo/Circles.java
+package com.demo;
+
+public class Circles {
+    public static Circle unit() {
+        return new Circle();
+    }
+}
+//- /com/demo/Circle.java
+package com.demo;
+
+public class Circle {
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun make(): Circle {
+        return Circles.un$0it()
+    }
+}
+//= expected
+/com/demo/Circles.java:4:26  public static Circle unit() {

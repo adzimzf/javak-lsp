@@ -1,0 +1,15 @@
+//- /com/demo/Scale.kt
+package com.demo
+
+class Scale {
+    fun apply(factor: Double, value: Double): Double {
+        return value * fac$0tor
+    }
+
+    fun twice(factor: Double): Double {
+        return factor * 2
+    }
+}
+//= expected
+/com/demo/Scale.kt:4:15  fun apply(factor: Double, value: Double): Double {
+/com/demo/Scale.kt:5:24  return value * factor

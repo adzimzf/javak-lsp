@@ -1,0 +1,23 @@
+//- /com/demo/Shape.kt
+package com.demo
+
+open class Shape
+
+class Circle : Shape()
+//- /com/demo/Square.java
+package com.demo;
+
+class Square extends Shape {
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run() {
+        Sha$0pe shape = new Square();
+    }
+}
+//= expected
+/com/demo/Shape.kt:3:12  open class Shape
+/com/demo/Shape.kt:5:7  class Circle : Shape()
+/com/demo/Square.java:3:7  class Square extends Shape {

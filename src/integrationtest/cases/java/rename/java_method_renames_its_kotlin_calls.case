@@ -1,0 +1,27 @@
+//- /com/demo/Circle.java
+package com.demo;
+
+public class Circle {
+    public double ar$0ea() {
+        return 3.14;
+    }
+}
+//- /com/demo/Square.kt
+package com.demo
+
+class Square {
+    fun area(): Double {
+        return 4.0
+    }
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun total(square: Square, circle: Circle): Double {
+        return square.area() + circle.area()
+    }
+}
+//= expected
+/com/demo/Circle.java:4:19  public double area() {
+/com/demo/Main.kt:5:39  return square.area() + circle.area()

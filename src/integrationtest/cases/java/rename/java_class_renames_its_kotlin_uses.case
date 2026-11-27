@@ -1,0 +1,18 @@
+//- /com/demo/Circle.java
+package com.demo;
+
+public class Cir$0cle {
+}
+//- /com/demo/Main.kt
+package com.demo
+
+class Main {
+    fun copy(circle: Circle): Circle {
+        return Circle()
+    }
+}
+//= expected
+/com/demo/Circle.java:3:14  public class Circle {
+/com/demo/Main.kt:4:22  fun copy(circle: Circle): Circle {
+/com/demo/Main.kt:4:31  fun copy(circle: Circle): Circle {
+/com/demo/Main.kt:5:16  return Circle()

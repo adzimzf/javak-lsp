@@ -1,0 +1,31 @@
+//- /com/demo/Shape.kt
+package com.demo
+
+interface Shape {
+    fun area(): Double
+}
+
+class Circle : Shape {
+    override fun area(): Double {
+        return 3.14
+    }
+}
+//- /com/demo/Square.java
+package com.demo;
+
+class Square implements Shape {
+    public double area() {
+        return 4.0;
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    double run(Shape shape) {
+        return shape.ar$0ea();
+    }
+}
+//= expected
+/com/demo/Shape.kt:8:18  override fun area(): Double {
+/com/demo/Square.java:4:19  public double area() {

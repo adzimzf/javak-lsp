@@ -1,0 +1,16 @@
+//- /com/demo/Circle.kt
+package com.demo
+
+class Circle {
+    var radius: Double = 1.0
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void grow(Circle circle) {
+        circle.setRa$0dius(2.0);
+    }
+}
+//= expected (pending)
+/com/demo/Circle.kt:4:9  var radius: Double = 1.0
