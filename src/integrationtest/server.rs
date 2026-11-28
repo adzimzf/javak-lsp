@@ -363,6 +363,13 @@ impl Session {
         !self.capabilities["diagnosticProvider"].is_null()
     }
 
+    /// Whether the server fills in a completion item when it is chosen
+    /// (`completionItem/resolve`): its documentation, its detail and the
+    /// imports it adds.
+    pub(super) fn resolves_completion(&self) -> bool {
+        self.capabilities["completionProvider"]["resolveProvider"].as_bool() == Some(true)
+    }
+
     /// The token types and modifiers the server's semantic tokens index.
     pub(super) fn semantic_legend(&self) -> &Value {
         &self.capabilities["semanticTokensProvider"]["legend"]
@@ -623,9 +630,40 @@ impl Session {
             "capabilities": {
                 "textDocument": {
                     "hover": {"contentFormat": ["markdown", "plaintext"]},
+                    // What VS Code declares: an answer is checked the way an
+                    // editor would use it, snippets, label details and the
+                    // list's item defaults included.
+                    "completion": {
+                        "contextSupport": true,
+                        "completionItem": {
+                            "snippetSupport": true,
+                            "commitCharactersSupport": true,
+                            "documentationFormat": ["markdown", "plaintext"],
+                            "deprecatedSupport": true,
+                            "preselectSupport": true,
+                            "tagSupport": {"valueSet": [1]},
+                            "insertReplaceSupport": true,
+                            "resolveSupport": {"properties": [
+                                "documentation", "detail", "additionalTextEdits",
+                            ]},
+                            "insertTextModeSupport": {"valueSet": [1, 2]},
+                            "labelDetailsSupport": true,
+                        },
+                        "completionList": {"itemDefaults": [
+                            "commitCharacters", "editRange", "insertTextFormat",
+                            "insertTextMode", "data",
+                        ]},
+                    },
                     "documentSymbol": {"hierarchicalDocumentSymbolSupport": true},
                     "rename": {"prepareSupport": true},
-                    "signatureHelp": {},
+                    "signatureHelp": {
+                        "contextSupport": true,
+                        "signatureInformation": {
+                            "documentationFormat": ["markdown", "plaintext"],
+                            "parameterInformation": {"labelOffsetSupport": true},
+                            "activeParameterSupport": true,
+                        },
+                    },
                     "codeAction": {
                         "codeActionLiteralSupport": {"codeActionKind": {"valueSet": [
                             "", "quickfix", "refactor", "refactor.extract", "refactor.inline",

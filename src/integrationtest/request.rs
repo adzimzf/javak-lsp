@@ -165,16 +165,17 @@ impl Kind {
         }
     }
 
-    /// Asks the request at the fixture's cursor and renders the answer.
-    /// `expected` is the answer the case writes down: a name it lists is
-    /// one it asks about, whoever else spells it.
-    pub(super) async fn ask(
+    /// Asks the request at the fixture's cursor and renders the answer,
+    /// which it returns with the server's own answer. `expected` is the
+    /// answer the case writes down: a name it lists is one it asks about,
+    /// whoever else spells it.
+    pub(super) async fn ask_raw(
         self,
         session: &mut Session,
         fixture: &Fixture,
         expected: &str,
         settles: Settles,
-    ) -> String {
+    ) -> (String, Value) {
         let params = self.params(session, fixture);
         let settled = |answer: &Value| match settles {
             Settles::Immediately => true,
@@ -211,13 +212,10 @@ impl Kind {
                 )
                 .await
             }
+            Self::Completion => resolved_completion(session, fixture, expected, answer).await,
             _ => answer,
         };
-        let view = View {
-            session,
-            fixture,
-            expected,
-        };
+        let view = View { session, fixture };
         let mut lines = match self {
             Self::Definition | Self::TypeDefinition | Self::Implementation | Self::References => {
                 view.locations(&answer)
@@ -248,7 +246,7 @@ impl Kind {
         if lines.is_empty() {
             lines.push(NOTHING.to_owned());
         }
-        lines.join("\n") + "\n"
+        (lines.join("\n") + "\n", answer)
     }
 }
 
@@ -300,7 +298,6 @@ fn as_list(answer: &Value) -> Vec<&Value> {
 struct View<'a> {
     session: &'a Session,
     fixture: &'a Fixture,
-    expected: &'a str,
 }
 
 impl View<'_> {
@@ -319,31 +316,46 @@ impl View<'_> {
         self.in_source_order(places.collect())
     }
 
-    /// `/path:line:column  message` of each diagnostic of the file at
-    /// `path`, in source order. The severity is left out: which check is a
-    /// warning and which a hint differs by server, what it reports where
-    /// does not.
+    /// `/path:line:column-end severity [code] message` of each diagnostic of
+    /// the file at `path`, in source order, then its tags. The code is what
+    /// a quick fix is chosen by, the range what an editor underlines and the
+    /// tags whether it is faded (`unnecessary`) or struck out
+    /// (`deprecated`): each is part of the answer, not its wording.
     fn reported(&self, path: &str, answer: &Value) -> Vec<String> {
         let items = answer.get("items").unwrap_or(answer);
         let mut reported: Vec<(Place, String)> = as_list(items)
             .into_iter()
             .filter_map(|diagnostic| {
                 let place = Place::new(format!("/{path}"), diagnostic.get("range")?);
-                Some((place, diagnostic["message"].as_str()?.to_owned()))
+                let severity = match diagnostic["severity"].as_u64() {
+                    Some(1) => "error",
+                    Some(2) => "warning",
+                    Some(3) => "info",
+                    Some(4) => "hint",
+                    _ => "(no severity)",
+                };
+                let code = match &diagnostic["code"] {
+                    Value::String(code) => format!(" [{code}]"),
+                    Value::Number(code) => format!(" [{code}]"),
+                    _ => String::new(),
+                };
+                let tags: String = as_list(&diagnostic["tags"])
+                    .into_iter()
+                    .filter_map(|tag| match tag.as_u64() {
+                        Some(1) => Some("  (unnecessary)"),
+                        Some(2) => Some("  (deprecated)"),
+                        _ => None,
+                    })
+                    .collect();
+                let message = diagnostic["message"].as_str()?;
+                Some((place, format!("{severity}{code} {message}{tags}")))
             })
             .collect();
         reported.sort();
         reported.dedup();
         reported
             .iter()
-            .map(|(place, message)| {
-                format!(
-                    "{}:{}:{}  {message}",
-                    place.path,
-                    place.line + 1,
-                    place.column + 1
-                )
-            })
+            .map(|(place, said)| format!("{}:{}  {said}", place.path, place.position()))
             .collect()
     }
 
@@ -413,41 +425,124 @@ impl View<'_> {
             .fixture
             .line(&place.path, place.line)
             .unwrap_or_default();
-        format!(
-            "{}:{}:{}  {}",
-            place.path,
-            place.line + 1,
-            place.column + 1,
-            source.trim()
-        )
+        format!("{}:{}  {}", place.path, place.position(), source.trim())
     }
 
-    /// The names offered, best first, as a client would sort them — only
-    /// those the fixture itself spells or the case asks for: what a JDK
-    /// adds (`hashCode`, `getClass`, …) depends on the JDK the server found,
-    /// while a keyword (`package`), what every array has (`length`) or a
-    /// package name (`com.demo`) is the answer a case can ask for without
-    /// writing it in its sources.
+    /// The items offered, best first, as a client would sort them — only
+    /// those named as the fixture spells a name or the case asks for: what
+    /// a JDK adds (`hashCode`, `getClass`, …) depends on the JDK the server
+    /// found, while a keyword (`package`), what every array has (`length`)
+    /// or a package name (`com.demo`) is an answer a case can ask for
+    /// without writing it in its sources ([`kept_by_name`]).
+    ///
+    /// An item is what an editor shows and does with it, not its name
+    /// alone:
+    ///
+    /// ```text
+    /// test(String x) · void  method  deprecated
+    ///   inserts test(${1:x}); over "tes"
+    ///   detail Test.test(String x) : void
+    ///   doc Tests a thing.
+    ///   adds import java.util.List;
+    /// ```
+    ///
+    /// The first line is the label as shown (the label and its
+    /// `labelDetails`, or a label that writes them itself — `test(String x)
+    /// : void`, `List - java.util`), the kind and the deprecated tag. Then
+    /// the text the item puts in the buffer and the source text it
+    /// replaces: the item's edit, the list's `editRange`, or, without
+    /// either, the word before the cursor as an editor would take it. Then
+    /// the detail, the first line of the documentation and the other edits
+    /// it makes (an import), as `completionItem/resolve` fills them in.
     fn completion_names(&self, answer: &Value) -> Vec<String> {
+        let defaults = &answer["itemDefaults"];
         let items = answer.get("items").unwrap_or(answer);
-        let mut offered: Vec<(String, String)> = as_list(items)
+        let mut offered: Vec<(String, String, String)> = as_list(items)
             .into_iter()
             .filter_map(|item| {
-                let name = qualified_name_prefix(item["label"].as_str()?);
-                let sort_key = item["sortText"].as_str().unwrap_or(name);
-                Some((sort_key.to_owned(), name.to_owned()))
+                let label = item["label"].as_str()?;
+                let sort_key = item["sortText"].as_str().unwrap_or(label);
+                let shown = self.completion_item(item, defaults);
+                Some((sort_key.to_owned(), label.to_owned(), shown))
             })
-            .filter(|(_, name)| self.fixture.spells(name) || self.asks_for(name))
             .collect();
         offered.sort();
-        let mut names: Vec<String> = offered.into_iter().map(|(_, name)| name).collect();
-        names.dedup();
-        names
+        let mut shown: Vec<String> = offered.into_iter().map(|(_, _, shown)| shown).collect();
+        shown.dedup();
+        shown
     }
 
-    /// Whether the case's expected answer lists `name` on a line of its own.
-    fn asks_for(&self, name: &str) -> bool {
-        self.expected.lines().any(|line| line.trim() == name)
+    fn completion_item(&self, item: &Value, defaults: &Value) -> String {
+        let (label, description) = presented_label(item);
+        let kind = completion_kind(item["kind"].as_u64());
+        let deprecated = item["deprecated"].as_bool() == Some(true)
+            || as_list(&item["tags"]).iter().any(|tag| tag.as_u64() == Some(1));
+        let mut lines = vec![format!(
+            "{label}{}  {kind}{}",
+            if description.is_empty() {
+                String::new()
+            } else {
+                format!(" · {description}")
+            },
+            if deprecated { "  deprecated" } else { "" }
+        )];
+        let (text, range) = inserted(item, defaults);
+        let replaced = range.map_or_else(
+            || self.word_before_cursor(),
+            |range| self.cursor_file_text(range),
+        );
+        lines.push(format!("  inserts {} over {replaced:?}", one_line(&text)));
+        if let Some(detail) = item["detail"].as_str().filter(|detail| !detail.trim().is_empty()) {
+            lines.push(format!("  detail {}", one_line(detail.trim())));
+        }
+        let documentation = match &item["documentation"] {
+            Value::String(text) => text.as_str(),
+            other => other["value"].as_str().unwrap_or_default(),
+        };
+        if let Some(first) = documentation
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty() && !line.starts_with("```"))
+        {
+            lines.push(format!("  doc {}", without_link_targets(first)));
+        }
+        let mut added: Vec<String> = as_list(&item["additionalTextEdits"])
+            .into_iter()
+            .filter_map(|edit| edit["newText"].as_str())
+            .map(|text| one_line(text.trim()))
+            .filter(|text| !text.is_empty())
+            .map(|text| format!("  adds {text}"))
+            .collect();
+        added.sort();
+        lines.extend(added);
+        lines.join("\n")
+    }
+
+    /// The identifier in front of the cursor: what an editor replaces with
+    /// an item that names no range of its own.
+    fn word_before_cursor(&self) -> String {
+        let cursor = &self.fixture.cursor;
+        let line = self
+            .fixture
+            .line(&format!("/{}", cursor.path), cursor.line as usize)
+            .unwrap_or_default();
+        let units: Vec<u16> = line.encode_utf16().collect();
+        let before =
+            String::from_utf16_lossy(&units[..(cursor.character as usize).min(units.len())]);
+        let word: String = before
+            .chars()
+            .rev()
+            .take_while(|character| character.is_alphanumeric() || matches!(character, '_' | '$'))
+            .collect();
+        word.chars().rev().collect()
+    }
+
+    /// The text of the cursor's file a range covers.
+    fn cursor_file_text(&self, range: &Value) -> String {
+        let text = self.fixture.text(&self.fixture.cursor.path).unwrap_or_default();
+        let offset = |position: &Value| byte_offset(text, position);
+        let (start, end) = (offset(&range["start"]), offset(&range["end"]));
+        text.get(start..end.max(start)).unwrap_or_default().to_owned()
     }
 
     /// Where the identifier a rename would change starts.
@@ -457,74 +552,84 @@ impl View<'_> {
             return Vec::new();
         }
         let place = Place::new(format!("/{}", self.fixture.cursor.path), range);
-        vec![self.show(&place)]
+        let mut shown = vec![self.show(&place)];
+        if let Some(placeholder) = answer["placeholder"].as_str() {
+            shown.push(format!("placeholder {placeholder}"));
+        }
+        shown
     }
 
-    /// Where each text edit of a rename starts, as [`Self::locations`] shows
-    /// a place: the line is the one before the rename. Files the rename
-    /// would move are not shown.
-    fn edited_places(&self, answer: &Value) -> Vec<String> {
-        let mut places = Vec::new();
+    /// What a rename leaves: each line it changes, as it reads afterwards,
+    /// `/path:line  text`, and each file it moves, `/old -> /new`. Where an
+    /// edit starts, how much it replaces and what it writes all show in the
+    /// lines it leaves, whether a server answers one edit per name or one
+    /// per file.
+    fn edited_places<'a>(&self, answer: &'a Value) -> Vec<String> {
+        let mut edits: Vec<(String, Vec<&'a Value>)> = Vec::new();
+        let mut add = |uri: &str, list: &'a Value| {
+            let path = self.session.display(uri);
+            match edits.iter_mut().find(|(known, _)| *known == path) {
+                Some((_, known)) => known.extend(as_list(list)),
+                None => edits.push((path, as_list(list))),
+            }
+        };
         if let Some(changes) = answer["changes"].as_object() {
-            for (uri, edits) in changes {
-                places.extend(self.edit_places(uri, edits));
+            for (uri, list) in changes {
+                add(uri, list);
             }
         }
+        let mut moves = Vec::new();
         for change in as_list(&answer["documentChanges"]) {
             if let Some(uri) = change["textDocument"]["uri"].as_str() {
-                places.extend(self.edit_places(uri, &change["edits"]));
+                add(uri, &change["edits"]);
+            } else if change["kind"].as_str() == Some("rename") {
+                let (Some(old), Some(new)) =
+                    (change["oldUri"].as_str(), change["newUri"].as_str())
+                else {
+                    continue;
+                };
+                moves.push(format!(
+                    "moves {} -> {}",
+                    self.session.display(old),
+                    self.session.display(new)
+                ));
+            } else if let Some(kind) = change["kind"].as_str() {
+                let uri = change["uri"].as_str().unwrap_or_default();
+                moves.push(format!("{kind}s {}", self.session.display(uri)));
             }
         }
-        self.in_source_order(places)
-    }
-
-    /// One place per identifier an edit renames. An edit may span several
-    /// names with the text between them kept (jdtls answers a Java rename
-    /// with one such edit per file), so the names it changes are found by
-    /// comparing the text it replaces with the text it writes.
-    fn edit_places(&self, uri: &str, edits: &Value) -> Vec<Place> {
-        let path = self.session.display(uri);
-        let mut places = Vec::new();
-        for edit in as_list(edits) {
-            let Some(range) = edit.get("range") else {
+        let mut lines: Vec<(String, usize, String)> = Vec::new();
+        for (path, list) in &edits {
+            let Some(text) = path.strip_prefix('/').and_then(|path| self.fixture.text(path)) else {
+                lines.push((path.clone(), 0, format!("{} edits outside the fixture", list.len())));
                 continue;
             };
-            let start = Place::new(path.clone(), range);
-            let end = Place::new(path.clone(), &json!({"start": range["end"]}));
-            let replaced = self.fixture_text(&path, &start, &end);
-            let written = edit["newText"].as_str().unwrap_or_default();
-            match replaced.and_then(|replaced| renamed_words(&start, &replaced, written)) {
-                Some(renamed) if !renamed.is_empty() => places.extend(renamed),
-                _ => places.push(start),
+            let after = apply_edits(text, list);
+            let before: Vec<&str> = text.lines().collect();
+            for (index, line) in after.lines().enumerate() {
+                if before.get(index) != Some(&line) {
+                    lines.push((path.clone(), index, line.trim().to_owned()));
+                }
+            }
+            if after.lines().count() < before.len() {
+                lines.push((path.clone(), before.len(), "(lines removed)".to_owned()));
             }
         }
-        places
+        lines.sort();
+        lines.dedup();
+        let mut shown: Vec<String> = lines
+            .into_iter()
+            .map(|(path, index, line)| format!("{path}:{}  {line}", index + 1))
+            .collect();
+        moves.sort();
+        shown.extend(moves);
+        shown
     }
 
-    /// The fixture's text of `path` from `start` to `end`, lines joined by `\n`.
-    fn fixture_text(&self, path: &str, start: &Place, end: &Place) -> Option<String> {
-        let mut text = String::new();
-        for line_index in start.line..=end.line {
-            let line: Vec<char> = self.fixture.line(path, line_index)?.chars().collect();
-            let from = if line_index == start.line {
-                start.column
-            } else {
-                0
-            };
-            let to = if line_index == end.line {
-                end.column
-            } else {
-                line.len()
-            };
-            if line_index != start.line {
-                text.push('\n');
-            }
-            text.extend(line.get(from..to)?);
-        }
-        Some(text)
-    }
-
-    /// `name  /path:line` of the types found in the fixture's files, sorted.
+    /// `name  kind in container  /path:line` of the types found in the
+    /// fixture's files, sorted: the container (the package, or the type a
+    /// nested one is in) is what tells two types of one name apart in a
+    /// picker.
     /// Whether fields and methods are searchable too differs by server.
     fn workspace_types(&self, answer: &Value) -> Vec<String> {
         let mut lines: Vec<String> = as_list(answer)
@@ -535,7 +640,14 @@ impl View<'_> {
                 let line = symbol["location"]["range"]["start"]["line"].as_u64()?;
                 self.fixture.line(&path, line as usize)?;
                 let name = identifier_prefix(symbol["name"].as_str()?);
-                Some(format!("{name}  {path}:{}", line + 1))
+                let kind = symbol_kind(symbol["kind"].as_u64());
+                let container = symbol["containerName"].as_str().unwrap_or_default();
+                let container = if container.is_empty() {
+                    String::new()
+                } else {
+                    format!(" in {container}")
+                };
+                Some(format!("{name}  {kind}{container}  {path}:{}", line + 1))
             })
             .collect();
         lines.sort();
@@ -544,82 +656,43 @@ impl View<'_> {
     }
 }
 
-/// A zero-based position in a file, ordered as the source reads.
+/// A zero-based position in a file, ordered as the source reads, and where
+/// the range it starts ends, when it is a range: a definition that points
+/// at the start of a name and one that covers it are different answers.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct Place {
     path: String,
     line: usize,
     column: usize,
+    end: Option<(usize, usize)>,
 }
 
 impl Place {
     fn new(path: String, range: &Value) -> Self {
         let start = &range["start"];
+        let end = &range["end"];
+        let end = match (end["line"].as_u64(), end["character"].as_u64()) {
+            (Some(line), Some(column)) => Some((line as usize, column as usize)),
+            _ => None,
+        };
         Self {
             path,
             line: start["line"].as_u64().unwrap_or(0) as usize,
             column: start["character"].as_u64().unwrap_or(0) as usize,
+            end,
         }
     }
-}
 
-/// Where the identifiers that differ between `replaced` (the text an edit
-/// starting at `start` replaces) and `written` start. `None` when the two
-/// are not the same text with some identifiers swapped.
-fn renamed_words(start: &Place, replaced: &str, written: &str) -> Option<Vec<Place>> {
-    let replaced = words(replaced);
-    let written = words(written);
-    if replaced.len() != written.len() {
-        return None;
-    }
-    let mut places = Vec::new();
-    for ((token, line, column), (new_token, _, _)) in replaced.iter().zip(&written) {
-        if token == new_token {
-            continue;
-        }
-        let is_identifier = token.chars().all(is_word_character);
-        if !is_identifier {
-            return None;
-        }
-        let column = if *line == 0 {
-            start.column + column
-        } else {
-            *column
-        };
-        places.push(Place {
-            path: start.path.clone(),
-            line: start.line + line,
-            column,
-        });
-    }
-    Some(places)
-}
-
-fn is_word_character(character: char) -> bool {
-    character.is_alphanumeric() || character == '_' || character == '$'
-}
-
-/// `text` cut into runs of word characters and single other characters,
-/// each with the line and column (in characters) it starts at.
-fn words(text: &str) -> Vec<(String, usize, usize)> {
-    let mut tokens: Vec<(String, usize, usize)> = Vec::new();
-    let (mut line, mut column) = (0, 0);
-    let mut in_word = false;
-    for character in text.chars() {
-        let is_word = is_word_character(character);
-        match tokens.last_mut() {
-            Some((token, _, _)) if is_word && in_word => token.push(character),
-            _ => tokens.push((character.to_string(), line, column)),
-        }
-        in_word = is_word;
-        if character == '\n' {
-            line += 1;
-            column = 0;
-        } else {
-            column += 1;
+    /// `line:column`, one-based, then `-column` or `-line:column` where it
+    /// ends.
+    fn position(&self) -> String {
+        let start = format!("{}:{}", self.line + 1, self.column + 1);
+        match self.end {
+            None => start,
+            Some((line, column)) if line == self.line => format!("{start}-{}", column + 1),
+            Some((line, column)) => format!("{start}-{}:{}", line + 1, column + 1),
         }
     }
-    tokens
 }
 
 /// `scaled` of `scaled(double, int) : Circle`.
@@ -642,6 +715,164 @@ fn qualified_name_prefix(label: &str) -> &str {
     name
 }
 
+/// The label an editor shows and the description beside it: the label
+/// and its `labelDetails`, or, for a server that writes them into the
+/// label itself, the label cut where they start — `test(String x) : void`
+/// (a member and its type) or `List - java.util` (a type and its package).
+fn presented_label(item: &Value) -> (String, String) {
+    let label = item["label"].as_str().unwrap_or_default();
+    let details = &item["labelDetails"];
+    if details.is_object() {
+        let detail = details["detail"].as_str().unwrap_or_default();
+        let description = details["description"].as_str().unwrap_or_default();
+        return (format!("{label}{detail}"), description.to_owned());
+    }
+    for separator in [" : ", " - "] {
+        if let Some((shown, description)) = label.rsplit_once(separator) {
+            return (shown.to_owned(), description.to_owned());
+        }
+    }
+    (label.to_owned(), String::new())
+}
+
+/// What choosing `item` writes, and the range it writes over when the
+/// answer names one: its own `textEdit`, or the list's `editRange` with the
+/// item's `textEditText` (or `insertText`, or label) as the text.
+fn inserted<'a>(item: &'a Value, defaults: &'a Value) -> (String, Option<&'a Value>) {
+    let label = item["label"].as_str().unwrap_or_default();
+    let edit = &item["textEdit"];
+    if let Some(text) = edit["newText"].as_str() {
+        let range = edit.get("range").or_else(|| edit.get("insert"));
+        return (text.to_owned(), range);
+    }
+    let default_range = &defaults["editRange"];
+    let default_range = if default_range.get("insert").is_some() {
+        Some(&default_range["insert"])
+    } else if default_range.get("start").is_some() {
+        Some(default_range)
+    } else {
+        None
+    };
+    let text = default_range
+        .and_then(|_| item["textEditText"].as_str())
+        .or_else(|| item["insertText"].as_str())
+        .unwrap_or(label);
+    (text.to_owned(), default_range)
+}
+
+/// `text` on one line: a snippet's newlines and tabs written `\n`, `\t`.
+fn one_line(text: &str) -> String {
+    text.replace('\n', "\\n").replace('\t', "\\t")
+}
+
+fn completion_kind(kind: Option<u64>) -> &'static str {
+    match kind {
+        Some(1) => "text",
+        Some(2) => "method",
+        Some(3) => "function",
+        Some(4) => "constructor",
+        Some(5) => "field",
+        Some(6) => "variable",
+        Some(7) => "class",
+        Some(8) => "interface",
+        Some(9) => "module",
+        Some(10) => "property",
+        Some(11) => "unit",
+        Some(12) => "value",
+        Some(13) => "enum",
+        Some(14) => "keyword",
+        Some(15) => "snippet",
+        Some(16) => "color",
+        Some(17) => "file",
+        Some(18) => "reference",
+        Some(19) => "folder",
+        Some(20) => "enum-member",
+        Some(21) => "constant",
+        Some(22) => "struct",
+        Some(23) => "event",
+        Some(24) => "operator",
+        Some(25) => "type-parameter",
+        _ => "(no kind)",
+    }
+}
+
+/// Whether a completion item labelled `label` is one a case looks at: a
+/// name its sources spell, or one its expected answer lists (an item's
+/// first line starts with its name).
+fn kept_by_name(fixture: &Fixture, expected: &str, label: &str) -> bool {
+    let name = qualified_name_prefix(label);
+    fixture.spells(name)
+        || expected
+            .lines()
+            .filter(|line| !line.starts_with(' '))
+            .any(|line| qualified_name_prefix(line.trim()) == name)
+}
+
+/// The completion answer with only the items a case looks at, each as
+/// `completionItem/resolve` fills it in where the server resolves items: an
+/// editor resolves the item it shows, and the documentation, the detail
+/// and the import an item adds may only come then. An item without `data`
+/// is sent with the list's default `data`, as the protocol says a client
+/// does.
+async fn resolved_completion(
+    session: &mut Session,
+    fixture: &Fixture,
+    expected: &str,
+    answer: Value,
+) -> Value {
+    let defaults = answer.get("itemDefaults").cloned().unwrap_or(Value::Null);
+    let items = answer.get("items").cloned().unwrap_or(answer);
+    let mut kept = Vec::new();
+    for item in as_list(&items) {
+        let Some(label) = item["label"].as_str() else {
+            continue;
+        };
+        if !kept_by_name(fixture, expected, label) {
+            continue;
+        }
+        let mut item = item.clone();
+        if session.resolves_completion() {
+            if item.get("data").is_none() && !defaults["data"].is_null() {
+                item["data"] = defaults["data"].clone();
+            }
+            let resolved = session
+                .request_until(
+                    "completionItem/resolve",
+                    item.clone(),
+                    OnError::AnswerNothing,
+                    |_| true,
+                )
+                .await;
+            if resolved.is_object() {
+                item = resolved;
+            }
+        }
+        kept.push(item);
+    }
+    json!({"items": kept, "itemDefaults": defaults})
+}
+
+/// The byte offset in `text` of an LSP position, which counts UTF-16 units.
+fn byte_offset(text: &str, position: &Value) -> usize {
+    let line = position["line"].as_u64().unwrap_or(0) as usize;
+    let Some(start) = std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(at, _)| at + 1))
+        .nth(line)
+    else {
+        return text.len();
+    };
+    let mut units = position["character"].as_u64().unwrap_or(0) as usize;
+    let mut end = start;
+    for character in text[start..].chars() {
+        if units == 0 || character == '\n' {
+            break;
+        }
+        units = units.saturating_sub(character.len_utf16());
+        end += character.len_utf8();
+    }
+    end
+}
+
 fn identifier_prefix(label: &str) -> &str {
     let end = label
         .find(|character: char| !character.is_alphanumeric() && character != '_')
@@ -649,23 +880,49 @@ fn identifier_prefix(label: &str) -> &str {
     &label[..end]
 }
 
-/// The first line of code a hover shows, with `name` unqualified: one
-/// server writes `void print(String)`, another `void Printer.print(String)`.
-/// A constructor is named after its class — `Printer.Printer(String)` — and
-/// is shown as `Printer(String)`.
+/// Every line a hover shows, its first line of code (the signature) with
+/// `name` unqualified: one server writes `void print(String)`, another
+/// `void Printer.print(String)`. A constructor is named after its class —
+/// `Printer.Printer(String)` — and is shown as `Printer(String)`.
+///
+/// The documentation below the signature is the answer too: a hover that
+/// drops the Javadoc, or its `@param` lines, is a different hover. Code
+/// fences, blank lines and the targets of links (URIs of the temporary
+/// workspace) are left out, so what is compared is what a reader sees.
 fn hover_signature(answer: &Value, name: &str) -> Vec<String> {
     let text = as_list(&answer["contents"])
         .into_iter()
         .filter_map(|part| part.as_str().or_else(|| part["value"].as_str()))
         .collect::<Vec<_>>()
         .join("\n");
-    let signature = text
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("```"));
-    signature
-        .map(|line| vec![unqualified(line, name)])
-        .unwrap_or_default()
+    let mut lines = Vec::new();
+    let mut signature_shown = false;
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with("```") || line == "---" || line == "***" {
+            continue;
+        }
+        let line = without_link_targets(line);
+        if signature_shown {
+            lines.push(line);
+        } else {
+            lines.push(unqualified(&line, name));
+            signature_shown = true;
+        }
+    }
+    lines
+}
+
+/// `[text](target)` as `[text]`.
+fn without_link_targets(line: &str) -> String {
+    let mut shown = String::new();
+    let mut rest = line;
+    while let Some(at) = rest.find("](") {
+        shown.push_str(&rest[..=at]);
+        let after = &rest[at + 2..];
+        rest = after.find(')').map_or("", |close| &after[close + 1..]);
+    }
+    shown.push_str(rest);
+    shown
 }
 
 /// `line` without the dotted qualifier in front of its first `name`.
@@ -683,33 +940,85 @@ fn unqualified(line: &str, name: &str) -> String {
     format!("{}{}", &line[..qualifier_start], &line[at..])
 }
 
-/// `name(parameter, [active parameter])` of the active signature.
+/// Every signature offered, the active one marked `>`, each as its whole
+/// label with the active parameter in brackets — `> foo(int a, [String b])
+/// : String` — and the first line of its documentation below it. Which
+/// overloads are offered, which is chosen, the return type and the
+/// parameter names are all part of the answer.
 fn signature(answer: &Value) -> Vec<String> {
     let active_signature = answer["activeSignature"].as_u64().unwrap_or(0) as usize;
-    let Some(signature) = answer["signatures"].get(active_signature) else {
-        return Vec::new();
-    };
-    let label = signature["label"].as_str().unwrap_or_default();
-    let active_parameter = signature["activeParameter"]
-        .as_u64()
-        .or_else(|| answer["activeParameter"].as_u64());
-    let parameters: Vec<String> = as_list(&signature["parameters"])
-        .into_iter()
-        .enumerate()
-        .map(|(index, parameter)| {
-            let text = parameter["label"].as_str().unwrap_or("?");
-            if active_parameter == Some(index as u64) {
-                format!("[{text}]")
+    let mut lines = Vec::new();
+    for (index, signature) in as_list(&answer["signatures"]).into_iter().enumerate() {
+        let label = signature["label"].as_str().unwrap_or_default();
+        let active = index == active_signature;
+        let active_parameter = signature["activeParameter"]
+            .as_u64()
+            .or_else(|| answer["activeParameter"].as_u64())
+            .filter(|_| active);
+        let spans = parameter_spans(label, &as_list(&signature["parameters"]));
+        let marked = active_parameter
+            .and_then(|at| spans.get(at as usize).copied().flatten())
+            .map_or_else(
+                || label.to_owned(),
+                |(start, end)| {
+                    format!("{}[{}]{}", &label[..start], &label[start..end], &label[end..])
+                },
+            );
+        let parameter_names: Vec<String> = spans
+            .iter()
+            .map(|span| span.map_or_else(|| "?".to_owned(), |(start, end)| label[start..end].to_owned()))
+            .collect();
+        let missing = parameter_names.iter().any(|name| name == "?");
+        lines.push(format!(
+            "{}{marked}{}",
+            if active { "> " } else { "  " },
+            if missing {
+                format!("  (parameters: {})", parameter_names.join(", "))
             } else {
-                text.to_owned()
+                String::new()
             }
+        ));
+        let documentation = match &signature["documentation"] {
+            Value::String(text) => text.as_str(),
+            other => other["value"].as_str().unwrap_or_default(),
+        };
+        if let Some(first) = documentation.lines().map(str::trim).find(|line| !line.is_empty()) {
+            lines.push(format!("    {}", without_link_targets(first)));
+        }
+    }
+    lines
+}
+
+/// Where each parameter's label sits in the signature's label, in bytes: a
+/// `[start, end]` in UTF-16 units, or a string found in the label after the
+/// parameter before it (`(int a, int b)` has two `int`s).
+fn parameter_spans(label: &str, parameters: &[&Value]) -> Vec<Option<(usize, usize)>> {
+    let byte = |units: u64| -> Option<usize> {
+        let mut counted = 0;
+        for (at, character) in label.char_indices() {
+            if counted == units as usize {
+                return Some(at);
+            }
+            counted += character.len_utf16();
+        }
+        (counted == units as usize).then_some(label.len())
+    };
+    let mut searched_from = label.find('(').map_or(0, |at| at + 1);
+    parameters
+        .iter()
+        .map(|parameter| {
+            let parameter = &parameter["label"];
+            if let Some(offsets) = parameter.as_array() {
+                let span = (byte(offsets.first()?.as_u64()?)?, byte(offsets.get(1)?.as_u64()?)?);
+                searched_from = span.1;
+                return Some(span);
+            }
+            let text = parameter.as_str()?;
+            let start = searched_from + label.get(searched_from..)?.find(text)?;
+            searched_from = start + text.len();
+            Some((start, searched_from))
         })
-        .collect();
-    vec![format!(
-        "{}({})",
-        identifier_prefix(label),
-        parameters.join(", ")
-    )]
+        .collect()
 }
 
 const PACKAGE: u64 = 4;
@@ -812,15 +1121,25 @@ fn flatten_symbols<'a>(symbols: &'a Value, flat: &mut Vec<&'a Value>) {
 
 fn symbol_kind(kind: Option<u64>) -> &'static str {
     match kind {
+        Some(1) => "file",
+        Some(2) => "module",
+        Some(3) => "namespace",
         Some(4) => "package",
         Some(5) => "class",
         Some(6) => "method",
+        Some(7) => "property",
         Some(8) => "field",
         Some(9) => "constructor",
         Some(10) => "enum",
         Some(11) => "interface",
+        Some(12) => "function",
+        Some(13) => "variable",
         Some(14) => "constant",
         Some(22) => "enum-member",
+        Some(23) => "struct",
+        Some(24) => "event",
+        Some(25) => "operator",
+        Some(26) => "type-parameter",
         _ => "symbol",
     }
 }
@@ -879,19 +1198,39 @@ async fn hierarchy(
     answer
 }
 
-/// The title of each action, sorted: which comes first is up to the
-/// client.
+/// `title  (kind)` of each action, sorted: which comes first is up to the
+/// client. The kind is what an editor files an action under (a quick fix,
+/// a refactoring, a source action) and what `editor.codeActionsOnSave`
+/// picks one by; `preferred` and why an action is `disabled` follow.
 fn action_titles(answer: &Value) -> Vec<String> {
     let mut titles: Vec<String> = as_list(answer)
         .into_iter()
-        .filter_map(|action| Some(action["title"].as_str()?.to_owned()))
+        .filter_map(|action| {
+            let mut shown = action["title"].as_str()?.to_owned();
+            match action["kind"].as_str() {
+                Some(kind) if !kind.is_empty() => shown.push_str(&format!("  ({kind})")),
+                _ if action.get("command").is_some_and(Value::is_string) => {
+                    shown.push_str("  (command)");
+                }
+                _ => shown.push_str("  (no kind)"),
+            }
+            if action["isPreferred"].as_bool() == Some(true) {
+                shown.push_str("  preferred");
+            }
+            if let Some(reason) = action["disabled"]["reason"].as_str() {
+                shown.push_str(&format!("  disabled: {reason}"));
+            }
+            Some(shown)
+        })
         .collect();
     titles.sort();
     titles.dedup();
     titles
 }
 
-/// `line:column  label` of each hint, one-based, in source order.
+/// `line:column  label  (kind)` of each hint, one-based, in source order,
+/// with a `␣` where the hint asks for padding: `name: ` and `name:` read
+/// differently in the editor. The kind is `type` or `parameter`.
 fn inlay_hints(answer: &Value) -> Vec<String> {
     let mut hints: Vec<(u64, u64, String)> = as_list(answer)
         .into_iter()
@@ -903,18 +1242,25 @@ fn inlay_hints(answer: &Value) -> Vec<String> {
                     .filter_map(|part| part["value"].as_str())
                     .collect(),
             };
+            let kind = match hint["kind"].as_u64() {
+                Some(1) => "  (type)",
+                Some(2) => "  (parameter)",
+                _ => "",
+            };
+            let left = if hint["paddingLeft"].as_bool() == Some(true) { "␣" } else { "" };
+            let right = if hint["paddingRight"].as_bool() == Some(true) { "␣" } else { "" };
             let position = &hint["position"];
             Some((
                 position["line"].as_u64()?,
                 position["character"].as_u64()?,
-                label,
+                format!("{left}{}{right}{kind}", label.trim()),
             ))
         })
         .collect();
     hints.sort();
     hints
         .into_iter()
-        .map(|(line, column, label)| format!("{}:{}  {}", line + 1, column + 1, label.trim()))
+        .map(|(line, column, label)| format!("{}:{}  {label}", line + 1, column + 1))
         .collect()
 }
 
@@ -978,15 +1324,27 @@ impl View<'_> {
     }
 
     /// `item`, then `incomingCalls` / `outgoingCalls` (or `supertypes` /
-    /// `subtypes`): `name  /path:line:column  source line`, each group in
-    /// source order.
+    /// `subtypes`): `kind name detail  /path:line:column-end  source line`,
+    /// each group in source order, and under a call the places it is made
+    /// (`fromRanges`): which calls a caller makes, not only that it calls.
     fn hierarchy(&self, answer: &Value) -> Vec<String> {
         let mut lines = Vec::new();
         let show = |item: &Value| -> Option<String> {
             let uri = item["uri"].as_str()?;
             let range = item.get("selectionRange").or_else(|| item.get("range"))?;
             let place = Place::new(self.session.display(uri), range);
-            Some(format!("{}  {}", item["name"].as_str()?, self.show(&place)))
+            let detail = item["detail"].as_str().unwrap_or_default();
+            let detail = if detail.is_empty() {
+                String::new()
+            } else {
+                format!(" {detail}")
+            };
+            Some(format!(
+                "{} {}{detail}  {}",
+                symbol_kind(item["kind"].as_u64()),
+                item["name"].as_str()?,
+                self.show(&place)
+            ))
         };
         for (group, key, inner) in [
             ("item", "items", None),
@@ -997,8 +1355,18 @@ impl View<'_> {
         ] {
             let mut shown: Vec<String> = as_list(&answer[key])
                 .into_iter()
-                .filter_map(|entry| show(inner.map_or(entry, |field| &entry[field])))
-                .map(|line| format!("{group} {line}"))
+                .filter_map(|entry| {
+                    let mut line = format!("{group} {}", show(inner.map_or(entry, |field| &entry[field]))?);
+                    let mut calls: Vec<Place> = as_list(&entry["fromRanges"])
+                        .into_iter()
+                        .map(|range| Place::new(String::new(), range))
+                        .collect();
+                    calls.sort();
+                    for call in calls {
+                        line.push_str(&format!("\n    called at {}", call.position()));
+                    }
+                    Some(line)
+                })
                 .collect();
             shown.sort();
             lines.extend(shown);
@@ -1057,26 +1425,7 @@ impl View<'_> {
 
 /// `text` with the LSP `edits` applied; positions count UTF-16 units.
 fn apply_edits(text: &str, edits: &[&Value]) -> String {
-    let line_starts: Vec<usize> = std::iter::once(0)
-        .chain(text.match_indices('\n').map(|(at, _)| at + 1))
-        .collect();
-    let offset = |position: &Value| -> usize {
-        let line = position["line"].as_u64().unwrap_or(0) as usize;
-        let Some(&start) = line_starts.get(line) else {
-            return text.len();
-        };
-        let rest = &text[start..];
-        let mut units = position["character"].as_u64().unwrap_or(0) as usize;
-        let mut end = 0;
-        for character in rest.chars() {
-            if units == 0 || character == '\n' {
-                break;
-            }
-            units = units.saturating_sub(character.len_utf16());
-            end += character.len_utf8();
-        }
-        start + end
-    };
+    let offset = |position: &Value| byte_offset(text, position);
     let mut spans: Vec<(usize, usize, &str)> = edits
         .iter()
         .map(|edit| {
@@ -1093,4 +1442,89 @@ fn apply_edits(text: &str, edits: &[&Value]) -> String {
         result.replace_range(start..end.max(start), new_text);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A server that writes the signature into the label and one that
+    /// gives it as `labelDetails` show the editor the same item.
+    #[test]
+    fn a_label_reads_the_same_with_or_without_label_details() {
+        let legacy = json!({"label": "test(String x) : void"});
+        let detailed = json!({
+            "label": "test",
+            "labelDetails": {"detail": "(String x)", "description": "void"},
+        });
+        assert_eq!(presented_label(&legacy), presented_label(&detailed));
+        let legacy_type = json!({"label": "List - java.util"});
+        let detailed_type = json!({"label": "List", "labelDetails": {"description": "java.util"}});
+        assert_eq!(presented_label(&legacy_type), presented_label(&detailed_type));
+    }
+
+    /// The list's `editRange` and the item's `textEditText` are what an
+    /// item without an edit of its own writes; an item's own edit wins.
+    #[test]
+    fn an_item_inserts_its_edit_or_the_lists_default() {
+        let range = json!({"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}});
+        let defaults = json!({"editRange": range});
+        let item = json!({"label": "test", "insertText": "test", "textEditText": "test(${1:x})"});
+        let (text, at) = inserted(&item, &defaults);
+        assert_eq!(text, "test(${1:x})");
+        assert_eq!(at, Some(&range));
+
+        let own = json!({"label": "test", "textEdit": {"newText": "tested", "range": range}});
+        assert_eq!(inserted(&own, &Value::Null).0, "tested");
+
+        let plain = json!({"label": "test", "insertText": "test()"});
+        assert_eq!(inserted(&plain, &Value::Null), ("test()".to_owned(), None));
+    }
+
+    /// Parameters given as offsets and as strings land on the same text,
+    /// and two parameters of one type are told apart.
+    #[test]
+    fn parameters_are_found_by_offset_or_in_order() {
+        let label = "add(int a, int b) : int";
+        let by_offset = [json!({"label": [4, 9]}), json!({"label": [11, 16]})];
+        let by_text = [json!({"label": "int"}), json!({"label": "int"})];
+        let spans = |parameters: &[Value]| parameter_spans(label, &parameters.iter().collect::<Vec<_>>());
+        assert_eq!(spans(&by_offset), vec![Some((4, 9)), Some((11, 16))]);
+        assert_eq!(spans(&by_text), vec![Some((4, 7)), Some((11, 14))]);
+    }
+
+    #[test]
+    fn a_link_keeps_its_text_not_its_target() {
+        assert_eq!(
+            without_link_targets("Source: *[demo](file:///tmp/x/A.java#4)* and [B](jdt://b)"),
+            "Source: *[demo]* and [B]"
+        );
+    }
+
+    /// The active signature is marked and its active parameter bracketed;
+    /// the other overloads are listed too.
+    #[test]
+    fn every_overload_is_shown_with_the_active_one_marked() {
+        let answer = json!({
+            "activeSignature": 1,
+            "activeParameter": 1,
+            "signatures": [
+                {"label": "add(int a) : int", "parameters": [{"label": "int a"}]},
+                {"label": "add(int a, int b) : int",
+                 "parameters": [{"label": "int a"}, {"label": "int b"}],
+                 "documentation": {"kind": "markdown", "value": "Adds.\n\nMore."}},
+            ],
+        });
+        assert_eq!(
+            signature(&answer),
+            vec!["  add(int a) : int", "> add(int a, [int b]) : int", "    Adds."]
+        );
+    }
+
+    #[test]
+    fn a_position_counts_utf16_units() {
+        let text = "a\n€x = 1\n";
+        assert_eq!(byte_offset(text, &json!({"line": 1, "character": 1})), 5);
+        assert_eq!(byte_offset(text, &json!({"line": 5, "character": 0})), text.len());
+    }
 }
