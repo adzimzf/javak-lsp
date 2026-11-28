@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 mod java;
 mod shown;
+mod templates;
 
 pub use shown::{ItemKind, Shown};
 
@@ -44,6 +45,15 @@ pub struct Offer {
     /// The constructors of the type named, not the type: one name offers
     /// both after `new`.
     pub constructs: bool,
+    /// A postfix template (`a.var`), which jdtls lists after the
+    /// receiver's members.
+    pub postfix: bool,
+    /// Its declarations listed in the order given (constructors, overrides),
+    /// not by how many parameters each has.
+    pub in_order: bool,
+    /// Another name the offer is found by (`main` of the `public static
+    /// void main(String[] args)` template).
+    pub alias: Option<String>,
 }
 
 /// One declaration a name offers.
@@ -116,8 +126,9 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
         order: usize,
         /// What JDT compares names by ([`completion_of`]).
         completion: String,
-        /// A constructor, listed in the order it is offered.
-        constructs: bool,
+        /// Listed in the order it is offered ([`Offer::in_order`]).
+        in_order: bool,
+        postfix: bool,
     }
     let mut ranked = Vec::new();
     for (order, offer) in offers.into_iter().enumerate() {
@@ -164,10 +175,14 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
                 parameters: proposed.parameters.as_ref().map_or(0, Vec::len),
                 index: proposed.index,
                 order,
-                constructs: offer.constructs,
+                in_order: offer.in_order,
+                postfix: offer.postfix,
             });
         }
     }
+    // A postfix template goes after the receiver's members, which keep
+    // jdtls's order.
+    let (mut postfix, mut ranked): (Vec<Ranked>, Vec<Ranked>) = ranked.into_iter().partition(|ranked| ranked.postfix);
     let members = !ranked.is_empty() && ranked.iter().all(|ranked| ranked.member);
     if members {
         ranked.sort_by(|left, right| {
@@ -181,7 +196,7 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
         });
     } else {
         ranked.sort_by(|left, right| {
-            let overloads = if left.constructs && right.constructs {
+            let overloads = if left.in_order && right.in_order {
                 left.index.cmp(&right.index)
             } else {
                 left.parameters.cmp(&right.parameters).then(right.index.cmp(&left.index))
@@ -193,6 +208,8 @@ pub fn proposals(offers: Vec<Offer>, prefix: &str) -> (Vec<Proposal>, bool) {
                 .then(overloads)
         });
     }
+    postfix.sort_by(|left, right| left.proposal.sort.cmp(&right.proposal.sort));
+    ranked.extend(postfix);
     let incomplete = ranked.len() > MAX_PROPOSALS;
     let proposals = ranked
         .into_iter()
@@ -490,6 +507,7 @@ fn gather(
         offers.retain(|offer| {
             prefix.is_empty()
                 || java::matches(offer, &prefix)
+                || offer.alias.as_deref().is_some_and(|alias| java::starts_with(alias, &prefix))
                 || dotted.as_deref().is_some_and(|dotted| java::starts_with(&offer.name, dotted))
         });
         // One offer per name, at the best place any of them has; types of
@@ -499,6 +517,7 @@ fn gather(
             let same = |known: &&mut Offer| {
                 known.name == offer.name
                     && known.constructs == offer.constructs
+                    && (known.shown.kind == Some(ItemKind::Snippet)) == (offer.shown.kind == Some(ItemKind::Snippet))
                     && (known.kind == OfferKind::Package) == (offer.kind == OfferKind::Package)
                     && (known.qualified.is_none() || offer.qualified.is_none() || known.qualified == offer.qualified)
             };

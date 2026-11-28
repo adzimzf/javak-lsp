@@ -60,6 +60,9 @@ pub struct Shown {
     pub replaces: Option<Position>,
     /// Choosing it adds no import (it is the import being written).
     pub no_import: bool,
+    /// Where the text it replaces ends, where that is past the cursor
+    /// (the `)` of `new Runnable(|)`).
+    pub replaces_to: Option<Position>,
 }
 
 /// A type as jdtls's labels write it: the name of its declaration, nested

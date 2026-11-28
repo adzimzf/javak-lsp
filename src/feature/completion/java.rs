@@ -203,6 +203,11 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
         }
         // `java.util.List|`: the type, written as qualified as it is.
         let mut offers = offers;
+        // `a.var|`: the postfix templates of what the value is.
+        if super::names_a_value(snapshot, file, receiver) {
+            let written = super::type_of_receiver(snapshot, file, receiver);
+            offers.extend(super::templates::postfix(context, receiver, written.as_ref(), start));
+        }
         for offer in &mut offers {
             if offer.kind == super::OfferKind::Type
                 && let Some(qualified) = &offer.qualified
@@ -230,13 +235,33 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
         return types(context);
     }
     if !in_a_body(path) {
-        return unit_keywords(context);
+        let mut offers = unit_keywords(context);
+        offers.extend(super::templates::unit(context));
+        return offers;
     }
     if let Some(offers) = argument_offers(context) {
         return offers;
     }
     let expected = expected_type(context);
     if after_new(context) {
+        // `Arr[] ages = new |`: the array the place wants, and nothing else.
+        if let Some(expected) = expected.as_ref().filter(|expected| expected.dimensions > 0 && prefix.is_empty()) {
+            let written = expected.written();
+            return vec![Offer {
+                name: written.clone(),
+                rank: format!("{EXPECTED}{written}"),
+                kind: super::OfferKind::Type,
+                shown: super::Shown {
+                    kind: Some(super::ItemKind::Class),
+                    detail: Some(written.clone()),
+                    insert: Some(format!("{}[$1]$0{}", expected.name, "[]".repeat(expected.dimensions - 1))),
+                    snippet: true,
+                    no_import: true,
+                    ..super::Shown::default()
+                },
+                ..Offer::default()
+            }];
+        }
         let mut offers = types(context);
         if let Some(expected) = &expected {
             offers.push(expected_offer(context, expected));
@@ -251,6 +276,7 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
             offer.shown.insert = Some(format!("{} ", offer.name));
             offer
         }));
+        offers.extend(super::templates::members(context));
         return offers;
     }
     let mut offers = Vec::new();
@@ -289,6 +315,10 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
         } else {
             offers.extend(keywords(EXPRESSION_KEYWORDS));
         }
+    }
+    if starts_a_statement(context) && super::templates::in_a_block(path) {
+        offers.extend(super::templates::statements(context));
+        offers.extend(super::templates::local_class(context));
     }
     offers
 }
@@ -492,7 +522,16 @@ fn unit_keywords(context: &Context<'_>) -> Vec<Offer> {
     if !has_type {
         words.push("import");
     }
+    // After a type, jdtls writes the next one's keyword with its space.
     keywords(&words)
+        .into_iter()
+        .map(|mut offer| {
+            if has_type && TYPE_KEYWORDS.contains(&offer.name.as_str()) {
+                offer.shown.insert = Some(format!("{} ", offer.name));
+            }
+            offer
+        })
+        .collect()
 }
 
 /// Whether the placeholder is the name a declaration declares: a variable
@@ -697,6 +736,7 @@ fn creations(context: &Context<'_>, offers: Vec<Offer>, qualified_from: Option<P
                 rank: if hidden { format!("{}~", offer.rank) } else { offer.rank.clone() },
                 kind: super::OfferKind::Type,
                 constructs: true,
+                in_order: true,
                 qualified: offer.qualified.clone(),
                 declarations,
                 ..Offer::default()
@@ -763,6 +803,8 @@ fn types(context: &Context<'_>) -> Vec<Offer> {
     // type the cursor is in is `Shapes<T>.Inner`, beside `Shapes<T>`.
     let mut ranks: Vec<(String, String)> = Vec::new();
     let mut parameters: Vec<String> = Vec::new();
+    let mut recovered: Vec<(String, super::ItemKind)> = Vec::new();
+    let mut recovered_package: Option<String> = None;
     if context.prefix.is_empty() {
         for (name, declaration) in types_of(context.file) {
             add(name, Some(snapshot.qualified_type_name(context.file, declaration)));
@@ -770,9 +812,14 @@ fn types(context: &Context<'_>) -> Vec<Offer> {
                 ranks.push((name.to_owned(), format!("{outer}.{name}")));
             }
         }
-        for name in recovered_types(&context.file.tree) {
+        // A type the parser could not close is still its kind, in the
+        // file's package.
+        let package = snapshot.package(context.file).filter(|package| !package.is_empty());
+        for (name, kind) in recovered_types(&context.file.tree) {
+            recovered.push((name.clone(), kind));
             add(&name, None);
         }
+        recovered_package = package;
         // The type parameters in scope are types too.
         for node in &context.path {
             let Some(declared) = node.child("type_parameters") else { continue };
@@ -805,11 +852,22 @@ fn types(context: &Context<'_>) -> Vec<Offer> {
         .into_iter()
         .map(|(name, qualified)| {
             let ranked = ranks.iter().find(|(known, _)| *known == name).map_or(name.clone(), |(_, rank)| rank.clone());
+            let shown = recovered
+                .iter()
+                .find(|(known, _)| *known == name && qualified.is_none())
+                .map(|(_, kind)| super::Shown {
+                    kind: Some(*kind),
+                    description: recovered_package.clone(),
+                    detail: Some(recovered_package.as_ref().map_or(name.clone(), |package| format!("{package}.{name}"))),
+                    ..super::Shown::default()
+                })
+                .unwrap_or_default();
             Offer {
                 rank: format!("{TYPE}{ranked}"),
                 name,
                 kind: super::OfferKind::Type,
                 qualified,
+                shown,
                 ..Offer::default()
             }
         })
@@ -848,20 +906,22 @@ fn generic_outer(context: &Context<'_>, declaration: &Syn) -> Option<String> {
 
 /// The types a file declares where the parser could not read the
 /// declaration: `class Name {` left open.
-fn recovered_types(tree: &Syn) -> Vec<String> {
+fn recovered_types(tree: &Syn) -> Vec<(String, super::ItemKind)> {
     let mut names = Vec::new();
     for node in tree.walk() {
         if node.kind != "ERROR" {
             continue;
         }
         for pair in node.children.windows(2) {
-            if matches!(
-                pair[0].kind.as_str(),
-                "class" | "interface" | "enum" | "record"
-            ) && is_identifier(&pair[1])
-                && pair[1].text != PROBE
-            {
-                names.push(pair[1].text.clone());
+            let kind = match pair[0].kind.as_str() {
+                "class" => super::ItemKind::Class,
+                "interface" => super::ItemKind::Interface,
+                "enum" => super::ItemKind::Enum,
+                "record" => super::ItemKind::Struct,
+                _ => continue,
+            };
+            if is_identifier(&pair[1]) && pair[1].text != PROBE {
+                names.push((pair[1].text.clone(), kind));
             }
         }
     }
@@ -1286,10 +1346,27 @@ fn expected_type(context: &Context<'_>) -> Option<Type> {
 /// which a half-written argument list leaves to the parser to guess at.
 fn argument_offers(context: &Context<'_>) -> Option<Vec<Offer>> {
     let call = open_call(context)?;
+    if let Some(anonymous) = anonymous_in_parentheses(context, &call) {
+        return Some(vec![anonymous]);
+    }
     // The call itself, each overload, as jdtls shows what it is filling
     // in: it writes nothing.
+    // The arguments written before the cursor narrow the overloads to the
+    // ones they fit, as jdtls narrows them.
+    let written = written_arguments(context, &call);
+    let fits = |member: &Found<'_>| {
+        let parameters = crate::feature::semantic::parameters(member.node, &member.bindings);
+        parameters.len() >= written.len()
+            && written.iter().zip(&parameters).all(|(argument, parameter)| {
+                let wanted = parameter.written.split('<').next().unwrap_or_default().trim();
+                argument.as_ref().is_none_or(|argument| {
+                    wanted == argument.name || wanted == "Object" || wanted.len() == 1
+                })
+            })
+    };
     let declarations: Vec<super::Proposed> = call_overloads(context, &call)
         .iter()
+        .filter(|(_, member)| fits(member))
         .enumerate()
         .map(|(index, (owner, member))| {
             let mut proposed = proposed_method(context, owner, member, index);
@@ -1331,6 +1408,104 @@ fn argument_offers(context: &Context<'_>) -> Option<Vec<Offer>> {
             .map(|value| value.offer),
     );
     Some(offers)
+}
+
+/// `new Runnable(|)`: an interface or abstract class being created, the
+/// cursor right in its parentheses. jdtls offers its anonymous class
+/// alone, written over the parentheses: both where they are closed, the
+/// `(` where nothing follows (and `;` after), nothing before an argument.
+fn anonymous_in_parentheses(context: &Context<'_>, call: &OpenCall) -> Option<Offer> {
+    if !call.creates || call.index > 0 || !context.prefix.is_empty() {
+        return None;
+    }
+    let found = context.snapshot.type_named(&call.name, context.file)?;
+    let abstract_type = matches!(found.node.kind.as_str(), "interface_declaration")
+        || found
+            .node
+            .first("modifiers")
+            .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|word| word == "abstract"));
+    if !abstract_type {
+        return None;
+    }
+    let text = &context.written.text;
+    let open = offset_of(text, call.open)?;
+    let at = offset_of(text, context.name.start)?;
+    if !text.get(open + 1..at)?.trim().is_empty() {
+        return None;
+    }
+    let after = &text[at..];
+    let next = after.find(|character: char| !character.is_whitespace());
+    let (from, to, end) = match next.map(|index| (index, after[index..].chars().next().unwrap_or(' '))) {
+        Some((index, ')')) => (
+            Some(call.open),
+            Some(crate::parser::position_of(text, at + index + 1)),
+            "",
+        ),
+        Some((_, ',')) => (None, None, ""),
+        _ => (Some(call.open), None, ";"),
+    };
+    Some(Offer {
+        name: call.name.clone(),
+        rank: format!("{EXPECTED}{}", call.name),
+        kind: super::OfferKind::Type,
+        declarations: vec![super::Proposed {
+            parameters: Some(Vec::new()),
+            shown: super::Shown {
+                kind: Some(super::ItemKind::Class),
+                description: Some("Anonymous Inner Type".to_owned()),
+                insert: Some(format!("() {{\n\t${{0}}\n}}{end}")),
+                snippet: true,
+                replaces: from,
+                replaces_to: to,
+                no_import: true,
+                ..super::Shown::default()
+            },
+            ..super::Proposed::default()
+        }],
+        ..Offer::default()
+    })
+}
+
+/// The arguments of `call` written whole before the cursor, each with its
+/// type where it is a name in scope.
+fn written_arguments(context: &Context<'_>, call: &OpenCall) -> Vec<Option<Type>> {
+    let Some((open, at)) = offset_of(&context.written.text, call.open).zip(offset_of(&context.written.text, context.name.start)) else {
+        return Vec::new();
+    };
+    let Some(between) = context.written.text.get(open..at) else {
+        return Vec::new();
+    };
+    let between = between.strip_prefix('(').unwrap_or(between);
+    let mut pieces: Vec<String> = Vec::new();
+    let mut depth = 0i32;
+    let mut current = String::new();
+    for character in between.chars() {
+        match character {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            ',' if depth == 0 => {
+                pieces.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(character);
+    }
+    // What is after the last comma is an argument only once it is written.
+    if !current.trim().is_empty() {
+        pieces.push(current);
+    }
+    pieces
+        .into_iter()
+        .map(|piece| {
+            let piece = piece.trim();
+            let is_name = !piece.is_empty() && piece.chars().all(|character| character.is_alphanumeric() || character == '_');
+            is_name
+                .then(|| context.snapshot.name_in_scope(piece, context.file, context.name.start))
+                .flatten()
+                .and_then(|found| context.snapshot.type_of_declaration(&found))
+        })
+        .collect()
 }
 
 /// A call whose argument list the placeholder is in.
@@ -1559,6 +1734,7 @@ fn overridable(context: &Context<'_>) -> Vec<Offer> {
         .map(|(_, named)| named.text.as_str())
         .collect();
     let mut offers: Vec<Offer> = Vec::new();
+    let mut signatures: Vec<(String, Vec<String>)> = Vec::new();
     for above in context.snapshot.with_supertypes(&owner).into_iter().skip(1) {
         for (member, named) in members_of(above.node) {
             if member.kind != "method_declaration" || declared.contains(&named.text.as_str()) {
@@ -1576,17 +1752,73 @@ fn overridable(context: &Context<'_>) -> Vec<Offer> {
             {
                 continue;
             }
-            if offers.iter().any(|offer| offer.name == named.text) {
+            // Each overload its own proposal: the method written again,
+            // calling the one it overrides, as jdtls writes it.
+            let method = Found { file: above.file, node: member, name: named, bindings: above.bindings.clone() };
+            // A method overridden higher up is offered once, as the nearest
+            // type declares it.
+            let signature = (named.text.clone(), context.snapshot.erased_parameter_types(&method));
+            if signatures.contains(&signature) {
                 continue;
             }
-            offers.push(Offer {
-                name: named.text.clone(),
-                rank: format!("{METHOD}{}", named.text),
-                ..Offer::default()
-            });
+            signatures.push(signature);
+            let proposed = overriding(context, &above, &method);
+            match offers.iter_mut().find(|offer| offer.name == named.text) {
+                Some(offer) => offer.declarations.push(proposed),
+                None => offers.push(Offer {
+                    name: named.text.clone(),
+                    rank: format!("{METHOD}{}", named.text),
+                    kind: super::OfferKind::Method,
+                    declarations: vec![proposed],
+                    in_order: true,
+                    ..Offer::default()
+                }),
+            }
         }
     }
     offers
+}
+
+/// `method`, overridden where it is being written: `@Override`, its
+/// visibility, return type and parameters, and a body calling `super`.
+fn overriding(context: &Context<'_>, owner: &Found<'_>, method: &Found<'_>) -> super::Proposed {
+    let snapshot = context.snapshot;
+    let written = snapshot.parameters_written(method);
+    let names: Vec<String> = crate::feature::semantic::parameters(method.node, &method.bindings)
+        .into_iter()
+        .map(|parameter| parameter.name)
+        .collect();
+    let returns = snapshot.return_written(method).unwrap_or_else(|| "void".to_owned());
+    let visibility = ["public", "protected"]
+        .into_iter()
+        .find(|word| {
+            method
+                .node
+                .first("modifiers")
+                .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|written| written == *word))
+        })
+        .map(|word| format!("{word} "))
+        .unwrap_or_default();
+    let call = format!("super.{}({});", method.name.text, names.join(", "));
+    let body = if returns == "void" { call } else { format!("return {call}") };
+    super::Proposed {
+        returns: Some(returns.clone()),
+        shown: super::Shown {
+            kind: Some(super::ItemKind::Method),
+            description: Some(returns.clone()),
+            detail: Some(format!("Override method in '{}'", owner.name.text)),
+            insert: Some(format!(
+                "@Override\n{visibility}{returns} {}({}) {{\n    ${{0:{body}}}\n}}",
+                method.name.text,
+                written.join(", ")
+            )),
+            snippet: true,
+            ..super::Shown::default()
+        },
+        parameters: Some(written),
+        names,
+        ..super::Proposed::default()
+    }
 }
 
 /// With a prefix typed, the static members of the types the file imports

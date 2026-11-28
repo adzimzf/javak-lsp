@@ -680,9 +680,16 @@ fn java_completion_item(
     });
     let inserted = shown.insert.unwrap_or(proposal.name.clone());
     // What a qualified name being written is replaced with, whole.
-    let text_edit = shown.replaces.map(|from| {
+    let replaces = shown.replaces.or(shown.replaces_to.map(|_| crate::parser::Position {
+        line: cursor_at.line,
+        column: cursor_at.character,
+    }));
+    let text_edit = replaces.map(|from| {
         CompletionTextEdit::Edit(TextEdit {
-            range: Range { start: lsp_position(from), end: cursor_at },
+            range: Range {
+                start: lsp_position(from),
+                end: shown.replaces_to.map_or(cursor_at, lsp_position),
+            },
             new_text: inserted.clone(),
         })
     });
