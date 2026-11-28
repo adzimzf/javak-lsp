@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Circle.kt:5:12  val Circle.diameter: Double
+/com/demo/Circle.kt:5:12-20  val Circle.diameter: Double

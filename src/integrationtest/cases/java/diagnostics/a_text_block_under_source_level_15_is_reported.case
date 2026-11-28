@@ -16,4 +16,4 @@ public class Za$0mzam {
   }
 }
 //= expected
-/src/main/java/org/jsoup/azim/Zamzam.java:5:12  The Java feature 'Text Blocks' is only available with source level 15 and above
+/src/main/java/org/jsoup/azim/Zamzam.java:5:12-7:12  error The Java feature 'Text Blocks' is only available with source level 15 and above

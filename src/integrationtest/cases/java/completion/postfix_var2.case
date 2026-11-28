@@ -6,4 +6,8 @@ public class Test {
 		Collections.emptyList().var$0	}
 }
 //= expected
-(nothing)
+var · Creates a new variable  snippet
+  inserts List<Object> ${1:emptyList} = Collections.emptyList();${0} over "Collections.emptyList().var"
+  detail Creates a new variable
+  adds import java.util.List;
+  adds import java.util.List;

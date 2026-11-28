@@ -11,4 +11,4 @@ public interface CallHierarchyGH2771 {
     }
 }
 //= expected
-item name() : Opt<String>  /src/org/sample/CallHierarchyGH2771.java:4:17  Opt<String> name();
+item method name() : Opt<String> org.sample.CallHierarchyGH2771  /src/org/sample/CallHierarchyGH2771.java:4:17-21  Opt<String> name();

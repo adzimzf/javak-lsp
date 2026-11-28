@@ -5,4 +5,6 @@ public class Test {
 		sout$0	}
 }
 //= expected
-(nothing)
+sout · print to standard out  snippet
+  inserts System.out.println(${0}); over "sout"
+  detail print to standard out

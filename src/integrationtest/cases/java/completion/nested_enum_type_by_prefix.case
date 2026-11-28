@@ -9,4 +9,6 @@ public class Test {
     }
 }
 //= expected
-Zenum
+Zenum · com.demo.Test  enum
+  inserts Zenum over "Zenu"
+  detail com.demo.Test.Zenum

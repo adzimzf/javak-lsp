@@ -71,4 +71,4 @@ public interface IFoo {
     void so$0meMethod();
 }
 //= expected
-/org/sample/Foo2.java:5:17  public void someMethod() {
+/org/sample/Foo2.java:5:17-27  public void someMethod() {

@@ -20,6 +20,6 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:6:17  printer.print("one");
-/com/demo/Main.java:8:17  printer.print("two");
-/com/demo/Printer.java:7:10  void print(String text) {
+/com/demo/Main.java:6:17-29  printer.print("one");
+/com/demo/Main.java:8:17-29  printer.print("two");
+/com/demo/Printer.java:7:10-15  void print(String text) {

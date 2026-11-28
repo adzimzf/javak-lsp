@@ -13,4 +13,6 @@ public class Test {
     }
 }
 //= expected
-accept
+accept(String value) · void  method
+  inserts accept(${1:value}); over "acce"
+  detail Consumer.accept(String value) : void

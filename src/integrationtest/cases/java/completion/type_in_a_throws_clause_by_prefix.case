@@ -11,4 +11,6 @@ public class Dog {
     }
 }
 //= expected
-WalkFailure
+WalkFailure · com.demo  class
+  inserts WalkFailure over "Walk"
+  detail com.demo.WalkFailure

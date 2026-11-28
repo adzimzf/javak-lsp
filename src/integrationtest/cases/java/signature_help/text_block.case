@@ -7,4 +7,13 @@ public class E {
 	}
 }
 //= expected
-println([String x])
+  println() : void
+  println(Object x) : void
+> println([String x]) : void
+  println(char[] x) : void
+  println(double x) : void
+  println(float x) : void
+  println(long x) : void
+  println(int x) : void
+  println(char x) : void
+  println(boolean x) : void

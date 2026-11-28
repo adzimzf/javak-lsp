@@ -5,4 +5,8 @@ package foo.bar;
 public class Foo {
 }
 //= expected
-(nothing)
+Foo · foo.bar  class
+  inserts Foo over ""
+  detail foo.bar.Foo
+class  snippet
+  inserts class ${1:InnerFoo} {\n\n\t${0}\n} over ""

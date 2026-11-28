@@ -14,4 +14,4 @@ class E {
     }
 }
 //= expected
-bar([String a])
+> bar([String a]) : void

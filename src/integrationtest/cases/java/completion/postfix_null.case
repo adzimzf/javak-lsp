@@ -5,4 +5,6 @@ public class Test {
 		a.null$0	}
 }
 //= expected
-(nothing)
+null · Creates an if statement which checks if expression resolves to null  snippet
+  inserts if (a == null) {\n\t${0}\n} over "a.null"
+  detail Creates an if statement which checks if expression resolves to null

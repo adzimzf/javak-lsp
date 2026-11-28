@@ -18,6 +18,6 @@ class Main {
     String shapeName;
 }
 //= expected
-Shape  /com/demo/Shape.java:3
-ShapeBuilder  /com/demo/Shape.java:9
-ShapeKind  /com/demo/Shape.java:4
+Shape  interface in com.demo  /com/demo/Shape.java:3
+ShapeBuilder  class in com.demo.Shape  /com/demo/Shape.java:9
+ShapeKind  enum in com.demo.Shape  /com/demo/Shape.java:4

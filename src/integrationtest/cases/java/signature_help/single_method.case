@@ -12,4 +12,4 @@ class E {
     }
 }
 //= expected
-foo([String s])
+> foo([String s]) : int

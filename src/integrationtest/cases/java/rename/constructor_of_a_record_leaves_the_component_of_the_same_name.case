@@ -7,5 +7,6 @@ record value(int value) {
     }
 }
 //= expected
-/com/demo/value.java:3:8  record value(int value) {
-/com/demo/value.java:4:5  value() {
+/com/demo/value.java:3  record renamed(int value) {
+/com/demo/value.java:4  renamed() {
+moves /com/demo/value.java -> /com/demo/renamed.java

@@ -23,4 +23,6 @@ public class Shelter {
     }
 }
 //= expected
-eat
+eat() · void  method
+  inserts eat(); over ""
+  detail Animal.eat() : void

@@ -12,4 +12,4 @@ class User {
     }
 }
 //= expected
-/com/demo/User.java:5:18  return r.value();
+/com/demo/User.java:5:18-23  return r.value();

@@ -8,5 +8,11 @@ public class Foo {
     }
 }
 //= expected
-IFoo
-Foo
+Foo.IFoo() · Anonymous Inner Type  constructor
+  inserts IFoo() {\n\t${0}\n}; over ""
+Foo()  constructor
+  inserts Foo() over ""
+  detail Foo.Foo()
+Foo  class
+  inserts Foo over ""
+  detail Foo

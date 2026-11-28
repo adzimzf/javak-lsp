@@ -20,4 +20,6 @@ public class Foo {
     }
 }
 //= expected
-put
+put(String key, String value) · String  method
+  inserts put(${1:key}, ${2:value}) over "pu"
+  detail Pair.put(String key, String value) : String

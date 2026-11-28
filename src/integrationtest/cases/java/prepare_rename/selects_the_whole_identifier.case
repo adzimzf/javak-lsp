@@ -8,4 +8,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:6:16  return subtotal;
+/com/demo/Main.java:6:16-24  return subtotal;

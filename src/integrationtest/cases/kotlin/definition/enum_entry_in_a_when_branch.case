@@ -17,4 +17,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Unit.kt:5:5  FOOT
+/com/demo/Unit.kt:5:5-9  FOOT

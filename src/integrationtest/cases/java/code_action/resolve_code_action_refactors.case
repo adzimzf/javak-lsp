@@ -14,10 +14,10 @@ public class E {
     }
 }
 //= expected
-Add Javadoc comment
-Change modifiers to final where possible
-Change signature for 'method'
-Convert anonymous to nested class
-Convert to lambda expression
-Sort Members for 'E.java'
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Change signature for 'method'  (refactor.change.signature)
+Convert anonymous to nested class  (refactor)
+Convert to lambda expression  (refactor)
+Sort Members for 'E.java'  (source.sortMembers)
+Surround with try/catch  (refactor)

@@ -21,5 +21,5 @@ class Square implements Shape {
     }
 }
 //= expected
-/com/demo/Circle.kt:3:7  class Circle : Shape {
-/com/demo/Square.java:3:7  class Square implements Shape {
+/com/demo/Circle.kt:3:7-13  class Circle : Shape {
+/com/demo/Square.java:3:7-13  class Square implements Shape {

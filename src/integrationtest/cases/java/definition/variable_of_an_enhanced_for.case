@@ -11,4 +11,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:6:18  for (int number : numbers) {
+/com/demo/Main.java:6:18-24  for (int number : numbers) {

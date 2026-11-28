@@ -12,5 +12,6 @@ class B extends A {
     }
 }
 //= expected
-/com/demo/A.java:3:7  class A {
-/com/demo/A.java:8:17  class B extends A {
+/com/demo/A.java:3  class renamed {
+/com/demo/A.java:8  class B extends renamed {
+moves /com/demo/A.java -> /com/demo/renamed.java

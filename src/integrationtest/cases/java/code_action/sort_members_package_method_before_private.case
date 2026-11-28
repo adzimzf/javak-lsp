@@ -6,6 +6,6 @@ public class B {
     private void consume() {}
 }
 //= expected
-Add Javadoc comment
-Generate toString()
-Inline Method
+Add Javadoc comment  (quickassist)
+Generate toString()  (source.generate.toString)
+Inline Method  (refactor.inline)

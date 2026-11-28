@@ -7,4 +7,4 @@ public class E extends F {
 }
 class F {}
 //= expected
-equals([Object obj])
+> equals([Object obj]) : boolean

@@ -6,4 +6,6 @@ public class Test {
 		foo.syserr$0	}
 }
 //= expected
-(nothing)
+syserr · Sends the affected object to a System.err.println(..) call  snippet
+  inserts System.err.println(foo);${0} over "foo.syserr"
+  detail Sends the affected object to a System.err.println(..) call

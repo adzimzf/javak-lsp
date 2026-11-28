@@ -10,3 +10,5 @@ public class Te$0st {
 }
 //= expected
 Test
+A simple program.
+int x = 1;

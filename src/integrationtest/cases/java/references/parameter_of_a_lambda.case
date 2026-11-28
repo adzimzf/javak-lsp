@@ -13,6 +13,6 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:5:16  return input -> input + input;
-/com/demo/Main.java:5:25  return input -> input + input;
-/com/demo/Main.java:5:33  return input -> input + input;
+/com/demo/Main.java:5:16-21  return input -> input + input;
+/com/demo/Main.java:5:25-30  return input -> input + input;
+/com/demo/Main.java:5:33-38  return input -> input + input;

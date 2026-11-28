@@ -5,4 +5,6 @@ public class Test {
 		serr$0	}
 }
 //= expected
-(nothing)
+serr · print to standard err  snippet
+  inserts System.err.println(${0}); over "serr"
+  detail print to standard err

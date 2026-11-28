@@ -7,4 +7,6 @@ public class Test {
 	}
 }
 //= expected
-sysop
+sysop() · void  method
+  inserts sysop(); over "syso"
+  detail Test.sysop() : void

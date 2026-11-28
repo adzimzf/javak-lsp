@@ -6,4 +6,6 @@ public class Test {
 	}
 }
 //= expected
-String
+String(String original) · void  method
+  inserts  over ""
+  detail String.String(String original)

@@ -4,9 +4,9 @@ public class E {
     }
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'count'
-Assign parameter to new field
-Change modifiers to final where possible
-Change signature for 'E'
-Generate toString()
+Add Javadoc comment  (quickassist)
+Add final modifier for 'count'  (quickassist)
+Assign parameter to new field  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Change signature for 'E'  (refactor.change.signature)
+Generate toString()  (source.generate.toString)

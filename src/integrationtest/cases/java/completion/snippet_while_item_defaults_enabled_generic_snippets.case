@@ -10,4 +10,5 @@ public class Test {
 	}
 }
 //= expected
-a
+a · int  variable
+  inserts a over "a"

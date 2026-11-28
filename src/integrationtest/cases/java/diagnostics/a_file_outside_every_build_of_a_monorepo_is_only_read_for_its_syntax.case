@@ -15,6 +15,6 @@ public class Tool {
     // TODO keep
 }
 //= expected (pending)
-/scripts/src/main/java/com/demo/Tool.java:1:1  Tool.java is a non-project file, only syntax errors are reported
-/scripts/src/main/java/com/demo/Tool.java:3:17  The value of the field Tool.unused is not used
-/scripts/src/main/java/com/demo/Tool.java:4:8  TODO keep
+/scripts/src/main/java/com/demo/Tool.java:1:1-2  warning [32] Tool.java is a non-project file, only syntax errors are reported
+/scripts/src/main/java/com/demo/Tool.java:3:17-23  warning [570425421] The value of the field Tool.unused is not used
+/scripts/src/main/java/com/demo/Tool.java:4:8-17  info [536871362] TODO keep

@@ -58,3 +58,4 @@ public class Foo2 {
 }
 //= expected
 void javadocLinkToMethodInOtherClass()
+Foo.linkedFromFoo2()

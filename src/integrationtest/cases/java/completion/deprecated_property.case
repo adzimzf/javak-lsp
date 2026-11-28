@@ -5,4 +5,6 @@ public class Main {
 	DeprecatedCl$0
 }
 //= expected
-DeprecatedClass
+DeprecatedClass · Main  class  deprecated
+  inserts DeprecatedClass over "DeprecatedCl"
+  detail Main.DeprecatedClass

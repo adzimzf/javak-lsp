@@ -11,5 +11,5 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:4:20  int foo(String str) {
-/com/demo/E.java:5:16  return str.length();
+/com/demo/E.java:4  int foo(String renamed) {
+/com/demo/E.java:5  return renamed.length();

@@ -21,4 +21,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Shapes.kt:10:9  fun area(): Double {
+/com/demo/Shapes.kt:10:9-13  fun area(): Double {

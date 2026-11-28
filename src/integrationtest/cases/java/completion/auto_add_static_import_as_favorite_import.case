@@ -7,4 +7,7 @@ public class Test {
 	}
 }
 //= expected
-asList
+asList(T... a) · List<T>  method
+  inserts asList(${1:a}) over "asList"
+  detail java.util.Arrays.asList(T... a) : List<T>
+  adds import static java.util.Arrays.asList;

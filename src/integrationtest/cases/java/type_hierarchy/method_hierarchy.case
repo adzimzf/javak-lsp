@@ -47,6 +47,6 @@ public class Six extends Two {
     }
 }
 //= expected
-item Zero  /src/main/java/org/example/Zero.java:4:17  public void foo() {
-subtype One  /src/main/java/org/example/One.java:5:17  public void foo() {
-subtype Two  /src/main/java/org/example/Two.java:3:14  public class Two extends Zero {
+item class Zero main.java.org.example  /src/main/java/org/example/Zero.java:4:17-20  public void foo() {
+subtype class One main.java.org.example  /src/main/java/org/example/One.java:5:17-20  public void foo() {
+subtype symbol Two main.java.org.example  /src/main/java/org/example/Two.java:3:14-17  public class Two extends Zero {

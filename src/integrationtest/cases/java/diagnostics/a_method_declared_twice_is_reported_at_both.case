@@ -16,11 +16,11 @@ public class Outer {
     }
 }
 //= expected
-/src/main/java/p/Outer.java:4:5  Duplicate method Outer() in type Outer
-/src/main/java/p/Outer.java:5:5  Duplicate method Outer() in type Outer
-/src/main/java/p/Outer.java:7:14  Duplicate method m(String, int[]) in type Outer.Inner
-/src/main/java/p/Outer.java:8:14  Duplicate method m(String, int[]) in type Outer.Inner
-/src/main/java/p/Outer.java:9:14  Duplicate method v(String...) in type Outer.Inner
-/src/main/java/p/Outer.java:10:14  Duplicate method v(String[]) in type Outer.Inner
-/src/main/java/p/Outer.java:11:14  Duplicate method g(List<String>) in type Outer.Inner
-/src/main/java/p/Outer.java:12:14  Duplicate method g(List<String>) in type Outer.Inner
+/src/main/java/p/Outer.java:4:5-12  error [67109219] Duplicate method Outer() in type Outer
+/src/main/java/p/Outer.java:5:5-12  error [67109219] Duplicate method Outer() in type Outer
+/src/main/java/p/Outer.java:7:14-34  error [67109219] Duplicate method m(String, int[]) in type Outer.Inner
+/src/main/java/p/Outer.java:8:14-34  error [67109219] Duplicate method m(String, int[]) in type Outer.Inner
+/src/main/java/p/Outer.java:9:14-28  error [67109219] Duplicate method v(String...) in type Outer.Inner
+/src/main/java/p/Outer.java:10:14-27  error [67109219] Duplicate method v(String[]) in type Outer.Inner
+/src/main/java/p/Outer.java:11:14-31  error [67109219] Duplicate method g(List<String>) in type Outer.Inner
+/src/main/java/p/Outer.java:12:14-31  error [67109219] Duplicate method g(List<String>) in type Outer.Inner

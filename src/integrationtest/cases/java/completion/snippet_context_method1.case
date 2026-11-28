@@ -7,5 +7,9 @@ public class Test {
 $0	}
 }
 //= expected
-test
-Test
+test() · void  method
+  inserts test(); over ""
+  detail Test.test() : void
+Test · org.sample  class
+  inserts Test over ""
+  detail org.sample.Test

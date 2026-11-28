@@ -8,4 +8,4 @@ $0package test1;
 public class F implements E {
 }
 //= expected (pending)
-/src/main/java/test1/F.java:2:14  The type F must implement the inherited abstract method E.foo()
+/src/main/java/test1/F.java:2:14-15  error [67109264] The type F must implement the inherited abstract method E.foo()

@@ -23,5 +23,7 @@ class Main {
     }
 }
 //= expected (pending)
-area
-describe
+area  method
+  inserts area over ""
+describe  method
+  inserts describe over ""

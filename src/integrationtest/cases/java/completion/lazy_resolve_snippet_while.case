@@ -5,4 +5,8 @@ public class Test {
 		while$0	}
 }
 //= expected
-while
+while · while statement  snippet
+  inserts while (${1:con}) {\n\t$TM_SELECTED_TEXT${0}\n} over "while"
+  detail while statement
+while  keyword
+  inserts while over "while"

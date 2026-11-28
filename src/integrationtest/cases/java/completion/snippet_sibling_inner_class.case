@@ -4,4 +4,8 @@ public class Test {}
 public class InnerTest{}
 $0
 //= expected
-class
+class  snippet
+  inserts /**\n * ${1:InnerTest_1}\n */\npublic class ${1:InnerTest_1} {\n\n\t${0}\n} over ""
+  doc /**
+class  keyword
+  inserts class  over ""

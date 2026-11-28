@@ -11,4 +11,9 @@ public class TestSuper {
 	public void test(String x, int y){}
 }
 //= expected
-test
+test(String x) · void  method
+  inserts test(${1:x}); over "test"
+  detail Test.test(String x) : void
+test(String x, int y) · void  method
+  inserts test(${1:x}, ${2:y}); over "test"
+  detail TestSuper.test(String x, int y) : void

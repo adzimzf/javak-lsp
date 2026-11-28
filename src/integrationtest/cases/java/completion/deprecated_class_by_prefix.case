@@ -8,4 +8,6 @@ public class Main {
     DeprecatedCl$0
 }
 //= expected
-DeprecatedClass
+DeprecatedClass · com.demo.Main  class  deprecated
+  inserts DeprecatedClass over "DeprecatedCl"
+  detail com.demo.Main.DeprecatedClass

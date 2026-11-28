@@ -10,4 +10,4 @@ public class E {
 	}
 }
 //= expected
-asList([T... a])
+> asList([T... a]) : List<T>

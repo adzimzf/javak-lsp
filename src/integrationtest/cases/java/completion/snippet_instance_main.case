@@ -4,4 +4,9 @@ public class Test {
 	main$0
 }
 //= expected
-(nothing)
+main · public static main method  snippet
+  inserts public static void main(String[] args) {\n\t${0}\n} over "main"
+  detail public static main method
+public static void main(String[] args) · public static main method  snippet
+  inserts public static void main(String[] args) {\n\t${0}\n} over "main"
+  detail public static main method

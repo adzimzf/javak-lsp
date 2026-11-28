@@ -17,4 +17,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Circle.kt:5:13  fun unit(): Circle {
+/com/demo/Circle.kt:5:13-17  fun unit(): Circle {

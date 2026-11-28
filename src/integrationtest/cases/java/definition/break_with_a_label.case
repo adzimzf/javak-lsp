@@ -25,4 +25,4 @@ class Loops {
     }
 }
 //= expected
-/com/demo/Loops.java:6:9  outer: while (true) {
+/com/demo/Loops.java:6:9-20:26  outer: while (true) {

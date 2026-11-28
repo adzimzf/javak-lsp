@@ -20,4 +20,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Customer.java:4:12  String name;
+/com/demo/Customer.java:4:12-16  String name;

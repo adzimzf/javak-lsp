@@ -10,4 +10,4 @@ public class MyTest {
     }
 }
 //= expected
-Generate toString()
+Generate toString()  (source.generate.toString)

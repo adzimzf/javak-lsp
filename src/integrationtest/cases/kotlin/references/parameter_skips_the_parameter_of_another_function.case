@@ -11,5 +11,5 @@ class Scale {
     }
 }
 //= expected
-/com/demo/Scale.kt:4:15  fun apply(factor: Double, value: Double): Double {
-/com/demo/Scale.kt:5:24  return value * factor
+/com/demo/Scale.kt:4:15-21  fun apply(factor: Double, value: Double): Double {
+/com/demo/Scale.kt:5:24-30  return value * factor

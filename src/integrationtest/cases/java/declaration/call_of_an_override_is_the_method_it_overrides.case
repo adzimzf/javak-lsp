@@ -18,4 +18,4 @@ public class Square extends Shape {
     }
 }
 //= expected
-/com/demo/Shape.java:4:28  public abstract double area();
+/com/demo/Shape.java:4:28-32  public abstract double area();

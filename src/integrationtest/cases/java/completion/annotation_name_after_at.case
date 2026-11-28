@@ -13,4 +13,6 @@ public class Foo {
     }
 }
 //= expected
-Deprecated
+Deprecated · java.lang  interface
+  inserts Deprecated over "Deprec"
+  detail java.lang.Deprecated

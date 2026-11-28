@@ -20,4 +20,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Order.java:5:14  Customer customer;
+/com/demo/Order.java:5:14-22  Customer customer;

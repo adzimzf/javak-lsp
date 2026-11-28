@@ -23,4 +23,6 @@ public class Main {
     }
 }
 //= expected
-otherOnly
+otherOnly() · void  method
+  inserts otherOnly(); over ""
+  detail Service.otherOnly() : void

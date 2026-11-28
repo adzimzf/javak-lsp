@@ -9,4 +9,4 @@ class A<T$0> {
     }
 }
 //= expected
-/com/demo/A.java:3:9  class A<T> {
+/com/demo/A.java:3:9-10  class A<T> {

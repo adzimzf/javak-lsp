@@ -4,4 +4,6 @@ public class Test {
 	java.util.List$0
 }
 //= expected
-List
+List · java.util  interface
+  inserts java.util.List over "java.util.List"
+  detail java.util.List

@@ -42,4 +42,4 @@ public @interface Singular {
     String value() default "";
 }
 //= expected
-/com/demo/Order.java:7:1  @Builder(toBuilder = true)
+/com/demo/Order.java:7:1-9  @Builder(toBuilder = true)

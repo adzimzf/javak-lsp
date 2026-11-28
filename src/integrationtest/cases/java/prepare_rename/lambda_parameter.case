@@ -11,4 +11,4 @@ class Test {
     Transform f = i$0 -> "" + i;
 }
 //= expected
-/com/demo/Test.java:4:19  Transform f = i -> "" + i;
+/com/demo/Test.java:4:19-20  Transform f = i -> "" + i;

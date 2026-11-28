@@ -6,4 +6,6 @@ public class Test {
 		foo.sysoutv$0	}
 }
 //= expected
-(nothing)
+sysoutv · Sends the affected object to a System.out.println(..) call  snippet
+  inserts System.out.println("foo = " + foo);${0} over "foo.sysoutv"
+  detail Sends the affected object to a System.out.println(..) call

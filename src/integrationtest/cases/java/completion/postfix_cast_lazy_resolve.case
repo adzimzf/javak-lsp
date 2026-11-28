@@ -5,4 +5,7 @@ public class Test {
 		a.cast$0	}
 }
 //= expected
-(nothing)
+cast · Casts the expression to a new type  snippet
+  inserts ((${1})a)${0} over "a.cast"
+  detail Casts the expression to a new type
+  doc (()a)

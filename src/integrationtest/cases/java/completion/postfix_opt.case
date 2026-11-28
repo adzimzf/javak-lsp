@@ -5,4 +5,6 @@ public class Test {
 		identifier.opt$0	}
 }
 //= expected
-(nothing)
+opt · Creates an Optional.ofNullable(..) call  snippet
+  inserts Optional.ofNullable(identifier) over "identifier.opt"
+  detail Creates an Optional.ofNullable(..) call

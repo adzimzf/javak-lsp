@@ -21,4 +21,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Unit.java:5:5  FOOT
+/com/demo/Unit.java:5:5-9  FOOT

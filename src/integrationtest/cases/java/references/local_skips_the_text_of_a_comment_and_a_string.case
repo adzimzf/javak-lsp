@@ -9,5 +9,5 @@ class Quoted {
     }
 }
 //= expected
-/com/demo/Quoted.java:5:16  String label = "label";
-/com/demo/Quoted.java:7:16  return label;
+/com/demo/Quoted.java:5:16-21  String label = "label";
+/com/demo/Quoted.java:7:16-21  return label;

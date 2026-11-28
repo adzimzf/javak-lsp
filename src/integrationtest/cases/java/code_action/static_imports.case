@@ -7,6 +7,6 @@ public class C {
     double pi = PI;
 }
 //= expected
-Generate Getters
-Generate Getters and Setters
-Generate Setters
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setters  (source.generate.accessors)

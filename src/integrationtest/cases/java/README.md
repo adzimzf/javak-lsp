@@ -21,6 +21,12 @@ the fixture — so this file says where each one comes from.
 
 Notes on how an answer is written down:
 
+- A place is written `path:line:column-end`: where the range the server
+  answers starts and where it ends (a column, or `line:column` over
+  lines). jdtls answers a definition, a reference or an implementation
+  with the range of the name, so a server that points at the start of the
+  name with an empty range answers something else, though it lands on the
+  same spot.
 - A place in the JDK or a library is written `<library>/` and the file's
   path in its module or jar (`<library>/java.base/java/lang/reflect/Array.java`),
   without a line: jdtls points at its own JDK's class file (`jdt://…`, which
@@ -52,9 +58,12 @@ Notes on how an answer is written down:
 - **implementation** asks every case of the hierarchy of jdtls's `hello`
   test project: `IFoo` is implemented by `Foo2`, which `Foo3` extends;
   `Foo` is extended by `FooChild`; nothing extends `AbstractFoo`.
-- **rename** lists where each edit starts, on the line as it was before;
-  the jdtls tests compare the sources after the rename. The new name is
-  `renamed` (`Renamed` for a name that starts with a capital).
+- **rename** is what the rename leaves, as the jdtls tests compare it:
+  each line it changes as it reads afterwards (`path:line  text`), whether
+  the server sends one edit per name or one per file, and each file it
+  moves (`moves /old -> /new`: jdtls renames the file of a public type it
+  renames). The new name is `renamed` (`Renamed` for a name that starts
+  with a capital).
 - **prepare_rename** and **rename** answer `(nothing)` where jdtls refuses
   with an error.
 - **folding_range** uses the files of jdtls's `foldingRange` test project
@@ -70,10 +79,48 @@ Notes on how an answer is written down:
   settings, Eclipse's built-in profile: the cases that come from tests of a
   setting (the Google profile, on-type formatting, switch indentation) are
   asked without it, so they show the default layout.
-- **hover** is the signature line as jdtls words it, with the hovered name
-  unqualified.
+- **hover** is every line the hover shows, the signature first, with the
+  hovered name unqualified, and the Javadoc below it: code fences, blank
+  lines and the targets of links are left out.
+- **completion** lists the items an editor would show, best first, each
+  as what the editor shows and does with it:
+
+  ```text
+  test(String x) · void  method  deprecated
+    inserts test(${1:x}); over "tes"
+    detail Test.test(String x) : void
+    doc The first line of its Javadoc.
+    adds import java.util.List;
+  ```
+
+  The label is shown with its `labelDetails` (jdtls's) or as a label that
+  writes them itself (`test(String x) : void`, `List - java.util`): both
+  read the same. Then the kind, the deprecated tag, the text the item
+  writes (its edit, or the list's `itemDefaults.editRange` with its
+  `textEditText`) and the source text that replaces, the detail, the first
+  line of the documentation and the other edits it makes, after
+  `completionItem/resolve` as an editor resolves the item it shows. The
+  client declares what VS Code declares (snippets, label details, item
+  defaults, resolve). Only items whose name the fixture spells, or the
+  case lists, are shown: what the JDK adds depends on the JDK.
+- **signature_help** lists every signature offered, the active one marked
+  `>`, each with its whole label (return type included), its active
+  parameter in brackets and the first line of its documentation.
+- **code_action** is each action's title and kind (`(quickfix)`,
+  `(source.organizeImports)`, …), and whether it is preferred or disabled.
+- **inlay_hint** is each hint with its kind (`(type)`, `(parameter)`) and a
+  `␣` where it asks for padding.
+- **workspace_symbol** is each type with its kind and container (the
+  package, or the type a nested one is in).
+- **call_hierarchy** and **type_hierarchy** give each item's kind and
+  detail, and under a call the places it is made (`called at`).
+- **prepare_rename** is the range a rename would change, and the
+  placeholder when the server gives one.
 - **diagnostics** is the whole file's report (`textDocument/diagnostic`),
-  written as `path:line:column  message`, every severity alike. javak-lsp
+  written as `path:line:column-end severity [code] message`, then
+  `(unnecessary)` or `(deprecated)` where it is tagged: the code is the
+  Eclipse problem id a quick fix is chosen by, the range what the editor
+  underlines. javak-lsp
   reports a Java file's syntax errors and its missing `package` declaration
   in its own words, and in jdtls's words a feature the build file's source
   level does not have (a text block below 15), a call no method of its name
@@ -93,7 +140,13 @@ Notes on how an answer is written down:
   project. jdtls reads the whole project, not only the open files.
 - **signature_help** cases that end in a syntax error do so on purpose, as
   the jdtls tests do: help is asked while a call is being typed.
-- The `lombok_*` cases were recorded from jdtls 1.63.0 started as
+- The answers were recorded from jdtls 1.64.0 (snapshot of 2026-11-24) on
+  JDK 25, with Lombok 1.18.48 as a Java agent (`just`-less:
+  `JDTLS_CMD="jdtls --jvm-arg=-javaagent:lombok.jar -data …"`), and are
+  the expectation wherever jdtls agreed with the case's earlier, shorter
+  answer. Where it did not, the case keeps its own answer, written out in
+  full by hand: a definition or reference runs to the end of the name.
+- The `lombok_*` cases were first recorded from jdtls 1.63.0 started as
   vscode-java starts it, with Lombok 1.18.48 as a Java agent
   (`--jvm-arg=-javaagent:lombok.jar` in `JDTLS_CMD`). The fixture brings
   the annotations as stubs of its own (`lombok/Data.java`,
@@ -549,16 +602,18 @@ Their `//= expected` block is empty: each one fails with
 hand (or recorded with `compat`, then checked). A jdtls test that asks
 several questions is one case per question, numbered `_1`, `_2`, ….
 
-The answer of some of these is more than the rendering shows: a hover is its
-signature line, not its Javadoc; a completion is the names offered, not the
-text a snippet inserts. Those cases still ask the question at the jdtls
-position; what the rendering leaves out is not checked.
+The rendering of each request is described under "Notes on how an answer
+is written down" above: it keeps what an editor acts on (kinds, ranges,
+inserted text, documentation, codes), so a case checks the whole answer,
+not only that the right name came back.
 
 ### completion
 
-Answer: the names offered, best first, as a client sorts them, of those the
-fixture spells or the case lists. The expectations were recorded with jdtls
-1.63.0 (`compat.rs`), so they follow jdtls's defaults: a type matches a prefix
+Answer: the items offered, best first, as a client sorts them, of those the
+fixture spells or the case lists, each with its kind, the text it inserts
+and what it replaces, its detail, documentation and the edits it adds (see
+the notes above). The expectations were recorded with jdtls 1.64.0
+(`compat.rs`), so they follow jdtls's defaults: a type matches a prefix
 whatever its case, anything else only with its first letter as typed
 (`java.completion.matchCase`); with no prefix the only types offered are the
 file's own; a declared type puts itself first in the value being written.

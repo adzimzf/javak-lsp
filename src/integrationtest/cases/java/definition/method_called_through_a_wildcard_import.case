@@ -18,4 +18,4 @@ public class Foo2 {
     }
 }
 //= expected
-/com/demo/one/Foo.java:4:17  public void hello() {
+/com/demo/one/Foo.java:4:17-22  public void hello() {

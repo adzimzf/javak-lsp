@@ -5,4 +5,6 @@ public class Test {
 		fori$0	}
 }
 //= expected
-(nothing)
+fori · iterate over array  snippet
+  inserts for (${1:int} ${2:i} = ${3:0}; ${2:i} < ${4:args.length}; ${2:i}++) {\n\t$TM_SELECTED_TEXT${0}\n} over "fori"
+  detail iterate over array

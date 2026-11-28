@@ -24,5 +24,5 @@ class Main {
     Measure byPerimeter = Circle::perimeter;
 }
 //= expected
-/com/demo/Circle.java:4:12  double area() {
-/com/demo/Main.java:4:30  Measure byArea = Circle::area;
+/com/demo/Circle.java:4:12-16  double area() {
+/com/demo/Main.java:4:30-34  Measure byArea = Circle::area;

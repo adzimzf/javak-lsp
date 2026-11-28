@@ -6,6 +6,11 @@ public class Test {
 	}
 }
 //= expected
-Consumer
-args
-Test
+Consumer · java.util.function  interface
+  inserts Consumer over ""
+  detail java.util.function.Consumer
+args · String[]  variable
+  inserts args over ""
+Test  class
+  inserts Test over ""
+  detail Test

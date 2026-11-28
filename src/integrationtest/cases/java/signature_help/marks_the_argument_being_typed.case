@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected
-print(String text, [int copies])
+> print(String text, [int copies]) : void

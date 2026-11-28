@@ -13,5 +13,6 @@ package p;
 public $0class B$1 extends A {
 }
 //= expected
-Add Javadoc comment
-Generate toString()
+Add Javadoc comment  (quickassist)
+Generate toString()  (quickassist)
+Generate toString()  (source.generate.toString)

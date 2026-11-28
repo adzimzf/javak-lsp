@@ -11,4 +11,4 @@ class Outer {
     }
 }
 //= expected
-/com/demo/Outer.java:4:9  int count;
+/com/demo/Outer.java:4:9-14  int count;

@@ -9,5 +9,5 @@ public class Broken {
     }
 }
 //= expected
-/src/main/java/p/Broken.java:4:8  The import java.util.Set is never used
-/src/main/java/p/Broken.java:7:17  Syntax error, insert ";" to complete BlockStatements
+/src/main/java/p/Broken.java:4:8-21  warning [268435844] The import java.util.Set is never used
+/src/main/java/p/Broken.java:7:17-18  error [1610612976] Syntax error, insert ";" to complete BlockStatements

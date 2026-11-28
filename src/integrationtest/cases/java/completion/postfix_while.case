@@ -5,4 +5,6 @@ public class Test {
 		a.while$0	}
 }
 //= expected
-(nothing)
+while · Creates a while loop  snippet
+  inserts while (a) {\n\t${0}\n} over "a.while"
+  detail Creates a while loop

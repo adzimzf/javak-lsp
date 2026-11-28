@@ -9,4 +9,4 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:7:9  myValue = 3;
+/com/demo/E.java:7:9-16  myValue = 3;

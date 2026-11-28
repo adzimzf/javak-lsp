@@ -11,4 +11,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.kt:3:18  class Circle(val radius: Double)
+/com/demo/Circle.kt:3:18-24  class Circle(val radius: Double)

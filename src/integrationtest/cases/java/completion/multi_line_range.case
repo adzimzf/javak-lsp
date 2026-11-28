@@ -10,4 +10,9 @@ public class Foo {
     }
 }
 //= expected
-add
+add(String arg0) · boolean  method
+  inserts add(${1:arg0}) over ""
+  detail List.add(String arg0) : boolean
+add(int arg0, String arg1) · void  method
+  inserts add(${1:arg0}, ${2:arg1}); over ""
+  detail List.add(int arg0, String arg1) : void

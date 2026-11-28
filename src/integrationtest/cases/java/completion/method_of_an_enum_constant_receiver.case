@@ -18,4 +18,6 @@ public class Main {
     }
 }
 //= expected
-rgb
+rgb() · int  method
+  inserts rgb() over "rg"
+  detail Color.rgb() : int

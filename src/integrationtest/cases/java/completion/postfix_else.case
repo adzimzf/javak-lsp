@@ -5,4 +5,7 @@ public class Test {
 		a.else$0	}
 }
 //= expected
-(nothing)
+else · Creates a negated if statement  snippet
+  inserts if (!a) {\n\t${0}\n} over "a.else"
+  detail Creates a negated if statement
+  doc if (!a) {

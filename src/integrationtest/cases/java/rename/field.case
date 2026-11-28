@@ -9,5 +9,5 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:4:17  private int myValue = 2;
-/com/demo/E.java:7:9  myValue = 3;
+/com/demo/E.java:4  private int renamed = 2;
+/com/demo/E.java:7  renamed = 3;

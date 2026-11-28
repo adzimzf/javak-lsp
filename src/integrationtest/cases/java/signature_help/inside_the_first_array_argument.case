@@ -10,4 +10,4 @@ class E {
     }
 }
 //= expected
-foo([int[] a], char[] b)
+> foo([int[] a], char[] b) : void

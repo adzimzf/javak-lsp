@@ -5,4 +5,7 @@ public class Test {
 		a.if$0	}
 }
 //= expected
-(nothing)
+if · Creates a if statement  snippet
+  inserts if (a) {\n\t${0}\n} over "a.if"
+  detail Creates a if statement
+  doc if (a) {

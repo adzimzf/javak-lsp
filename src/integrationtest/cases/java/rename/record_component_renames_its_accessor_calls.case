@@ -13,5 +13,5 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:6:25  return instance.value();
-/com/demo/Test.java:3:17  record Test(int value) {
+/com/demo/Main.java:6  return instance.renamed();
+/com/demo/Test.java:3  record Test(int renamed) {

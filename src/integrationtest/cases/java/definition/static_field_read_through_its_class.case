@@ -13,4 +13,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Config.java:4:22  static final int LIMIT = 10;
+/com/demo/Config.java:4:22-27  static final int LIMIT = 10;

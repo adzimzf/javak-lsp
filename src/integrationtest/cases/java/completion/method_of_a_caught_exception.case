@@ -31,4 +31,6 @@ public class Main {
     }
 }
 //= expected
-code
+code() · int  method
+  inserts code() over "co"
+  detail DemoException.code() : int

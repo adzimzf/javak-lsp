@@ -5,4 +5,6 @@ public class Test {
 		identifier.assert$0	}
 }
 //= expected
-(nothing)
+assert · Creates an assert statement  snippet
+  inserts assert identifier; over "identifier.assert"
+  detail Creates an assert statement

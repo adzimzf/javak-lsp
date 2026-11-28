@@ -7,8 +7,8 @@ package alternative; public class One {}
 $0package demo;
 class App { One one; }
 //= expected
-Add all missing imports
-Generate Getters
-Generate Getters and Setters
-Generate Setters
-Organize imports
+Add all missing imports  (source)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setters  (source.generate.accessors)
+Organize imports  (source.organizeImports)

@@ -9,6 +9,6 @@ class A<T$0> {
     }
 }
 //= expected
-/com/demo/A.java:3:9  class A<T> {
-/com/demo/A.java:4:13  private T t;
-/com/demo/A.java:6:5  T get() {
+/com/demo/A.java:3  class A<Renamed> {
+/com/demo/A.java:4  private Renamed t;
+/com/demo/A.java:6  Renamed get() {

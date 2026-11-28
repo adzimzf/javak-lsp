@@ -29,4 +29,4 @@ class Report {
     }
 }
 //= expected
-/com/demo/Report.java:11:27  public String title() {
+/com/demo/Report.java:11:27-32  public String title() {

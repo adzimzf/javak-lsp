@@ -2,4 +2,4 @@
 $0package test1;
 import java.security.*;
 //= expected (pending)
-/src/main/java/test1/E.java:2:8  The import java.security is never used
+/src/main/java/test1/E.java:2:8-21  warning [268435844] The import java.security is never used

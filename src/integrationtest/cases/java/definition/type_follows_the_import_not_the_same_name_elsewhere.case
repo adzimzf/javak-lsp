@@ -17,4 +17,4 @@ class Main {
     Cir$0cle circle;
 }
 //= expected
-/com/demo/shapes/Circle.java:3:14  public class Circle {
+/com/demo/shapes/Circle.java:3:14-20  public class Circle {

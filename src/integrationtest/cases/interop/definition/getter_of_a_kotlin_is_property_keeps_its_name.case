@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Box.kt:4:9  val isEmpty: Boolean = true
+/com/demo/Box.kt:4:9-16  val isEmpty: Boolean = true

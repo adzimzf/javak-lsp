@@ -13,4 +13,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.kt:4:9  var radius: Double = 1.0
+/com/demo/Circle.kt:4:9-15  var radius: Double = 1.0

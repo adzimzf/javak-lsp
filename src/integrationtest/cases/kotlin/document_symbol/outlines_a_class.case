@@ -17,14 +17,14 @@ class Circle$0(private val radius: Double) {
 }
 //= expected
 class Circle
-symbol radius
+property radius
 method area
 enum Unit
-symbol entries
-symbol values
-symbol valueOf
-symbol name
-symbol ordinal
+property entries
+function values
+function valueOf
+property name
+property ordinal
 enum-member METRE
 enum-member FOOT
 symbol Companion

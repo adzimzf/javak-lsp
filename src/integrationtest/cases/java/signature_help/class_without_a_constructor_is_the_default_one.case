@@ -10,4 +10,4 @@ class E {
 class F {
 }
 //= expected
-F()
+> F()

@@ -18,7 +18,7 @@ class B {
     }
 }
 //= expected
-/com/demo/A.java:5:9  B b = new B();
-/com/demo/A.java:5:19  B b = new B();
-/com/demo/B.java:3:7  class B {
-/com/demo/B.java:4:5  B() {
+/com/demo/A.java:5  Renamed b = new Renamed();
+/com/demo/B.java:3  class Renamed {
+/com/demo/B.java:4  Renamed() {
+moves /com/demo/B.java -> /com/demo/Renamed.java

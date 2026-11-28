@@ -35,6 +35,12 @@ public class Main {
     }
 }
 //= expected
-bark
-breathe
-feed
+bark() · void  method
+  inserts bark(); over ""
+  detail Dog.bark() : void
+breathe() · void  method
+  inserts breathe(); over ""
+  detail Animal.breathe() : void
+feed() · void  method
+  inserts feed(); over ""
+  detail Pet.feed() : void

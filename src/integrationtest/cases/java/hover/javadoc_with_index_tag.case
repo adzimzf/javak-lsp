@@ -6,3 +6,4 @@ package test1;
 public class M$0eh {}
 //= expected
 Meh
+Some _"locale-sensitive"_ text.

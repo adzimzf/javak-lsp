@@ -113,4 +113,4 @@ public final class LoggerFactory {
     }
 }
 //= expected
-/src/main/java/com/demo/Service.java:13:17  The value of the field Service.count is not used
+/src/main/java/com/demo/Service.java:13:17-22  warning [570425421] The value of the field Service.count is not used

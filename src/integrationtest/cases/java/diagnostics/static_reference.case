@@ -17,4 +17,4 @@ public class HelloWorld {
     }
 }
 //= expected (pending)
-/src/org/sample/HelloWorld.java:1:1  HelloWorld.java is not on the classpath of project compat, only syntax errors are reported
+/src/org/sample/HelloWorld.java:1:1-2  warning [32] HelloWorld.java is not on the classpath of project compat, only syntax errors are reported

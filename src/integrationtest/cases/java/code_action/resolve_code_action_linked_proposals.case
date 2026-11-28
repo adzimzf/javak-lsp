@@ -7,14 +7,14 @@ public class E {
     }
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'test'
-Change modifiers to final where possible
-Extract to constant
-Extract to field
-Extract to local variable
-Extract to local variable (replace all occurrences)
-Extract to method
-Generate toString()
-Introduce Parameter...
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Add final modifier for 'test'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Extract to constant  (refactor.extract.constant)
+Extract to field  (refactor.extract.field)
+Extract to local variable  (refactor.extract.variable)
+Extract to local variable (replace all occurrences)  (refactor.extract.variable)
+Extract to method  (refactor.extract.function)
+Generate toString()  (source.generate.toString)
+Introduce Parameter...  (refactor.introduce.parameter)
+Surround with try/catch  (refactor)

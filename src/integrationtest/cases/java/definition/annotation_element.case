@@ -13,4 +13,4 @@ package com.demo;
 class Main {
 }
 //= expected
-/com/demo/Config.java:4:12  String name();
+/com/demo/Config.java:4:12-16  String name();

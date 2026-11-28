@@ -10,7 +10,7 @@ public class MyTest {
     }
 }
 //= expected
-Add Javadoc comment
-Change signature for 'test'
-Generate toString()
-Make Static
+Add Javadoc comment  (quickassist)
+Change signature for 'test'  (refactor.change.signature)
+Generate toString()  (source.generate.toString)
+Make Static  (refactor.inline)

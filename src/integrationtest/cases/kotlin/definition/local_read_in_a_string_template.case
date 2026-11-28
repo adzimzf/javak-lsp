@@ -8,4 +8,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Main.kt:5:13  val name = first
+/com/demo/Main.kt:5:13-17  val name = first

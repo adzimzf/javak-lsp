@@ -4,4 +4,4 @@ class Ma$0in {
   void run() {
 }
 //= expected
-/src/main/java/com/demo/Main.java:4:1  Syntax error, insert "}" to complete ClassBody
+/src/main/java/com/demo/Main.java:4:1-2  error [1610612976] Syntax error, insert "}" to complete ClassBody

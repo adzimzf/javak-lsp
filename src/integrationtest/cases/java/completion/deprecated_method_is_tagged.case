@@ -1,0 +1,26 @@
+//- /com/demo/Printer.java
+package com.demo;
+
+public class Printer {
+    /** @deprecated use {@link #print(String)} */
+    @Deprecated
+    public void printOld(String text) {}
+
+    public void print(String text) {}
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run(Printer printer) {
+        printer.pri$0
+    }
+}
+//= expected
+print(String text) · void  method
+  inserts print(${1:text}); over "pri"
+  detail Printer.print(String text) : void
+printOld(String text) · void  method  deprecated
+  inserts printOld(${1:text}); over "pri"
+  detail Printer.printOld(String text) : void
+  doc **Deprecated.** *use [print(String)]*

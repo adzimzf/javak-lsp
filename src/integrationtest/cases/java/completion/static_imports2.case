@@ -9,4 +9,9 @@ public class B {
     }
 }
 //= expected
-foo
+foo(int x) · void  method
+  inserts foo(${1:x}); over "fo"
+  detail B.foo(int x) : void
+foo · (package)  module
+  inserts foo over "fo"
+  detail (package) foo

@@ -23,5 +23,5 @@ class Guard {
     }
 }
 //= expected
-/com/demo/Guard.java:10:28  } catch (Exception failure) {
-/com/demo/Guard.java:11:20  return failure.getMessage();
+/com/demo/Guard.java:10:28-35  } catch (Exception failure) {
+/com/demo/Guard.java:11:20-27  return failure.getMessage();

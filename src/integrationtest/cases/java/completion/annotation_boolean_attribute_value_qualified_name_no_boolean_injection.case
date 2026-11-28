@@ -6,5 +6,6 @@ public class Test {
     public static final boolean blah = false;
 }
 //= expected
-blah
-class
+blah · boolean  constant
+  inserts blah over ""
+  detail Test.blah : boolean

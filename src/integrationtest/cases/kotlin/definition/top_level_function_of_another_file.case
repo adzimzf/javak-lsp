@@ -19,4 +19,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Shapes.kt:3:5  fun unitCircle(): Circle {
+/com/demo/Shapes.kt:3:5-15  fun unitCircle(): Circle {

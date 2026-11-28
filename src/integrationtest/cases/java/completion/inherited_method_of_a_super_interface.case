@@ -19,5 +19,9 @@ public class Main {
     }
 }
 //= expected
-close
-send
+close() · void  method
+  inserts close(); over ""
+  detail Closeable.close() : void
+send() · void  method
+  inserts send(); over ""
+  detail Channel.send() : void

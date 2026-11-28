@@ -10,4 +10,19 @@ public class B {
     }
 }
 //= expected
-abs
+abs(double a) · double  method
+  inserts abs(${1:a}) over "abs"
+  detail java.lang.Math.abs(double a) : double
+  adds import static java.lang.Math.abs;
+abs(float a) · float  method
+  inserts abs(${1:a}) over "abs"
+  detail java.lang.Math.abs(float a) : float
+  adds import static java.lang.Math.abs;
+abs(int a) · int  method
+  inserts abs(${1:a}) over "abs"
+  detail java.lang.Math.abs(int a) : int
+  adds import static java.lang.Math.abs;
+abs(long a) · long  method
+  inserts abs(${1:a}) over "abs"
+  detail java.lang.Math.abs(long a) : long
+  adds import static java.lang.Math.abs;

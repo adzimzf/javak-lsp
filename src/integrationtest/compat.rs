@@ -109,9 +109,10 @@ async fn record(command: &str, suffix: &str, language: &str) -> usize {
             project_root.join(SOURCE_DIRECTORY)
         });
         session.load(&fixture).await;
-        let actual = kind
-            .ask(&mut session, &fixture, &case.expected, case.settles())
+        let (actual, raw) = kind
+            .ask_raw(&mut session, &fixture, &case.expected, case.settles())
             .await;
+        super::cases::dump_raw(file, "jdtls", &raw);
         session.unload(&fixture).await;
         if fixture.files.iter().any(|file| file.path == "pom.xml") {
             // The case brought its own build file and took it away again.
@@ -146,7 +147,7 @@ const SOURCE_DIRECTORY: &str = "src/main/java";
 
 /// Narrows what is recorded to the cases whose path contains this, so a
 /// handshake can be tried on one directory before minutes are spent on
-/// every case: `COMPAT_ONLY=hover`.
+/// every case: `COMPAT_ONLY=hover`, or several, `COMPAT_ONLY=hover,rename`.
 const ONLY_VARIABLE: &str = "COMPAT_ONLY";
 
 /// Every case of `language`, with the request its directory asks.
@@ -158,7 +159,8 @@ fn cases_of(language: &str) -> Vec<(PathBuf, Kind)> {
             continue;
         }
         for file in case_files(&cases_root().join(case_language).join(request)) {
-            if !file.to_string_lossy().contains(&only) {
+            let path = file.to_string_lossy();
+            if !only.split(',').any(|part| path.contains(part)) {
                 continue;
             }
             cases.push((file, *kind));

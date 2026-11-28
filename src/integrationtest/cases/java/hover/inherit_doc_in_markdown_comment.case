@@ -21,3 +21,7 @@ public class Test {
 }
 //= expected
 int add(int a, int b)
+Adds two numbers.
+* **a** the first number
+<!-- -->
+* **b** the second number

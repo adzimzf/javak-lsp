@@ -21,5 +21,7 @@ class Main {
     }
 }
 //= expected
-area
-radius
+area  method
+  inserts area over ""
+radius  property
+  inserts radius over ""

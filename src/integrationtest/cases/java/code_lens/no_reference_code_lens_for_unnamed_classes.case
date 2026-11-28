@@ -23,5 +23,5 @@ permits Bar {
 }
 record Bar(String name) implements Foo { }
 //= expected
-/src/main/java/UnnamedWithString.java:1:8  String foo() {
-/src/main/java/UnnamedWithString.java:5:6  void main() {
+/src/main/java/UnnamedWithString.java:1:8-11  String foo() {
+/src/main/java/UnnamedWithString.java:5:6-10  void main() {

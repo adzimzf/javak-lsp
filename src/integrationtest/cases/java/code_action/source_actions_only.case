@@ -5,8 +5,8 @@ public class Foo {
 	}
 }
 //= expected
-Add Javadoc comment
-Change signature for 'foo'
-Generate toString()
-Make Static
-Organize imports
+Add Javadoc comment  (quickassist)
+Change signature for 'foo'  (refactor.change.signature)
+Generate toString()  (source.generate.toString)
+Make Static  (refactor.inline)
+Organize imports  (source.organizeImports)

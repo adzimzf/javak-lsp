@@ -9,6 +9,6 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Main.kt:5:13  val name = first
-/com/demo/Main.kt:6:23  val loud = "${name}!"
-/com/demo/Main.kt:7:24  return "Hello $name" + loud
+/com/demo/Main.kt:5:13-17  val name = first
+/com/demo/Main.kt:6:23-27  val loud = "${name}!"
+/com/demo/Main.kt:7:24-28  return "Hello $name" + loud

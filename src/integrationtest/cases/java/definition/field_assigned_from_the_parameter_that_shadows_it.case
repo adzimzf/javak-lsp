@@ -9,4 +9,4 @@ class Circle {
     }
 }
 //= expected
-/com/demo/Circle.java:4:12  double radius;
+/com/demo/Circle.java:4:12-18  double radius;

@@ -30,6 +30,6 @@ class Main {
     // circle$0
 }
 //= expected
-Circle  /com/demo/Circle.java:3
-CircleTest  /com/demo/CircleTest.java:3
-CircleTools  /com/demo/CircleTools.java:3
+Circle  class in com.demo  /com/demo/Circle.java:3
+CircleTest  class in com.demo  /com/demo/CircleTest.java:3
+CircleTools  class in com.demo  /com/demo/CircleTools.java:3

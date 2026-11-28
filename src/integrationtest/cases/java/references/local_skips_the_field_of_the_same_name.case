@@ -15,8 +15,8 @@ class Counter {
     }
 }
 //= expected
-/com/demo/Counter.java:7:13  int count = start;
-/com/demo/Counter.java:8:9  count = count + count;
-/com/demo/Counter.java:8:17  count = count + count;
-/com/demo/Counter.java:8:25  count = count + count;
-/com/demo/Counter.java:9:16  return count;
+/com/demo/Counter.java:7:13-18  int count = start;
+/com/demo/Counter.java:8:9-14  count = count + count;
+/com/demo/Counter.java:8:17-22  count = count + count;
+/com/demo/Counter.java:8:25-30  count = count + count;
+/com/demo/Counter.java:9:16-21  return count;

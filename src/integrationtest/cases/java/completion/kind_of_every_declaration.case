@@ -1,0 +1,64 @@
+//- /com/demo/Shapes.java
+package com.demo;
+
+public class Shapes<T> {
+    static final int LIMIT = 3;
+    int count;
+
+    interface Visitor {}
+
+    enum Colour { RED }
+
+    record Point(int x, int y) {}
+
+    @interface Marker {}
+
+    class Inner {}
+
+    Shapes() {}
+
+    void draw(int width) {
+        int height = 2;
+        T item = null;
+        $0
+    }
+}
+//= expected
+height · int  variable
+  inserts height over ""
+item · T  variable
+  inserts item over ""
+width · int  variable
+  inserts width over ""
+LIMIT · int  constant
+  inserts LIMIT over ""
+  detail Shapes<T>.LIMIT : int
+count · int  field
+  inserts count over ""
+  detail Shapes<T>.count : int
+draw(int width) · void  method
+  inserts draw(${1:width}); over ""
+  detail Shapes.draw(int width) : void
+Colour · com.demo.Shapes  enum
+  inserts Colour over ""
+  detail com.demo.Shapes.Colour
+Marker · com.demo.Shapes  interface
+  inserts Marker over ""
+  detail com.demo.Shapes.Marker
+Point · com.demo.Shapes  struct
+  inserts Point over ""
+  detail com.demo.Shapes.Point
+Shapes<T> · com.demo  class
+  inserts Shapes over ""
+  detail com.demo.Shapes<T>
+Shapes<T>.Inner · com.demo  class
+  inserts Inner over ""
+  detail com.demo.Shapes<T>.Inner
+T  class
+  inserts T over ""
+  detail T
+Visitor · com.demo.Shapes  interface
+  inserts Visitor over ""
+  detail com.demo.Shapes.Visitor
+class  snippet
+  inserts class ${1:InnerShapes} {\n\n\t${0}\n} over ""

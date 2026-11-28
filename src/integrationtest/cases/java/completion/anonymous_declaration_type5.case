@@ -3,4 +3,5 @@ public class Foo {
     public static void main(String[] args) {
         run("name", new Runnable($0
 //= expected
-Runnable
+Runnable() · Anonymous Inner Type  class
+  inserts () {\n\t${0}\n}; over "("

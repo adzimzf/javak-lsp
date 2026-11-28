@@ -13,4 +13,6 @@ package com.demo;
 class Main {
 }
 //= expected
-name
+name · String  field
+  inserts name =  over "na"
+  detail Config.name : String

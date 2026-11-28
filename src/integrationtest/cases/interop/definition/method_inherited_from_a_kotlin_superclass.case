@@ -20,4 +20,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Shape.kt:4:9  fun describe(): String {
+/com/demo/Shape.kt:4:9-17  fun describe(): String {

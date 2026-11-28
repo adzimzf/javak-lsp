@@ -71,4 +71,4 @@ public interface IFoo {
     void someMethod();
 }
 //= expected
-/org/sample/AbstractFoo.java:3:23  public abstract class AbstractFoo {
+/org/sample/AbstractFoo.java:3:23-34  public abstract class AbstractFoo {

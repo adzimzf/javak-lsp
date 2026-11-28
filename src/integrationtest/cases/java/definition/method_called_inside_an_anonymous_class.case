@@ -19,4 +19,4 @@ public class App {
     }
 }
 //= expected
-/com/demo/App.java:6:19  public String getGreeting() {
+/com/demo/App.java:6:19-30  public String getGreeting() {

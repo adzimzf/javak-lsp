@@ -15,5 +15,5 @@ class Ma$0in {
   }
 }
 //= expected
-/src/main/java/com/demo/Main.java:6:10  The method checkMissing(boolean) is undefined for the type Util
-/src/main/java/com/demo/Main.java:8:10  The method addMissing(String[], int) is undefined for the type ArrayList<String>
+/src/main/java/com/demo/Main.java:6:10-22  error [67108964] The method checkMissing(boolean) is undefined for the type Util
+/src/main/java/com/demo/Main.java:8:10-20  error [67108964] The method addMissing(String[], int) is undefined for the type ArrayList<String>

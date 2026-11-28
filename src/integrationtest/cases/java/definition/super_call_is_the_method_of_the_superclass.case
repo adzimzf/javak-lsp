@@ -16,4 +16,4 @@ class Square extends Shape {
     }
 }
 //= expected
-/com/demo/Shape.java:4:12  String describe() {
+/com/demo/Shape.java:4:12-20  String describe() {

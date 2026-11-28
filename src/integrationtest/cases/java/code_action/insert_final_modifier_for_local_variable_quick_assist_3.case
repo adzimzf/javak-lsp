@@ -8,9 +8,9 @@ public class A {
 	}
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'd'
-Change modifiers to final where possible
-Extract to field
-Generate toString()
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Add final modifier for 'd'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Extract to field  (refactor.extract.field)
+Generate toString()  (source.generate.toString)
+Surround with try/catch  (refactor)

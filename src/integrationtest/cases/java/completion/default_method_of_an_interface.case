@@ -17,4 +17,6 @@ public class Main {
     }
 }
 //= expected
-greet
+greet() · String  method
+  inserts greet() over "gre"
+  detail Greeter.greet() : String

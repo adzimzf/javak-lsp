@@ -23,5 +23,5 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.kt:4:9  fun area(): Double {
-/com/demo/Main.java:5:39  return square.area() + circle.area();
+/com/demo/Circle.kt:4  fun renamed(): Double {
+/com/demo/Main.java:5  return square.area() + circle.renamed();

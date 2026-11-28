@@ -17,10 +17,10 @@ public abstract class Node {
     }
 }
 //= expected
-Add Javadoc comment
-Assign statement to new field
-Assign statement to new local variable
-Change modifiers to final where possible
-Generate Getters
-Inline Method
-Sort Members for 'Node.java'
+Add Javadoc comment  (quickassist)
+Assign statement to new field  (refactor.assign.field)
+Assign statement to new local variable  (refactor.assign.variable)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getters  (source.generate.accessors)
+Inline Method  (refactor.inline)
+Sort Members for 'Node.java'  (source.sortMembers)

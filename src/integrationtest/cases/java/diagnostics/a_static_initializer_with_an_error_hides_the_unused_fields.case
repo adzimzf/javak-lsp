@@ -8,4 +8,4 @@ public class Hidden {
     }
 }
 //= expected
-/src/main/java/p/Hidden.java:4:23  Cannot use this in a static context
+/src/main/java/p/Hidden.java:4:23-27  error [536871112] Cannot use this in a static context

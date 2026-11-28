@@ -1,0 +1,20 @@
+//- /com/demo/Joiner.java
+package com.demo;
+
+public class Joiner {
+    public String join(String separator, String... parts) {
+        return separator;
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run(Joiner joiner) {
+        joiner.jo$0
+    }
+}
+//= expected
+join(String separator, String... parts) · String  method
+  inserts join(${1:separator}, ${2:parts}) over "jo"
+  detail Joiner.join(String separator, String... parts) : String

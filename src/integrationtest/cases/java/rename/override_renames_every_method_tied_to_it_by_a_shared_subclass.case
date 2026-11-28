@@ -19,7 +19,7 @@ interface D {
     void foo();
 }
 //= expected
-/com/demo/B.java:4:17  public void foo() {
-/com/demo/B.java:9:26  public abstract void foo();
-/com/demo/B.java:13:17  public void foo() {
-/com/demo/B.java:18:10  void foo();
+/com/demo/B.java:4  public void renamed() {
+/com/demo/B.java:9  public abstract void renamed();
+/com/demo/B.java:13  public void renamed() {
+/com/demo/B.java:18  void renamed();

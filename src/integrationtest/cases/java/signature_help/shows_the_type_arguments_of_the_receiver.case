@@ -20,4 +20,4 @@ class Main {
     }
 }
 //= expected
-put(String key, [Circle value])
+> put(String key, [Circle value]) : Circle

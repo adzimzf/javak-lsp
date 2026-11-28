@@ -30,5 +30,5 @@ class Main {
     // CT$0
 }
 //= expected
-CircleTest  /com/demo/CircleTest.java:3
-CircleTools  /com/demo/CircleTools.java:3
+CircleTest  class in com.demo  /com/demo/CircleTest.java:3
+CircleTools  class in com.demo  /com/demo/CircleTools.java:3

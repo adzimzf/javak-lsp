@@ -7,7 +7,7 @@ public class E {
     void beta() {}
 }
 //= expected
-Add Javadoc comment
-Generate toString()
-Inline Method
-Sort Members for 'E.java'
+Add Javadoc comment  (quickassist)
+Generate toString()  (source.generate.toString)
+Inline Method  (refactor.inline)
+Sort Members for 'E.java'  (source.sortMembers)

@@ -27,5 +27,5 @@ class Main {
     }
 }
 //= expected
-/com/demo/Shape.kt:8:18  override fun area(): Double {
-/com/demo/Square.java:4:19  public double area() {
+/com/demo/Shape.kt:8:18-22  override fun area(): Double {
+/com/demo/Square.java:4:19-23  public double area() {

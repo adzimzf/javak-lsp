@@ -17,6 +17,6 @@ class Zamzam {
     Parser parser;
 }
 //= expected
-/org/jsoup/azim/Zamzam.java:3:8  import org.jsoup.parser.Parser;
-/org/jsoup/azim/Zamzam.java:6:5  Parser parser;
-/org/jsoup/parser/Parser.java:3:14  public class Parser {
+/org/jsoup/azim/Zamzam.java:3:8-31  import org.jsoup.parser.Parser;
+/org/jsoup/azim/Zamzam.java:6:5-11  Parser parser;
+/org/jsoup/parser/Parser.java:3:14-20  public class Parser {

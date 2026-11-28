@@ -23,4 +23,6 @@ class Limited extends Source {
     }
 }
 //= expected
-read([byte[] b], int off, int len)
+  read() : int
+  read(byte[] b) : int
+> read([byte[] b], int off, int len) : int

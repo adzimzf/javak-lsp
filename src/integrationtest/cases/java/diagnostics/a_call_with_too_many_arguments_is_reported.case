@@ -9,4 +9,4 @@ class Ma$0in {
   }
 }
 //= expected
-/src/main/java/com/demo/Main.java:7:10  The method count() in the type Main is not applicable for the arguments (String, int)
+/src/main/java/com/demo/Main.java:7:10-15  error [67108979] The method count() in the type Main is not applicable for the arguments (String, int)

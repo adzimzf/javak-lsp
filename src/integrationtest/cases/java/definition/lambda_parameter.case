@@ -15,4 +15,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:7:16  return value -> value * 2;
+/com/demo/Main.java:7:16-21  return value -> value * 2;

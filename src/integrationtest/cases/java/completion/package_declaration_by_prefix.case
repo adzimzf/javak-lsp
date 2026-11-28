@@ -4,4 +4,6 @@ package com.dem$0
 public class Baz {
 }
 //= expected
-com.demo
+com.demo · (package)  module
+  inserts com.demo over "com.dem"
+  detail (package) com.demo

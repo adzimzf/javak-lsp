@@ -42,4 +42,4 @@ public @interface Singular {
     String value() default "";
 }
 //= expected
-/com/demo/Shop.java:5:44  Order.OrderBuilder builder = Order.builder();
+/com/demo/Shop.java:5:44-53  Order.OrderBuilder builder = Order.builder();

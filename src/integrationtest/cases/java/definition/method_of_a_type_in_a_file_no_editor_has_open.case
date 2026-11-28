@@ -14,4 +14,4 @@ public class Zamzam {
     }
 }
 //= expected
-/org/jsoup/parser/Parser.java:4:19  public String defaultNamespace() { return ""; }
+/org/jsoup/parser/Parser.java:4:19-35  public String defaultNamespace() { return ""; }

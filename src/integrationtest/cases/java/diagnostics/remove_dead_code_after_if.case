@@ -9,4 +9,4 @@ public class E {
     }
 }
 //= expected
-/src/main/java/test1/E.java:4:20  Dead code
+/src/main/java/test1/E.java:4:20-6:10  warning [536871061] Dead code

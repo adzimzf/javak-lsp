@@ -4,4 +4,13 @@ public class E {
    public int bar(String s) { System.out.println( $0 }
 }
 //= expected
-println()
+> println() : void
+  println(Object x) : void
+  println(String x) : void
+  println(char[] x) : void
+  println(double x) : void
+  println(float x) : void
+  println(long x) : void
+  println(int x) : void
+  println(char x) : void
+  println(boolean x) : void

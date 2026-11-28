@@ -4,4 +4,4 @@ class Ma$0in {
   int count = 1
 }
 //= expected
-/src/main/java/com/demo/Main.java:3:15  Syntax error, insert ";" to complete ClassBodyDeclarations
+/src/main/java/com/demo/Main.java:3:15-16  error [1610612976] Syntax error, insert ";" to complete ClassBodyDeclarations

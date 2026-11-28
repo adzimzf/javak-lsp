@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Unit.java:4:5  METRE,
+/com/demo/Unit.java:4:5-10  METRE,

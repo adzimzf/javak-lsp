@@ -9,4 +9,4 @@ record R(int value) {
     }
 }
 //= expected
-/com/demo/R.java:5:13  if (value < 0) {
+/com/demo/R.java:5:13-18  if (value < 0) {

@@ -11,4 +11,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:7:35  } catch (RuntimeException failure) {
+/com/demo/Main.java:7:35-42  } catch (RuntimeException failure) {

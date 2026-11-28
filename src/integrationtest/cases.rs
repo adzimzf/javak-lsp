@@ -53,6 +53,10 @@ pub(super) const ANSWER_HEADER: &str = "//=";
 /// pending case cannot sit there once it holds.
 const PENDING: &str = "(pending)";
 const INTEGRATION_VARIABLE: &str = "INTEGRATION";
+/// `CASE_RECORD=1` writes what this server answers each case under a
+/// `//= javak` line, beside what [`super::compat`] records of jdtls, so the
+/// two can be read side by side.
+const RECORD_VARIABLE: &str = "CASE_RECORD";
 /// How many cases of one suite are in flight; what runs is capped by the
 /// budget they share with every other suite.
 const CASES_IN_FLIGHT: usize = 64;
@@ -212,9 +216,13 @@ async fn run_case(file: &Path, kind: Kind) -> Option<String> {
     let case = Case::read(file);
     let fixture = Fixture::parse(&case.fixture);
     let mut session = Session::open(&fixture).await;
-    let actual = kind
-        .ask(&mut session, &fixture, &case.expected, case.settles())
+    let (actual, raw) = kind
+        .ask_raw(&mut session, &fixture, &case.expected, case.settles())
         .await;
+    dump_raw(file, "javak", &raw);
+    if asked_for(RECORD_VARIABLE) {
+        write_answer_block(file, "javak", &actual);
+    }
     let agrees = actual == case.expected;
     if agrees != case.pending {
         return None;
@@ -340,8 +348,10 @@ fn block_span(text: &str, header: &str) -> Option<(usize, usize)> {
 /// ones around them, ending in one newline. An empty one stays empty, so a
 /// case file committed without an answer disagrees with every answer.
 fn normalized(expected: &str) -> String {
-    let body = expected.trim();
-    if body.is_empty() {
+    // Blank lines around it go, the indent of its first line stays: an
+    // answer may start with an indented line (an inactive signature).
+    let body = expected.trim_start_matches(['\n', '\r']).trim_end();
+    if body.trim().is_empty() {
         return String::new();
     }
     body.to_owned() + "\n"
@@ -431,4 +441,14 @@ pub(super) fn case_files(directory: &Path) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Debug aid: `CASE_RAW=<dir>` writes each raw answer there.
+pub(super) fn dump_raw(file: &Path, server: &str, raw: &serde_json::Value) {
+    let Ok(directory) = std::env::var("CASE_RAW") else { return };
+    let relative = file.strip_prefix(cases_root()).unwrap_or(file).to_string_lossy().replace('/', "__");
+    let _ = std::fs::write(
+        Path::new(&directory).join(format!("{relative}.{server}.json")),
+        serde_json::to_string_pretty(raw).unwrap_or_default(),
+    );
 }

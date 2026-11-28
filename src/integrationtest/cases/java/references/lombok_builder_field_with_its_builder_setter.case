@@ -42,6 +42,6 @@ public @interface Singular {
     String value() default "";
 }
 //= expected
-/com/demo/Order.java:10:17  private int quantity;
-/com/demo/Shop.java:6:47  Order order = builder.customer("ada").quantity(2).express(true).item("tea").build();
-/com/demo/Shop.java:7:34  return order.toBuilder().quantity(3).build();
+/com/demo/Order.java:10:17-25  private int quantity;
+/com/demo/Shop.java:6:47-58  Order order = builder.customer("ada").quantity(2).express(true).item("tea").build();
+/com/demo/Shop.java:7:34-45  return order.toBuilder().quantity(3).build();

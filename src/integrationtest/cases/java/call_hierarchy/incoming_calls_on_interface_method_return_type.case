@@ -11,5 +11,6 @@ public interface CallHierarchyGH2771 {
     }
 }
 //= expected
-item Opt<T>  /src/org/sample/CallHierarchyGH2771.java:6:25  public static class Opt<T> {
-incoming of(T) <T> : Opt<T>  /src/org/sample/CallHierarchyGH2771.java:8:20  return new Opt();
+item class Opt<T> org.sample.CallHierarchyGH2771  /src/org/sample/CallHierarchyGH2771.java:6:25-28  public static class Opt<T> {
+incoming method of(T) <T> : Opt<T> org.sample.CallHierarchyGH2771$Opt  /src/org/sample/CallHierarchyGH2771.java:8:20-29  return new Opt();
+    called at 8:20-29

@@ -37,4 +37,4 @@ public class Old {
     }
 }
 //= expected
-/legacy/src/main/java/com/demo/Old.java:4:16  The Java feature 'Text Blocks' is only available with source level 15 and above
+/legacy/src/main/java/com/demo/Old.java:4:16-6:16  error The Java feature 'Text Blocks' is only available with source level 15 and above

@@ -14,4 +14,4 @@ public class Foo2 {
     F$0oo bar;
 }
 //= expected
-/com/demo/one/Foo.java:3:14  public class Foo {
+/com/demo/one/Foo.java:3:14-17  public class Foo {

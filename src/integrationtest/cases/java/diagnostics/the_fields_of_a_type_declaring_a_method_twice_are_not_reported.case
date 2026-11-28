@@ -6,6 +6,6 @@ public class Twice {
     void m() {}
 }
 //= expected
-/src/main/java/p/Twice.java:3:17  The value of the field Twice.unused is not used
-/src/main/java/p/Twice.java:4:10  Duplicate method m() in type Twice
-/src/main/java/p/Twice.java:5:10  Duplicate method m() in type Twice
+/src/main/java/p/Twice.java:3:17-23  warning [570425421] The value of the field Twice.unused is not used
+/src/main/java/p/Twice.java:4:10-13  error [67109219] Duplicate method m() in type Twice
+/src/main/java/p/Twice.java:5:10-13  error [67109219] Duplicate method m() in type Twice

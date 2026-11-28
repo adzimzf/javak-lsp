@@ -113,4 +113,4 @@ public final class LoggerFactory {
     }
 }
 //= expected
-/com/demo/Person.java:8:21  private boolean active;
+/com/demo/Person.java:8:21-27  private boolean active;

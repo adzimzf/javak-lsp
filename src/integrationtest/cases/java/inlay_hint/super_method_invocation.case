@@ -8,4 +8,4 @@ class Bar extends Foo {
 	}
 }
 //= expected
-6:17  obj:
+6:17  obj:␣

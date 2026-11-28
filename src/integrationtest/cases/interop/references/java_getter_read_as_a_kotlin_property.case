@@ -15,6 +15,6 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Circle.java:4:19  public double getRadius() {
-/com/demo/Main.kt:5:23  return circle.radius + circle.getRadius()
-/com/demo/Main.kt:5:39  return circle.radius + circle.getRadius()
+/com/demo/Circle.java:4:19-28  public double getRadius() {
+/com/demo/Main.kt:5:23-29  return circle.radius + circle.getRadius()
+/com/demo/Main.kt:5:39-48  return circle.radius + circle.getRadius()

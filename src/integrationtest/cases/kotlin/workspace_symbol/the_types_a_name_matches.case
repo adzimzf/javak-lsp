@@ -13,5 +13,5 @@ package com.demo
 
 class Square
 //= expected
-Circle  /com/demo/Circle.kt:3
-CircleTest  /com/demo/CircleTest.kt:3
+Circle  class in com.demo  /com/demo/Circle.kt:3
+CircleTest  class in com.demo  /com/demo/CircleTest.kt:3

@@ -18,8 +18,8 @@ public class Name {
     }
 }
 //= expected
-Add Javadoc comment
-Change modifiers to final where possible
-Generate Getters
-Invert conditions
-Invert equals
+Add Javadoc comment  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getters  (source.generate.accessors)
+Invert conditions  (refactor)
+Invert equals  (quickassist)

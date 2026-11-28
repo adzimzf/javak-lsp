@@ -27,6 +27,6 @@ class Plot {
     }
 }
 //= expected
-/com/demo/Circle.java:4:12  double area() {
-/com/demo/Circle.java:9:16  return area() * 2;
-/com/demo/Main.java:5:37  return plot.area() + circle.area();
+/com/demo/Circle.java:4:12-16  double area() {
+/com/demo/Circle.java:9:16-22  return area() * 2;
+/com/demo/Main.java:5:37-43  return plot.area() + circle.area();

@@ -3,4 +3,6 @@ public class NoPackage {
     NoP$0
 }
 //= expected
-NoPackage
+NoPackage  class
+  inserts NoPackage over "NoP"
+  detail NoPackage

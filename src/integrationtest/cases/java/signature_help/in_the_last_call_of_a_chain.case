@@ -15,4 +15,4 @@ class E {
     }
 }
 //= expected
-setBar()
+> setBar() : E

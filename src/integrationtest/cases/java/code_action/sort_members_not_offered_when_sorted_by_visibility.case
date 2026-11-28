@@ -7,9 +7,9 @@ public class D {
     private String consume(String s) { pos++; return s; }
 }
 //= expected
-Add Javadoc comment
-Change modifiers to final where possible
-Generate Getters
-Generate Getters and Setters
-Generate Setters
-Invert conditions
+Add Javadoc comment  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setters  (source.generate.accessors)
+Invert conditions  (refactor)

@@ -8,6 +8,6 @@ class Scale {
     }
 }
 //= expected
-/com/demo/Scale.kt:4:15  fun apply(factor: Double, value: Double): Double {
-/com/demo/Scale.kt:5:30  val scaled = value * factor
-/com/demo/Scale.kt:6:25  return scaled + factor
+/com/demo/Scale.kt:4:15-21  fun apply(factor: Double, value: Double): Double {
+/com/demo/Scale.kt:5:30-36  val scaled = value * factor
+/com/demo/Scale.kt:6:25-31  return scaled + factor

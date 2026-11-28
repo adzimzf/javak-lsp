@@ -18,4 +18,4 @@ public class Za$0mzam {
   }
 }
 //= expected
-/src/main/java/org/jsoup/azim/Zamzam.java:10:5  The method parse(String, Parser) in the type Zamzam is not applicable for the arguments (String)
+/src/main/java/org/jsoup/azim/Zamzam.java:10:5-10  error [67108979] The method parse(String, Parser) in the type Zamzam is not applicable for the arguments (String)

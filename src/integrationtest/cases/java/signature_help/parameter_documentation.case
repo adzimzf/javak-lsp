@@ -13,4 +13,4 @@ public class E {
 	}
 }
 //= expected
-copy([Object[] src], Object[] dest, int count)
+> copy([Object[] src], Object[] dest, int count) : void

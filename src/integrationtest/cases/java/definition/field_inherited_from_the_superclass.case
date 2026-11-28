@@ -13,4 +13,4 @@ public class Car extends Vehicle {
     }
 }
 //= expected
-/com/demo/Vehicle.java:4:19  public String model;
+/com/demo/Vehicle.java:4:19-24  public String model;

@@ -29,8 +29,8 @@ class Main {
     }
 }
 //= expected
-/com/demo/Counter.java:4:9  int total;
-/com/demo/Counter.java:7:9  total = total + amount;
-/com/demo/Counter.java:7:17  total = total + amount;
-/com/demo/Counter.java:11:14  this.total = 0;
-/com/demo/Main.java:8:24  return counter.total;
+/com/demo/Counter.java:4:9-14  int total;
+/com/demo/Counter.java:7:9-14  total = total + amount;
+/com/demo/Counter.java:7:17-22  total = total + amount;
+/com/demo/Counter.java:11:14-19  this.total = 0;
+/com/demo/Main.java:8:24-29  return counter.total;

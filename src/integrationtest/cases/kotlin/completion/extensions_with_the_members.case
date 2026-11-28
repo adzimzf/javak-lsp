@@ -23,5 +23,7 @@ class Main {
     }
 }
 //= expected
-area
-doubled
+area  method
+  inserts area over ""
+doubled  method
+  inserts doubled over ""

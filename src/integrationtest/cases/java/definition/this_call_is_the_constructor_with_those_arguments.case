@@ -18,4 +18,4 @@ public class CharacterReader {
     }
 }
 //= expected
-/com/demo/CharacterReader.java:8:12  public CharacterReader(Reader input) {
+/com/demo/CharacterReader.java:8:12-27  public CharacterReader(Reader input) {

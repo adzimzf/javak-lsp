@@ -5,4 +5,6 @@ public class Test {
 		a.var$0	}
 }
 //= expected
-(nothing)
+var · Creates a new variable  snippet
+  inserts String ${1:a2} = a;${0} over "a.var"
+  detail Creates a new variable

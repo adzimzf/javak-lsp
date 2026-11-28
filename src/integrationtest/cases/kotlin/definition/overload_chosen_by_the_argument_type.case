@@ -17,4 +17,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Printer.kt:7:9  fun print(text: String) {
+/com/demo/Printer.kt:7:9-14  fun print(text: String) {

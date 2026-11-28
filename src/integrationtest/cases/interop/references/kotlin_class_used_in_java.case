@@ -11,7 +11,7 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.kt:3:7  class Circle
-/com/demo/Main.java:4:5  Circle copy(Circle circle) {
-/com/demo/Main.java:4:17  Circle copy(Circle circle) {
-/com/demo/Main.java:5:20  return new Circle();
+/com/demo/Circle.kt:3:7-13  class Circle
+/com/demo/Main.java:4:5-11  Circle copy(Circle circle) {
+/com/demo/Main.java:4:17-23  Circle copy(Circle circle) {
+/com/demo/Main.java:5:20-26  return new Circle();

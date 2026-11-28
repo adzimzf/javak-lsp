@@ -19,5 +19,9 @@ public class Test extends Baz {
     }
 }
 //= expected
-describe
-run
+describe() · String  method
+  inserts describe() over ""
+  detail Baz.describe() : String
+run(Test test) · void  method
+  inserts run(${1:test}); over ""
+  detail Test.run(Test test) : void

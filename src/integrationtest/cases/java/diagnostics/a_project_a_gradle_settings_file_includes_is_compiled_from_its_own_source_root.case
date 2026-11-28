@@ -17,4 +17,4 @@ public class Api {
 package com.demo;
 public class Moved {}
 //= expected
-/services/api/src/main/java/com/demo/Api.java:1:9  The declared package "com.wrong" does not match the expected package "com.demo"
+/services/api/src/main/java/com/demo/Api.java:1:9-18  error [536871240] The declared package "com.wrong" does not match the expected package "com.demo"

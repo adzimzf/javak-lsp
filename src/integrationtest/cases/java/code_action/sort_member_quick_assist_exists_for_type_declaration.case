@@ -7,8 +7,12 @@ public class $0A$1 {
 	public String publicName;
 }
 //= expected
-Add Javadoc comment
-Generate Getters
-Generate Getters and Setters
-Generate Setters
-Sort Members for 'A.java'
+Add Javadoc comment  (quickassist)
+Generate Getters  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (quickassist)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setters  (quickassist)
+Generate Setters  (source.generate.accessors)
+Sort Members for 'A.java'  (quickassist)
+Sort Members for 'A.java'  (source.sortMembers)

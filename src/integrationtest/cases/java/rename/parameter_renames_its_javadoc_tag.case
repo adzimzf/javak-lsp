@@ -11,6 +11,6 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:5:15  * @param i int
-/com/demo/E.java:7:17  int foo(int i) {
-/com/demo/E.java:9:22  return e.foo(i);
+/com/demo/E.java:5  * @param renamed int
+/com/demo/E.java:7  int foo(int renamed) {
+/com/demo/E.java:9  return e.foo(renamed);

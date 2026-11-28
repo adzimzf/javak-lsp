@@ -7,4 +7,6 @@ public class Foo {
 	private static class A { public A(String name){} }
 }
 //= expected
-A
+A(String name)  constructor
+  inserts A(${1:name}) over "A"
+  detail Foo.A.A(String name)

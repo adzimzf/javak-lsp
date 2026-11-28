@@ -7,4 +7,6 @@ private String myTestString;
 	}
 }
 //= expected
-myTestString
+myTestString · String  field
+  inserts myTestString over "myTestS"
+  detail Foo.myTestString : String

@@ -11,4 +11,6 @@ public class Foo {
     }
 }
 //= expected
-IFoo
+Foo.IFoo() · Anonymous Inner Type  constructor
+  inserts IFoo() {\n\t${0}\n}; over "IFo"
+  detail com.demo.Foo.IFoo

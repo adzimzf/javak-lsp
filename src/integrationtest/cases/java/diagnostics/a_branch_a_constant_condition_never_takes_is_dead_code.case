@@ -13,9 +13,9 @@ public class Branches {
     }
 }
 //= expected
-/src/main/java/p/Branches.java:4:20  Dead code
-/src/main/java/p/Branches.java:5:22  Dead code
-/src/main/java/p/Branches.java:6:20  Dead code
-/src/main/java/p/Branches.java:7:36  Dead code
-/src/main/java/p/Branches.java:8:49  Dead code
-/src/main/java/p/Branches.java:9:32  Dead code
+/src/main/java/p/Branches.java:4:20-22  warning [536871061] Dead code
+/src/main/java/p/Branches.java:5:22-38  warning [536871061] Dead code
+/src/main/java/p/Branches.java:6:20-36  warning [536871061] Dead code
+/src/main/java/p/Branches.java:7:36-47  warning [536871061] Dead code
+/src/main/java/p/Branches.java:8:49-66  warning [536871061] Dead code
+/src/main/java/p/Branches.java:9:32-38  warning [536871061] Dead code

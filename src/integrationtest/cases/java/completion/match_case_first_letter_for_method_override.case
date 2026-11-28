@@ -8,6 +8,15 @@ class TestOverride extends Test{
 	t$0
 }
 //= expected
-testMethod
-Test
-TestOverride
+testMethod(int a, int b) · void  method
+  inserts @Override\npublic void testMethod(int a, int b) {\n    ${0:super.testMethod(a, b);}\n} over "t"
+  detail Override method in 'Test'
+testMethod(int b) · void  method
+  inserts @Override\npublic void testMethod(int b) {\n    ${0:super.testMethod(b);}\n} over "t"
+  detail Override method in 'Test'
+Test  class
+  inserts Test over "t"
+  detail Test
+TestOverride  class
+  inserts TestOverride over "t"
+  detail TestOverride

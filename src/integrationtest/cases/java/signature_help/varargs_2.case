@@ -10,4 +10,4 @@ public class E {
 	}
 }
 //= expected
-demo(String s, [String... s2])
+> demo(String s, [String... s2]) : void

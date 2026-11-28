@@ -14,4 +14,4 @@ class Circle {
     }
 }
 //= expected
-/com/demo/Circle.java:4:12  double area() {
+/com/demo/Circle.java:4:12-16  double area() {

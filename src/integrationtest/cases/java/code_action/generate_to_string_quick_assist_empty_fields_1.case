@@ -5,11 +5,12 @@ public class $0A$1 {
 	private static String name;
 }
 //= expected
-Add Javadoc comment
-Generate Getter and Setter for 'name'
-Generate Getter for 'name'
-Generate Getters
-Generate Getters and Setters
-Generate Setter for 'name'
-Generate Setters
-Generate toString()
+Add Javadoc comment  (quickassist)
+Generate Getter and Setter for 'name'  (quickassist)
+Generate Getter for 'name'  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setter for 'name'  (quickassist)
+Generate Setters  (source.generate.accessors)
+Generate toString()  (quickassist)
+Generate toString()  (source.generate.toString)

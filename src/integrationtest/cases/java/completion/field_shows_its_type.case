@@ -1,0 +1,29 @@
+//- /com/demo/Counter.java
+package com.demo;
+
+import java.util.List;
+
+public class Counter {
+    public int count;
+    public List<String> names;
+    public static final String LABEL = "counter";
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run(Counter counter) {
+        counter.$0
+    }
+}
+//= expected
+count · int  field
+  inserts count over ""
+  detail Counter.count : int
+names · List<java.lang.String>  field
+  inserts names over ""
+  detail Counter.names : List<java.lang.String>
+LABEL · String  constant
+  inserts LABEL over ""
+  detail Counter.LABEL : String
+  doc Value: "counter"

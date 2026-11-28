@@ -12,6 +12,6 @@ class Blocks {
     }
 }
 //= expected
-/com/demo/Blocks.java:6:17  int value = 1;
-/com/demo/Blocks.java:7:20  return value + value;
-/com/demo/Blocks.java:7:28  return value + value;
+/com/demo/Blocks.java:6:17-22  int value = 1;
+/com/demo/Blocks.java:7:20-25  return value + value;
+/com/demo/Blocks.java:7:28-33  return value + value;

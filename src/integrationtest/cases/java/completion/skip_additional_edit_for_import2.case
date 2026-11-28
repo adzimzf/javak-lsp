@@ -3,7 +3,14 @@ $0package org.sample;
 import public class Test {
 }
 //= expected
-class
-import
-package
-public
+class  snippet
+  inserts /**\n * ${1:InnerTest}\n */\npublic class ${1:InnerTest} {\n\n\t${0}\n} over ""
+  doc /**
+class  keyword
+  inserts class over ""
+import  keyword
+  inserts import over ""
+package  keyword
+  inserts package over ""
+public  keyword
+  inserts public over ""

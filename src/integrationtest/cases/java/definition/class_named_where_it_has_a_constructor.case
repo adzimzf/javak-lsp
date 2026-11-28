@@ -8,4 +8,4 @@ class Point {
     }
 }
 //= expected
-/com/demo/Point.java:3:7  class Point {
+/com/demo/Point.java:3:7-12  class Point {

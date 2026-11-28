@@ -5,4 +5,7 @@ public class Test {
 		a.par$0	}
 }
 //= expected
-(nothing)
+par · Places the expression in parentheses  snippet
+  inserts (a) over "a.par"
+  detail Places the expression in parentheses
+  doc (a)

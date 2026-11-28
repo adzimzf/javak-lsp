@@ -48,4 +48,6 @@ class Result {
     }
 }
 //= expected
-fail([String msg], Object data)
+  fail(Object data) : Boolean
+> fail([String msg], Object data) : Boolean
+  fail(int code, String msg, Object data) : Boolean

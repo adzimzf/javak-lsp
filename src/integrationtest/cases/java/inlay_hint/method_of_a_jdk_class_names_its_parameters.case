@@ -12,6 +12,6 @@ class Buffer {
 	}
 }
 //= expected
-8:40  initialCapacity:
-9:13  index:
-9:16  element:
+8:40  initialCapacity:␣
+9:13  index:␣
+9:16  element:␣

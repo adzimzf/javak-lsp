@@ -18,5 +18,6 @@ public class Decl extends LeafNode {
     }
 }
 //= expected
-item hasAttr(String) : boolean  /p/Node.java:3:20  public boolean hasAttr(String key) { return false; }
-incoming use(Decl, Node) : void  /p/Decl.java:5:14  node.hasAttr("b");
+item method hasAttr(String) : boolean p.Node  /p/Node.java:3:20-27  public boolean hasAttr(String key) { return false; }
+incoming method use(Decl, Node) : void p.Decl  /p/Decl.java:5:14-26  node.hasAttr("b");
+    called at 5:14-26

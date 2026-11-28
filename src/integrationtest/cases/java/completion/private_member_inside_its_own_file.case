@@ -12,4 +12,6 @@ class Circle {
     }
 }
 //= expected
-cache
+cache · double  field
+  inserts cache over "ca"
+  detail Circle.cache : double

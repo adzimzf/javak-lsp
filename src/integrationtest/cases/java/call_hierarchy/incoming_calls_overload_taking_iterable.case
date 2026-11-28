@@ -17,4 +17,4 @@ public class Selector {
     public static Elements select(String query, Iterable<Element> roots) { return null; }
 }
 //= expected
-item select(String, Element) : Elements  /p/Selector.java:3:28  public static Elements select(String query, Element root) { return null; }
+item method select(String, Element) : Elements p.Selector  /p/Selector.java:3:28-34  public static Elements select(String query, Element root) { return null; }

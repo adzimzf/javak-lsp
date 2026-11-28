@@ -790,4 +790,4 @@ public class Test{
     }
 }
 //= expected (pending)
-/src/test1/A.java:1:1  A.java is not on the classpath of project compat, only syntax errors are reported
+/src/test1/A.java:1:1-2  warning [32] A.java is not on the classpath of project compat, only syntax errors are reported

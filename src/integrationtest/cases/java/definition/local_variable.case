@@ -10,4 +10,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:7:13  int total = first + second;
+/com/demo/Main.java:7:13-18  int total = first + second;

@@ -11,4 +11,6 @@ public class Foo {
 	}
 }
 //= expected
-Integer
+Integer · java.lang  class
+  inserts Integer over ""
+  detail java.lang.Integer

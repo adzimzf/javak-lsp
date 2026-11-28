@@ -7,13 +7,13 @@ public class A {
 	public String publicName;$1
 }
 //= expected
-Add Javadoc comment
-Change modifier for 'publicName'
-Generate Getter and Setter for 'publicName'
-Generate Getter for 'publicName'
-Generate Getters
-Generate Getters and Setters
-Generate Setter for 'publicName'
-Generate Setters
-Sort Members for 'A.java'
-Sort Selected Members
+Add Javadoc comment  (quickassist)
+Change modifier for 'publicName'  (quickassist)
+Generate Getter and Setter for 'publicName'  (quickassist)
+Generate Getter for 'publicName'  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setter for 'publicName'  (quickassist)
+Generate Setters  (source.generate.accessors)
+Sort Members for 'A.java'  (source.sortMembers)
+Sort Selected Members  (quickassist)

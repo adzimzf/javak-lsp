@@ -20,4 +20,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Printer.java:7:10  void print(String text) {
+/com/demo/Printer.java:7:10-15  void print(String text) {

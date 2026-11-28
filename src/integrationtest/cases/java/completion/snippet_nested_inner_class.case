@@ -4,7 +4,19 @@ public class Test {}
 public class InnerTest{
 $0
 //= expected
-InnerTest
-Test
-class
-public
+InnerTest · org.sample  class
+  inserts InnerTest over ""
+  detail org.sample.InnerTest
+Test · org.sample  class
+  inserts Test over ""
+  detail org.sample.Test
+class  snippet
+  inserts /**\n * ${1:InnerTest_1}\n */\npublic class ${1:InnerTest_1} {\n\n\t${0}\n} over ""
+  doc /**
+public static void main(String[] args) · public static main method  snippet
+  inserts public static void main(String[] args) {\n\t${0}\n} over ""
+  detail public static main method
+class  keyword
+  inserts class  over ""
+public  keyword
+  inserts public  over ""

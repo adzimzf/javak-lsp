@@ -3,4 +3,8 @@ public class Foo {
 	pub$0
 }
 //= expected
-public
+public  keyword
+  inserts public  over "pub"
+public static void main(String[] args) · public static main method  snippet
+  inserts public static void main(String[] args) {\n\t${0}\n} over "pub"
+  detail public static main method

@@ -11,4 +11,4 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:7:17  int foo(int i) {
+/com/demo/E.java:7:17-18  int foo(int i) {

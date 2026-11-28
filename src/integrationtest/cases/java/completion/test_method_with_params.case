@@ -18,4 +18,14 @@ public class Test {
 	}
 }
 //= expected
-foo
+foo() · void  method
+  inserts foo(); over "fo"
+  detail Test.foo() : void
+  doc Another Javadoc
+foo(String bar) · void  method
+  inserts foo(${1:bar}); over "fo"
+  detail Test.foo(String bar) : void
+  doc This method has Javadoc
+foo · (package)  module
+  inserts foo over "fo"
+  detail (package) foo

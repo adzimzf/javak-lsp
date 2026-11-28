@@ -27,4 +27,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.kt:9:12  fun Circle.doubled(): Double {
+/com/demo/Circle.kt:9:12-19  fun Circle.doubled(): Double {

@@ -3,4 +3,8 @@ package org.sample;
 public class Test {}
 $0
 //= expected
-class
+class  snippet
+  inserts /**\n * ${1:InnerTest}\n */\npublic class ${1:InnerTest} {\n\n\t${0}\n} over ""
+  doc /**
+class  keyword
+  inserts class  over ""

@@ -15,4 +15,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Circle.java:4:19  public double getRadius() {
+/com/demo/Circle.java:4:19-28  public double getRadius() {

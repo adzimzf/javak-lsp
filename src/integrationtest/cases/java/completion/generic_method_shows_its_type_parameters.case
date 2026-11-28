@@ -1,0 +1,22 @@
+//- /com/demo/Lists.java
+package com.demo;
+
+import java.util.List;
+
+public class Lists {
+    public static <E extends Comparable<E>> E largest(List<E> items) {
+        return null;
+    }
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    void run() {
+        Lists.lar$0
+    }
+}
+//= expected
+largest(List<E> items) · E  method
+  inserts largest(${1:items}) over "lar"
+  detail Lists.largest(List<E> items) : E

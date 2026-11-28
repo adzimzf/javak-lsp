@@ -10,4 +10,4 @@ class E {
     }
 }
 //= expected
-show([String text], int copies)
+> show([String text], int copies) : void

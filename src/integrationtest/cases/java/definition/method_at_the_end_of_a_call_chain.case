@@ -27,4 +27,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Builder.java:8:13  Product build() {
+/com/demo/Builder.java:8:13-18  Product build() {

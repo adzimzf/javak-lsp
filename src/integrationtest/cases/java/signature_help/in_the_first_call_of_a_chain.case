@@ -15,4 +15,4 @@ class E {
     }
 }
 //= expected
-setFoo()
+> setFoo() : E

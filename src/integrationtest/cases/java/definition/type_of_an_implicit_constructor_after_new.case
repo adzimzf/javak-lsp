@@ -15,4 +15,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/App.java:3:14  public class App {
+/com/demo/App.java:3:14-17  public class App {

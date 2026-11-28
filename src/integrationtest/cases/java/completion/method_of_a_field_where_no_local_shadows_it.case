@@ -27,4 +27,6 @@ public class Main {
     }
 }
 //= expected
-meow
+meow() · void  method
+  inserts meow(); over ""
+  detail Cat.meow() : void

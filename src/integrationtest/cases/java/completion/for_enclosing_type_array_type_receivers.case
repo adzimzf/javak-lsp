@@ -5,4 +5,6 @@ public class Arr {
 	}
 }
 //= expected
-Arr
+Arr[]  class
+  inserts Arr[$1]$0 over ""
+  detail Arr[]

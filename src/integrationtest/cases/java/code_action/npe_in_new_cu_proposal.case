@@ -6,9 +6,9 @@ public class Foo {
 	}
 }
 //= expected
-Add Javadoc comment
-Add import
-Assign statement to new field
-Assign statement to new local variable
-Generate toString()
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Add import  (refactor)
+Assign statement to new field  (refactor.assign.field)
+Assign statement to new local variable  (refactor.assign.variable)
+Generate toString()  (source.generate.toString)
+Surround with try/catch  (refactor)

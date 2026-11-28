@@ -9,4 +9,4 @@ class B<T> {
     }
 }
 //= expected
-/com/demo/B.java:6:6  <U extends Number> U inspect(U u) {
+/com/demo/B.java:6:6-7  <U extends Number> U inspect(U u) {

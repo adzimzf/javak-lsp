@@ -17,4 +17,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/other/Circle.kt:3:7  class Circle
+/com/other/Circle.kt:3:7-13  class Circle

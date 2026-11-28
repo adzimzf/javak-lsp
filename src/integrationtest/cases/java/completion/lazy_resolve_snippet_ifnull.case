@@ -5,4 +5,6 @@ public class Test {
 		ifnull$0	}
 }
 //= expected
-(nothing)
+ifnull · if statement checking for null  snippet
+  inserts if (${1:obj} == null) {\n\t$TM_SELECTED_TEXT${0}\n} over "ifnull"
+  detail if statement checking for null

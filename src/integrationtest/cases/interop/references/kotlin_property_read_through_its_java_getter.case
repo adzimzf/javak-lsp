@@ -15,6 +15,6 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Circle.kt:3:18  class Circle(val radius: Double) {
-/com/demo/Circle.kt:5:16  return radius * 2
-/com/demo/Main.java:5:23  return circle.getRadius();
+/com/demo/Circle.kt:3:18-24  class Circle(val radius: Double) {
+/com/demo/Circle.kt:5:16-22  return radius * 2
+/com/demo/Main.java:5:23-32  return circle.getRadius();

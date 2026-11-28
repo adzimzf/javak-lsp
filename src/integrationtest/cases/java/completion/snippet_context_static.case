@@ -6,4 +6,6 @@ public class Test {
 $0	}
 }
 //= expected
-Test
+Test · org.sample  class
+  inserts Test over ""
+  detail org.sample.Test

@@ -12,4 +12,4 @@ class Main {
     Function<String, Integer> length = (@Mar$0ker String text) -> text.length();
 }
 //= expected
-/com/demo/Marker.java:3:12  @interface Marker {
+/com/demo/Marker.java:3:12-18  @interface Marker {

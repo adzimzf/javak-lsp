@@ -18,4 +18,4 @@ class E {
     }
 }
 //= expected
-V()
+> V()

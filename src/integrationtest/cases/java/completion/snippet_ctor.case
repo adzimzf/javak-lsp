@@ -5,4 +5,6 @@ public class MainClass {
 ctor$0
 }
 //= expected
-(nothing)
+ctor · constructor  snippet
+  inserts ${1|public,protected,private|} AnotherClass(${2}) {\n\t${3:super();}${0}\n} over "ctor"
+  detail constructor

@@ -4,5 +4,6 @@ package p;
 public $0class A$1 {
 }
 //= expected
-Add Javadoc comment
-Generate toString()
+Add Javadoc comment  (quickassist)
+Generate toString()  (quickassist)
+Generate toString()  (source.generate.toString)

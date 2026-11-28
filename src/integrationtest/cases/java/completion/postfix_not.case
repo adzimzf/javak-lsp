@@ -5,4 +5,7 @@ public class Test {
 		a.not$0	}
 }
 //= expected
-(nothing)
+not · Negates the expression  snippet
+  inserts !a over "a.not"
+  detail Negates the expression
+  doc !a
