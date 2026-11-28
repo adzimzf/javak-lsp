@@ -3040,19 +3040,38 @@ impl Snapshot {
                 None => format!("{name}{}", &signature[found.name.text.len()..]),
             };
         }
-        let documentation = match found.file.language {
-            Language::Java => self
-                .comment_above(found.file, found.node)
-                .filter(|comment| comment.text.starts_with("/**"))
-                .map(|comment| javadoc_markdown(&comment.text))
-                .filter(|markdown| !markdown.is_empty()),
-            _ => None,
-        };
+        let documentation = self.javadoc_of(&found);
         Some(HoverText {
             found,
             signature,
             documentation,
         })
+    }
+}
+
+impl Snapshot {
+    /// A Java declaration's Javadoc as Markdown, as jdtls's hover shows it.
+    pub fn javadoc_of(&self, found: &Found<'_>) -> Option<String> {
+        self.javadoc_comment(found)
+            .map(javadoc_markdown)
+            .filter(|markdown| !markdown.is_empty())
+    }
+
+    /// A Java declaration's Javadoc as a completion item shows it
+    /// ([`javadoc_summary`]).
+    pub fn javadoc_summary_of(&self, found: &Found<'_>) -> Option<String> {
+        self.javadoc_comment(found)
+            .map(javadoc_summary)
+            .filter(|markdown| !markdown.is_empty())
+    }
+
+    fn javadoc_comment<'a>(&self, found: &Found<'a>) -> Option<&'a str> {
+        if found.file.language != Language::Java {
+            return None;
+        }
+        self.comment_above(found.file, found.node)
+            .filter(|comment| comment.text.starts_with("/**"))
+            .map(|comment| comment.text.as_str())
     }
 }
 
@@ -3135,6 +3154,31 @@ fn type_arguments_text(written: &str) -> String {
 /// its `*` margins gone, inline tags as code or plain names, and the block
 /// tags (`@param`, `@return`, …) as lists under a heading each.
 pub fn javadoc_markdown(comment: &str) -> String {
+    let (mut markdown, tags) = javadoc_parts(comment);
+    markdown = inline_tags(&html_to_markdown(markdown.trim()));
+    javadoc_with_tags(markdown, &tags)
+}
+
+/// A Javadoc comment as a completion item's documentation shows it, as
+/// jdtls's: a `@deprecated` note first, then the description; the other
+/// tags are left to the hover.
+pub fn javadoc_summary(comment: &str) -> String {
+    let (description, tags) = javadoc_parts(comment);
+    let mut parts: Vec<String> = tags
+        .iter()
+        .filter(|(name, _)| name == "deprecated")
+        .map(|(_, text)| format!("**Deprecated.** *{}*", inline_tags(&html_to_markdown(text))))
+        .collect();
+    let description = inline_tags(&html_to_markdown(description.trim()));
+    if !description.is_empty() {
+        parts.push(description);
+    }
+    parts.join("\n\n")
+}
+
+/// A Javadoc comment's description and its block tags, each with its
+/// text on one line.
+fn javadoc_parts(comment: &str) -> (String, Vec<(String, String)>) {
     let body = comment
         .trim_start_matches("/**")
         .trim_end_matches("*/");
@@ -3167,7 +3211,11 @@ pub fn javadoc_markdown(comment: &str) -> String {
             description.push('\n');
         }
     }
-    let mut markdown = inline_tags(&html_to_markdown(description.trim()));
+    (description, tags)
+}
+
+/// The block tags under their jdtls headings, after `markdown`.
+fn javadoc_with_tags(mut markdown: String, tags: &[(String, String)]) -> String {
     // jdtls's headings, in its order; `@exception` is `@throws`.
     const HEADINGS: &[(&[&str], &str)] = &[
         (&["param"], "Parameters:"),

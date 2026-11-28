@@ -418,15 +418,29 @@ impl Libraries {
     /// The simple names of the types whose name starts with `prefix`,
     /// whatever their case, sorted.
     pub fn types_starting(&self, prefix: &str) -> Vec<String> {
+        self.types_starting_in_packages(prefix).into_iter().map(|(name, _)| name).collect()
+    }
+
+    /// [`Self::types_starting`], each name with the packages declaring a
+    /// type of that name, in the order they are read.
+    pub fn types_starting_in_packages(&self, prefix: &str) -> Vec<(String, Vec<String>)> {
         let Ok(indexed) = self.by_name.read() else {
             return Vec::new();
         };
         let prefix = prefix.to_lowercase();
-        let mut found: Vec<String> = indexed
+        let mut found: Vec<(String, Vec<String>)> = indexed
             .types
-            .keys()
-            .filter(|name| name.to_lowercase().starts_with(&prefix))
-            .cloned()
+            .iter()
+            .filter(|(name, _)| name.to_lowercase().starts_with(&prefix))
+            .map(|(name, files)| {
+                let mut packages: Vec<String> = Vec::new();
+                for file in files {
+                    if !packages.contains(&file.package) {
+                        packages.push(file.package.clone());
+                    }
+                }
+                (name.clone(), packages)
+            })
             .collect();
         found.sort();
         found

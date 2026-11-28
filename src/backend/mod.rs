@@ -640,6 +640,89 @@ fn highlighted(place: highlight::Highlight) -> DocumentHighlight {
 }
 
 /// An empty range at a declaration's name: what a client is sent to.
+/// A Java proposal as the item jdtls sends: the label with its parameters
+/// beside it and the type or package as their description, the kind, what
+/// it inserts (a snippet where it writes arguments), its detail and
+/// documentation, and the import it adds.
+fn java_completion_item(
+    proposal: crate::feature::completion::Proposal,
+    imports_at: (tower_lsp::lsp_types::Position, bool),
+    cursor_at: tower_lsp::lsp_types::Position,
+) -> CompletionItem {
+    use crate::feature::completion::ItemKind;
+    let shown = proposal.shown;
+    let kind = match shown.kind.unwrap_or_default() {
+        ItemKind::Text => CompletionItemKind::TEXT,
+        ItemKind::Method => CompletionItemKind::METHOD,
+        ItemKind::Constructor => CompletionItemKind::CONSTRUCTOR,
+        ItemKind::Field => CompletionItemKind::FIELD,
+        ItemKind::Constant => CompletionItemKind::CONSTANT,
+        ItemKind::EnumMember => CompletionItemKind::ENUM_MEMBER,
+        ItemKind::Variable => CompletionItemKind::VARIABLE,
+        ItemKind::Class => CompletionItemKind::CLASS,
+        ItemKind::Interface => CompletionItemKind::INTERFACE,
+        ItemKind::Enum => CompletionItemKind::ENUM,
+        ItemKind::Struct => CompletionItemKind::STRUCT,
+        ItemKind::Module => CompletionItemKind::MODULE,
+        ItemKind::Keyword => CompletionItemKind::KEYWORD,
+        ItemKind::Snippet => CompletionItemKind::SNIPPET,
+    };
+    let label = shown.label.unwrap_or(proposal.label);
+    let label_details = (proposal.label_detail.is_some() || shown.description.is_some()).then_some(
+        CompletionItemLabelDetails {
+            detail: proposal.label_detail,
+            description: shown.description,
+        },
+    );
+    let additional_text_edits = shown.import.map(|import| {
+        let (at, after_a_line) = imports_at;
+        let new_text = if after_a_line { format!("\n{}", import.trim_end()) } else { import };
+        vec![TextEdit { range: Range { start: at, end: at }, new_text }]
+    });
+    let inserted = shown.insert.unwrap_or(proposal.name.clone());
+    // What a qualified name being written is replaced with, whole.
+    let text_edit = shown.replaces.map(|from| {
+        CompletionTextEdit::Edit(TextEdit {
+            range: Range { start: lsp_position(from), end: cursor_at },
+            new_text: inserted.clone(),
+        })
+    });
+    CompletionItem {
+        filter_text: Some(proposal.name.clone()),
+        insert_text: Some(inserted),
+        text_edit,
+        insert_text_format: shown.snippet.then_some(InsertTextFormat::SNIPPET),
+        label,
+        label_details,
+        kind: Some(kind),
+        detail: shown.detail,
+        documentation: shown.documentation.map(|text| {
+            Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: text })
+        }),
+        deprecated: shown.deprecated.then_some(true),
+        tags: shown.deprecated.then(|| vec![CompletionItemTag::DEPRECATED]),
+        sort_text: Some(proposal.sort),
+        additional_text_edits,
+        ..CompletionItem::default()
+    }
+}
+
+/// Where an import goes in `file`: after its last import, else after its
+/// package declaration (the edit then starts a line of its own), else at
+/// its start.
+fn import_position(file: &crate::feature::semantic::FileView) -> (tower_lsp::lsp_types::Position, bool) {
+    let children = &file.tree.children;
+    let last = children
+        .iter()
+        .rev()
+        .find(|child| child.kind == "import_declaration")
+        .or_else(|| children.iter().find(|child| child.kind == "package_declaration"));
+    match last {
+        Some(declaration) => (lsp_position(declaration.end), true),
+        None => (tower_lsp::lsp_types::Position { line: 0, character: 0 }, false),
+    }
+}
+
 /// Where a declaration's name is, start to end, as a location shows it.
 fn name_range(name: &crate::parser::Syn) -> Range {
     Range { start: lsp_position(name.start), end: lsp_position(name.end) }
@@ -1286,41 +1369,31 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let implied = self.indexer.implied_package(&at.text_document.uri);
-        let offers = crate::feature::completion::offers(
-            &snapshot,
-            file,
-            cursor(at.position),
-            implied.as_deref(),
-        );
         if file.language == Language::Java {
             // As jdtls offers them: an item per overload, ranked, at most
-            // fifty, the list then incomplete.
-            let prefix = crate::feature::completion::typed_prefix(&file.text, cursor(at.position));
-            let (proposals, incomplete) = crate::feature::completion::proposals(offers, &prefix);
-            use crate::feature::completion::OfferKind;
+            // fifty, the list then incomplete; each as jdtls shows it.
+            let (proposals, incomplete) = crate::feature::completion::items(
+                &snapshot,
+                file,
+                cursor(at.position),
+                implied.as_deref(),
+            );
+            let imports_at = import_position(file);
             let items = proposals
                 .into_iter()
-                .map(|proposal| CompletionItem {
-                    label: proposal.label,
-                    filter_text: Some(proposal.name.clone()),
-                    insert_text: Some(proposal.name),
-                    kind: Some(match proposal.kind {
-                        OfferKind::Field => CompletionItemKind::FIELD,
-                        OfferKind::Keyword => CompletionItemKind::KEYWORD,
-                        OfferKind::Local => CompletionItemKind::VARIABLE,
-                        OfferKind::Method => CompletionItemKind::METHOD,
-                        OfferKind::Package => CompletionItemKind::MODULE,
-                        OfferKind::Type => CompletionItemKind::CLASS,
-                    }),
-                    sort_text: Some(proposal.sort),
-                    ..CompletionItem::default()
-                })
+                .map(|proposal| java_completion_item(proposal, imports_at, at.position))
                 .collect();
             return Ok(Some(CompletionResponse::List(CompletionList {
                 is_incomplete: incomplete,
                 items,
             })));
         }
+        let offers = crate::feature::completion::offers(
+            &snapshot,
+            file,
+            cursor(at.position),
+            implied.as_deref(),
+        );
         Ok(Some(CompletionResponse::Array(
             offers
                 .into_iter()

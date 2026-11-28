@@ -34,6 +34,7 @@ const LOCAL: char = '1';
 const FIELD: char = '2';
 const METHOD: char = '3';
 const TYPE: char = '5';
+const PACKAGE: char = '6';
 const KEYWORD: char = '9';
 
 /// What may start a compilation unit.
@@ -194,7 +195,24 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
             .and_then(|access| snapshot.expected_type_of(access, file))
             .map(|expected| expected.written())
             .or_else(|| expected_from_text(file, path, receiver));
-        return members(snapshot, file, receiver, prefix, calling, expected.as_deref());
+        let offers = members(snapshot, file, receiver, prefix, calling, expected.as_deref());
+        // `new com.demo.data.ArrayL|`: the constructors of the types.
+        let start = receiver_chain_start(path, receiver);
+        if creates_an_object(context) || written_after_new(context, start) {
+            return creations(context, offers, Some(start));
+        }
+        // `java.util.List|`: the type, written as qualified as it is.
+        let mut offers = offers;
+        for offer in &mut offers {
+            if offer.kind == super::OfferKind::Type
+                && let Some(qualified) = &offer.qualified
+                && enclosing_kind(path, "import_declaration").is_none()
+            {
+                offer.shown.insert = Some(qualified.clone());
+                offer.shown.replaces = Some(start);
+            }
+        }
+        return offers;
     }
     if enclosing_kind(path, "switch_label").is_some() {
         return switch_constants(snapshot, file, name.start);
@@ -221,14 +239,18 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
     if after_new(context) {
         let mut offers = types(context);
         if let Some(expected) = &expected {
-            offers.push(expected_offer(expected));
+            offers.push(expected_offer(context, expected));
         }
-        return offers;
+        return creations(context, offers, None);
     }
     if starts_a_member(path, name) || starts_a_recovered_member(path, name) {
         let mut offers = types(context);
         offers.extend(overridable(context));
-        offers.extend(keywords(MEMBER_KEYWORDS));
+        // In a type's body jdtls writes a keyword with the space after it.
+        offers.extend(keywords(MEMBER_KEYWORDS).into_iter().map(|mut offer| {
+            offer.shown.insert = Some(format!("{} ", offer.name));
+            offer
+        }));
         return offers;
     }
     let mut offers = Vec::new();
@@ -251,7 +273,15 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
         offers.extend(types(context));
     }
     if let Some(expected) = &expected {
-        offers.push(expected_offer(expected));
+        offers.push(expected_offer(context, expected));
+    }
+    // A name begun may be a package's: `foo|` offers `foo`.
+    if !prefix.is_empty() && !only_values {
+        offers.extend(super::packages(snapshot, prefix).into_iter().map(|mut offer| {
+            offer.rank = format!("{PACKAGE}{}", offer.name);
+            offer.shown = super::shown::package(&offer.name);
+            offer
+        }));
     }
     if !prefix.is_empty() {
         if starts_a_statement(context) {
@@ -385,15 +415,31 @@ fn keywords(words: &[&str]) -> Vec<Offer> {
         .map(|word| Offer {
             name: (*word).to_owned(),
             rank: format!("{KEYWORD}{word}"),
+            kind: super::OfferKind::Keyword,
             ..Offer::default()
         })
         .collect()
 }
 
-fn expected_offer(expected: &Type) -> Offer {
+/// The type the place wants, as jdtls offers it first: with its type
+/// arguments (`List<java.lang.String>`).
+fn expected_offer(context: &Context<'_>, expected: &Type) -> Offer {
+    let qualified = context
+        .snapshot
+        .of_type(expected, context.file)
+        .filter(|found| is_type_declaration(found.node))
+        .map(|found| context.snapshot.qualified_type_name(found.file, found.node));
+    let with_arguments = !expected.arguments.is_empty();
     Offer {
         name: expected.name.clone(),
         rank: format!("{EXPECTED}{}", expected.name),
+        kind: super::OfferKind::Type,
+        shown: super::Shown {
+            label: with_arguments.then(|| super::shown::jdt_type(context.snapshot, context.file, expected)),
+            detail: with_arguments.then(|| super::shown::qualified(context.snapshot, context.file, expected)),
+            ..super::Shown::default()
+        },
+        qualified,
         ..Offer::default()
     }
 }
@@ -513,44 +559,289 @@ fn after_new(context: &Context<'_>) -> bool {
             .is_some_and(|character| character.is_alphanumeric() || character == '_')
 }
 
+/// Whether the name is the type of a `new` expression.
+fn creates_an_object(context: &Context<'_>) -> bool {
+    context.path.iter().any(|node| {
+        node.kind == "object_creation_expression"
+            && node.child("type").is_some_and(|written| written.covers(context.name.start))
+    })
+}
+
+/// Whether `new` is written right before `start`.
+fn written_after_new(context: &Context<'_>, start: Position) -> bool {
+    let Some(offset) = offset_of(&context.written.text, start) else {
+        return false;
+    };
+    let before = context.written.text[..offset].trim_end();
+    before.ends_with("new")
+        && !before[..before.len() - 3]
+            .chars()
+            .next_back()
+            .is_some_and(|character| character.is_alphanumeric() || character == '_')
+}
+
+/// Where the qualified name the receiver is part of starts.
+fn receiver_chain_start(path: &[&Syn], receiver: &Syn) -> Position {
+    path.iter()
+        .filter(|node| matches!(node.kind.as_str(), "scoped_type_identifier" | "scoped_identifier" | "field_access"))
+        .find(|node| node.covers(receiver.start))
+        .map_or(receiver.start, |node| node.start)
+}
+
+/// What `new` offers of the types `offers` names, as jdtls does: a class's
+/// constructors, each its own proposal (the default one where it declares
+/// none); an interface's or abstract class's anonymous class. With no
+/// prefix the types themselves stay beside them. `qualified_from` is where
+/// a qualified name being written starts: the constructor writes it whole.
+fn creations(context: &Context<'_>, offers: Vec<Offer>, qualified_from: Option<Position>) -> Vec<Offer> {
+    let snapshot = context.snapshot;
+    let file = context.file;
+    let mut created = Vec::new();
+    for offer in offers {
+        let Some(found) = offer
+            .qualified
+            .as_deref()
+            .and_then(|qualified| snapshot.type_named(qualified, file))
+            .filter(|found| is_type_declaration(found.node))
+        else {
+            created.push(offer);
+            continue;
+        };
+        let qualified = snapshot.qualified_type_name(found.file, found.node);
+        let abstract_type = matches!(found.node.kind.as_str(), "interface_declaration" | "annotation_type_declaration")
+            || found
+                .node
+                .first("modifiers")
+                .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|word| word == "abstract"));
+        if found.node.kind == "enum_declaration" {
+            created.push(offer);
+            continue;
+        }
+        // A type the file cannot name by its simple name (another type of
+        // that name is imported) is written qualified.
+        let hidden = imports(context.written).into_iter().any(|import| {
+            !import.wildcard && !import.is_static && import.last_segment() == found.name.text && import.name != qualified
+        });
+        let written_name = if hidden || qualified_from.is_some() {
+            qualified.clone()
+        } else {
+            found.name.text.clone()
+        };
+        if abstract_type {
+            let package = snapshot.package(found.file).filter(|package| !package.is_empty());
+            let nested = package
+                .as_deref()
+                .and_then(|package| qualified.strip_prefix(&format!("{package}.")))
+                .unwrap_or(&qualified)
+                .to_owned();
+            let end = if ends_the_statement(context) { ";" } else { "" };
+            created.push(Offer {
+                name: found.name.text.clone(),
+                rank: format!("{EXPECTED}{}", found.name.text),
+                kind: super::OfferKind::Type,
+                constructs: true,
+                shown: super::Shown {
+                    kind: Some(super::ItemKind::Constructor),
+                    label: Some(nested),
+                    description: Some("Anonymous Inner Type".to_owned()),
+                    detail: (!context.prefix.is_empty()).then(|| qualified.clone()),
+                    insert: Some(format!("{written_name}() {{\n\t${{0}}\n}}{end}")),
+                    snippet: true,
+                    replaces: qualified_from,
+                    ..super::Shown::default()
+                },
+                qualified: offer.qualified.clone(),
+                declarations: vec![super::Proposed { parameters: Some(Vec::new()), ..super::Proposed::default() }],
+                ..Offer::default()
+            });
+        } else {
+            let constructors: Vec<Found<'_>> = members_of(found.node)
+                .into_iter()
+                .filter(|(member, _)| member.kind == "constructor_declaration")
+                .map(|(member, named)| Found { file: found.file, node: member, name: named, bindings: found.bindings.clone() })
+                .collect();
+            let declarations: Vec<super::Proposed> = if constructors.is_empty() {
+                vec![super::Proposed {
+                    parameters: Some(Vec::new()),
+                    shown: constructor_shown(&qualified, &found.name.text, &[], &written_name, &[], qualified_from),
+                    ..super::Proposed::default()
+                }]
+            } else {
+                let mut constructors = constructors;
+                // jdtls lists them by what their label writes.
+                constructors.sort_by_cached_key(|constructor| snapshot.parameters_written(constructor).join(", "));
+                constructors
+                    .iter()
+                    .enumerate()
+                    .map(|(index, constructor)| {
+                        let written = snapshot.parameters_written(constructor);
+                        let names: Vec<String> = crate::feature::semantic::parameters(constructor.node, &constructor.bindings)
+                            .into_iter()
+                            .map(|parameter| parameter.name)
+                            .collect();
+                        super::Proposed {
+                            shown: constructor_shown(&qualified, &found.name.text, &written, &written_name, &names, qualified_from),
+                            parameters: Some(written),
+                            names,
+                            deprecated: super::shown::deprecated(constructor.node),
+                            index,
+                            ..super::Proposed::default()
+                        }
+                    })
+                    .collect()
+            };
+            created.push(Offer {
+                name: found.name.text.clone(),
+                rank: offer.rank.clone(),
+                kind: super::OfferKind::Type,
+                constructs: true,
+                qualified: offer.qualified.clone(),
+                declarations,
+                ..Offer::default()
+            });
+        }
+        // A class stays offered as a type beside its constructors.
+        if context.prefix.is_empty() && qualified_from.is_none() && !abstract_type {
+            created.push(offer);
+        }
+    }
+    created
+}
+
+/// A constructor as jdtls shows it after `new`: `Name(String text)`, its
+/// qualified name as detail, the call it writes.
+fn constructor_shown(
+    qualified: &str,
+    name: &str,
+    written: &[String],
+    written_name: &str,
+    names: &[String],
+    replaces: Option<Position>,
+) -> super::Shown {
+    let arguments: Vec<String> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| format!("${{{}:{name}}}", index + 1))
+        .collect();
+    super::Shown {
+        kind: Some(super::ItemKind::Constructor),
+        detail: Some(format!("{qualified}.{name}({})", written.join(", "))),
+        insert: Some(format!("{written_name}({})", arguments.join(", "))),
+        snippet: !arguments.is_empty(),
+        replaces,
+        ..super::Shown::default()
+    }
+}
+
+/// Whether nothing but `;` (or the end of the line) follows the cursor,
+/// in a declaration or a statement: what is written there ends it.
+fn ends_the_statement(context: &Context<'_>) -> bool {
+    let line = context.written.text.lines().nth(context.name.start.line as usize).unwrap_or_default();
+    let rest: String = line.chars().skip(context.name.start.column as usize + context.prefix.chars().count()).collect();
+    let rest = rest.trim();
+    rest.is_empty() || rest == ";"
+}
+
 /// The types a name may stand for: with no prefix, the file's own; with
 /// one, every type of the workspace and its libraries starting with it.
 fn types(context: &Context<'_>) -> Vec<Offer> {
-    let mut names: Vec<String> = Vec::new();
-    let mut add = |name: &str| {
-        if !names.iter().any(|known| known == name) {
-            names.push(name.to_owned());
+    // Each name with the qualified name of the type it is, where known:
+    // types of one name in different packages are offered each.
+    let mut names: Vec<(String, Option<String>)> = Vec::new();
+    let mut add = |name: &str, qualified: Option<String>| {
+        let known = names.iter().any(|(known, known_qualified)| {
+            known == name && (known_qualified.is_none() || qualified.is_none() || *known_qualified == qualified)
+        });
+        if !known {
+            names.push((name.to_owned(), qualified));
         }
     };
+    let snapshot = context.snapshot;
+    // Ranked as jdtls lists them, by label: an inner class of a generic
+    // type the cursor is in is `Shapes<T>.Inner`, beside `Shapes<T>`.
+    let mut ranks: Vec<(String, String)> = Vec::new();
+    let mut parameters: Vec<String> = Vec::new();
     if context.prefix.is_empty() {
-        for (name, _) in types_of(context.file) {
-            add(name);
+        for (name, declaration) in types_of(context.file) {
+            add(name, Some(snapshot.qualified_type_name(context.file, declaration)));
+            if let Some(outer) = generic_outer(context, declaration) {
+                ranks.push((name.to_owned(), format!("{outer}.{name}")));
+            }
         }
         for name in recovered_types(&context.file.tree) {
-            add(&name);
+            add(&name, None);
         }
-    } else {
-        for file in &context.snapshot.files {
-            for (name, _) in types_of(file) {
-                if starts_with(name, context.prefix) {
-                    add(name);
+        // The type parameters in scope are types too.
+        for node in &context.path {
+            let Some(declared) = node.child("type_parameters") else { continue };
+            for parameter in declared.all("type_parameter") {
+                if let Some(named) = parameter.children.iter().find(|child| is_identifier(child))
+                    && !parameters.contains(&named.text)
+                {
+                    parameters.push(named.text.clone());
                 }
             }
         }
-        if let Some(libraries) = context.snapshot.libraries() {
-            for name in libraries.types_starting(context.prefix) {
-                add(&name);
+    } else {
+        for file in &snapshot.files {
+            for (name, declaration) in types_of(file) {
+                if starts_with(name, context.prefix) {
+                    add(name, Some(snapshot.qualified_type_name(file, declaration)));
+                }
+            }
+        }
+        if let Some(libraries) = snapshot.libraries() {
+            for (name, packages) in libraries.types_starting_in_packages(context.prefix) {
+                for package in packages {
+                    let qualified = if package.is_empty() { name.clone() } else { format!("{package}.{name}") };
+                    add(&name, Some(qualified));
+                }
             }
         }
     }
-    names
+    let mut offers: Vec<Offer> = names
         .into_iter()
-        .map(|name| Offer {
-            rank: format!("{TYPE}{name}"),
-            name,
-            ..Offer::default()
+        .map(|(name, qualified)| {
+            let ranked = ranks.iter().find(|(known, _)| *known == name).map_or(name.clone(), |(_, rank)| rank.clone());
+            Offer {
+                rank: format!("{TYPE}{ranked}"),
+                name,
+                kind: super::OfferKind::Type,
+                qualified,
+                ..Offer::default()
+            }
         })
-        .collect()
+        .collect();
+    offers.extend(parameters.into_iter().map(|name| Offer {
+        rank: format!("{TYPE}{name}"),
+        kind: super::OfferKind::Type,
+        shown: super::Shown {
+            kind: Some(super::ItemKind::Class),
+            detail: Some(name.clone()),
+            ..super::Shown::default()
+        },
+        name,
+        ..Offer::default()
+    }));
+    offers
+}
+
+/// The name of the generic class around an inner class `declaration`
+/// the cursor is in, as jdtls labels the inner one by it.
+fn generic_outer(context: &Context<'_>, declaration: &Syn) -> Option<String> {
+    if declaration.kind != "class_declaration"
+        || declaration.first("modifiers").is_some_and(|modifiers| modifiers.text.split_whitespace().any(|word| word == "static"))
+    {
+        return None;
+    }
+    let outer = path_to(&context.file.tree, declaration.start)
+        .into_iter()
+        .rev()
+        .find(|node| node.start < declaration.start && is_type_declaration(node))?;
+    let at = context.name.start;
+    (outer.kind == "class_declaration" && outer.child("type_parameters").is_some() && outer.start <= at && at <= outer.end)
+        .then(|| outer.child("name").map(|named| named.text.clone()))
+        .flatten()
 }
 
 /// The types a file declares where the parser could not read the
@@ -666,18 +957,30 @@ fn in_scope<'a>(context: &Context<'a>) -> Vec<Value<'a>> {
     let declaring = declaring(context);
     let mut values = Vec::new();
     let mut seen: Vec<String> = Vec::new();
-    let mut locals = snapshot.names_in_scope(file, at);
-    locals.extend(recovered_locals(context));
-    for local in locals {
+    let mut locals: Vec<(String, Option<String>)> =
+        snapshot.names_in_scope(file, at).into_iter().map(|name| (name, None)).collect();
+    locals.extend(recovered_locals(context).into_iter().map(|(name, written)| (name, Some(written))));
+    for (local, recovered_type) in locals {
         if declaring.as_deref() == Some(local.as_str()) || seen.contains(&local) {
             continue;
         }
         seen.push(local.clone());
+        let found = snapshot.name_in_scope(&local, file, at);
+        let shown = found.as_ref().map_or_else(
+            || super::Shown {
+                kind: Some(super::ItemKind::Variable),
+                description: recovered_type.clone(),
+                ..super::Shown::default()
+            },
+            |found| super::shown::variable(snapshot, file, found),
+        );
         values.push(Value {
-            found: snapshot.name_in_scope(&local, file, at),
+            found,
             offer: Offer {
                 rank: format!("{LOCAL}{local}"),
                 name: local,
+                kind: super::OfferKind::Local,
+                shown,
                 ..Offer::default()
             },
             is_void: false,
@@ -696,12 +999,14 @@ fn in_scope<'a>(context: &Context<'a>) -> Vec<Value<'a>> {
             }
             seen.push(named.text.clone());
             let is_method = member.kind == "method_declaration";
+            let found = Found {
+                file: owner.file,
+                node: member,
+                name: named,
+                bindings: owner.bindings.clone(),
+            };
             values.push(Value {
-                offer: Offer {
-                    name: named.text.clone(),
-                    rank: format!("{}{}", if is_method { METHOD } else { FIELD }, named.text),
-                    ..Offer::default()
-                },
+                offer: member_offer(context, &owner, &found, if is_method { METHOD } else { FIELD }),
                 is_void: is_method
                     && member
                         .child("type")
@@ -718,9 +1023,62 @@ fn in_scope<'a>(context: &Context<'a>) -> Vec<Value<'a>> {
     values
 }
 
+/// A member of `owner` offered by name, every overload of a method its
+/// own proposal, as jdtls offers it.
+fn member_offer(context: &Context<'_>, owner: &Found<'_>, found: &Found<'_>, group: char) -> Offer {
+    let snapshot = context.snapshot;
+    let named = &found.name.text;
+    let is_method = found.node.kind == "method_declaration";
+    let declarations = if is_method {
+        let mut overloads: Vec<super::Proposed> = Vec::new();
+        let mut signatures: Vec<Vec<String>> = Vec::new();
+        for (index, (member, other)) in members_of(owner.node).into_iter().enumerate() {
+            if member.kind != "method_declaration" || other.text != *named {
+                continue;
+            }
+            let overload = Found { file: owner.file, node: member, name: other, bindings: owner.bindings.clone() };
+            let signature = snapshot.erased_parameter_types(&overload);
+            if signatures.contains(&signature) {
+                continue;
+            }
+            signatures.push(signature);
+            overloads.push(proposed_method(context, owner, &overload, index));
+        }
+        overloads
+    } else {
+        vec![super::Proposed {
+            shown: super::shown::field(snapshot, context.file, owner, found),
+            deprecated: super::shown::deprecated(found.node),
+            ..super::Proposed::default()
+        }]
+    };
+    Offer {
+        name: named.clone(),
+        rank: format!("{group}{named}"),
+        kind: if is_method { super::OfferKind::Method } else { super::OfferKind::Field },
+        declarations,
+        ..Offer::default()
+    }
+}
+
+/// One overload of a method, as a proposal shows it.
+fn proposed_method(context: &Context<'_>, owner: &Found<'_>, found: &Found<'_>, index: usize) -> super::Proposed {
+    let written = context.snapshot.parameters_written(found);
+    let (shown, names) = super::shown::method(context.snapshot, owner, found, &written);
+    super::Proposed {
+        returns: context.snapshot.return_written(found),
+        parameters: Some(written),
+        names,
+        shown,
+        deprecated: super::shown::deprecated(found.node),
+        index,
+        ..super::Proposed::default()
+    }
+}
+
 /// Locals the parser could not read as declarations: `String s` before
 /// the placeholder in a statement it gave up on.
-fn recovered_locals(context: &Context<'_>) -> Vec<String> {
+fn recovered_locals(context: &Context<'_>) -> Vec<(String, String)> {
     let at = context.name.start;
     let mut names = Vec::new();
     for node in context.path.iter().filter(|node| node.kind == "ERROR") {
@@ -737,7 +1095,7 @@ fn recovered_locals(context: &Context<'_>) -> Vec<String> {
             );
             if is_type && pair[1].kind == "identifier" && pair[1].end <= at && pair[1].text != PROBE
             {
-                names.push(pair[1].text.clone());
+                names.push((pair[1].text.clone(), pair[0].text.clone()));
             }
         }
     }
@@ -926,9 +1284,31 @@ fn expected_type(context: &Context<'_>) -> Option<Type> {
 /// which a half-written argument list leaves to the parser to guess at.
 fn argument_offers(context: &Context<'_>) -> Option<Vec<Offer>> {
     let call = open_call(context)?;
+    // The call itself, each overload, as jdtls shows what it is filling
+    // in: it writes nothing.
+    let declarations: Vec<super::Proposed> = call_overloads(context, &call)
+        .iter()
+        .enumerate()
+        .map(|(index, (owner, member))| {
+            let mut proposed = proposed_method(context, owner, member, index);
+            if call.creates {
+                proposed.shown.detail = Some(format!(
+                    "{}.{}({})",
+                    owner.name.text,
+                    member.name.text,
+                    proposed.parameters.as_deref().unwrap_or_default().join(", ")
+                ));
+                proposed.shown.description = Some("void".to_owned());
+            }
+            proposed.shown.insert = Some(String::new());
+            proposed
+        })
+        .collect();
     let mut offers = vec![Offer {
         rank: format!("{EXPECTED}{}", call.name),
         name: call.name.clone(),
+        kind: super::OfferKind::Method,
+        declarations,
         ..Offer::default()
     }];
     let before = text_before(context);
@@ -1054,7 +1434,7 @@ fn open_call(context: &Context<'_>) -> Option<OpenCall> {
     })
 }
 
-fn offset_of(text: &str, at: Position) -> Option<usize> {
+pub(super) fn offset_of(text: &str, at: Position) -> Option<usize> {
     let mut offset = 0;
     for (index, line) in text.split_inclusive('\n').enumerate() {
         if index == at.line as usize {
@@ -1073,50 +1453,10 @@ fn offset_of(text: &str, at: Position) -> Option<usize> {
 /// The types the parameter at the placeholder's position of every
 /// overload of the call takes.
 fn parameter_types(context: &Context<'_>, call: &OpenCall) -> Vec<Type> {
-    let snapshot = context.snapshot;
-    let file = context.file;
-    let mut overloads: Vec<&Syn> = Vec::new();
-    if call.creates {
-        if let Some(owner) = snapshot.type_named(&call.name, file) {
-            for (member, _) in members_of(owner.node) {
-                if member.kind == "constructor_declaration" {
-                    overloads.push(member);
-                }
-            }
-        }
-    } else {
-        // The invocation the parser made of it, for its receiver.
-        let invocation = context.path.iter().rev().find(|node| {
-            node.kind == "method_invocation"
-                && node
-                    .child("arguments")
-                    .is_some_and(|arguments| arguments.start == call.open)
-        });
-        let owner = match invocation.and_then(|invocation| invocation.child("object")) {
-            Some(object) => super::type_of_receiver(snapshot, file, object)
-                .and_then(|written| snapshot.of_type(&written, file))
-                .or_else(|| snapshot.type_named(object.text.trim(), file)),
-            None if invocation.is_some() => snapshot.enclosing(file, context.name.start),
-            None => None,
-        };
-        let mut owners: Vec<Found<'_>> = owner
-            .map(|owner| snapshot.with_supertypes(&owner))
-            .unwrap_or_default();
-        // Every class is an `Object`, written or not.
-        if let Some(object) = snapshot.type_named("Object", file)
-            && !owners.is_empty()
-            && !owners.iter().any(|owner| owner.name.text == "Object")
-        {
-            owners.push(object);
-        }
-        for above in owners {
-            for (member, named) in members_of(above.node) {
-                if member.kind == "method_declaration" && named.text == call.name {
-                    overloads.push(member);
-                }
-            }
-        }
-    }
+    let overloads: Vec<&Syn> = call_overloads(context, call)
+        .into_iter()
+        .map(|(_, member)| member.node)
+        .collect();
     let index = call.index;
     overloads
         .into_iter()
@@ -1145,6 +1485,65 @@ fn parameter_types(context: &Context<'_>, call: &OpenCall) -> Vec<Type> {
             Some(written)
         })
         .collect()
+}
+
+/// The constructors or methods a call may be calling, each with the type
+/// declaring it, nearest type first.
+fn call_overloads<'a>(context: &Context<'a>, call: &OpenCall) -> Vec<(Found<'a>, Found<'a>)> {
+    let snapshot = context.snapshot;
+    let file = context.file;
+    let mut overloads: Vec<(Found<'a>, Found<'a>)> = Vec::new();
+    if call.creates {
+        if let Some(owner) = snapshot.type_named(&call.name, file) {
+            for (member, named) in members_of(owner.node) {
+                if member.kind == "constructor_declaration" {
+                    let constructor = Found { file: owner.file, node: member, name: named, bindings: owner.bindings.clone() };
+                    overloads.push((owner.clone(), constructor));
+                }
+            }
+        }
+    } else {
+        // The invocation the parser made of it, for its receiver.
+        let invocation = context.path.iter().rev().find(|node| {
+            node.kind == "method_invocation"
+                && node
+                    .child("arguments")
+                    .is_some_and(|arguments| arguments.start == call.open)
+        });
+        let owner = match invocation.and_then(|invocation| invocation.child("object")) {
+            Some(object) => super::type_of_receiver(snapshot, file, object)
+                .and_then(|written| snapshot.of_type(&written, file))
+                .or_else(|| snapshot.type_named(object.text.trim(), file)),
+            None if invocation.is_some() => snapshot.enclosing(file, context.name.start),
+            None => None,
+        };
+        let mut owners: Vec<Found<'_>> = owner
+            .map(|owner| snapshot.with_supertypes(&owner))
+            .unwrap_or_default();
+        // Every class is an `Object`, written or not.
+        if let Some(object) = snapshot.type_named("Object", file)
+            && !owners.is_empty()
+            && !owners.iter().any(|owner| owner.name.text == "Object")
+        {
+            owners.push(object);
+        }
+        let mut signatures: Vec<Vec<String>> = Vec::new();
+        for above in owners {
+            for (member, named) in members_of(above.node) {
+                if member.kind == "method_declaration" && named.text == call.name {
+                    let method = Found { file: above.file, node: member, name: named, bindings: above.bindings.clone() };
+                    // An override is the method it overrides: offered once.
+                    let signature = snapshot.erased_parameter_types(&method);
+                    if signatures.contains(&signature) {
+                        continue;
+                    }
+                    signatures.push(signature);
+                    overloads.push((above.clone(), method));
+                }
+            }
+        }
+    }
+    overloads
 }
 
 /// The methods of the supertypes a member written here may override,
@@ -1207,7 +1606,8 @@ fn statically_imported(context: &Context<'_>) -> Vec<Offer> {
         let Some(declaration) = context.snapshot.type_named(&owner, context.file) else {
             continue;
         };
-        for (member, named, _) in own_members(context, &declaration, Wanted::Static) {
+        let qualified = context.snapshot.qualified_type_name(declaration.file, declaration.node);
+        for (member, named, owner) in own_members(context, &declaration, Wanted::Static) {
             if offers.iter().any(|offer| offer.name == named.text) {
                 continue;
             }
@@ -1216,11 +1616,22 @@ fn statically_imported(context: &Context<'_>) -> Vec<Offer> {
             } else {
                 FIELD
             };
-            offers.push(Offer {
-                name: named.text.clone(),
-                rank: format!("{group}{}", named.text),
-                ..Offer::default()
+            let found = Found { file: owner.file, node: member, name: named, bindings: owner.bindings.clone() };
+            let mut offer = member_offer(context, &owner, &found, group);
+            // Named as jdtls names a member of a type the file imports
+            // members of: qualified, its import added unless one covers it.
+            let covered = imports(context.file).into_iter().any(|import| {
+                import.is_static && (import.wildcard || import.last_segment() == named.text)
             });
+            for proposed in &mut offer.declarations {
+                if let Some(detail) = &proposed.shown.detail {
+                    proposed.shown.detail = Some(format!("{qualified}{}", &detail[owner.name.text.len()..]));
+                }
+                if !covered {
+                    proposed.shown.import = Some(format!("import static {qualified}.{};\n", named.text));
+                }
+            }
+            offers.push(offer);
         }
     }
     offers
@@ -1270,7 +1681,9 @@ fn import_offers(context: &Context<'_>) -> Vec<Offer> {
         if starts_with(&name, context.prefix) && !imported.contains(&name) {
             offers.push(Offer {
                 rank: format!("{TYPE}{name}"),
+                qualified: Some(format!("{qualifier}.{name}")),
                 name,
+                kind: super::OfferKind::Type,
                 ..Offer::default()
             });
         }
