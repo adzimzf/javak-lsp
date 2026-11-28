@@ -640,9 +640,9 @@ fn highlighted(place: highlight::Highlight) -> DocumentHighlight {
 }
 
 /// An empty range at a declaration's name: what a client is sent to.
-fn at_name(at: Position) -> Range {
-    let start = lsp_position(at);
-    Range { start, end: start }
+/// Where a declaration's name is, start to end, as a location shows it.
+fn name_range(name: &crate::parser::Syn) -> Range {
+    Range { start: lsp_position(name.start), end: lsp_position(name.end) }
 }
 
 /// The language of an opened document: the client's language id, else
@@ -931,7 +931,16 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let target = found.file.uri.clone();
-        let location = Location { uri: target.clone(), range: at_name(found.selection()) };
+        let mut range = name_range(found.name);
+        // jdtls goes from the loop (or its label) a `break`/`continue`
+        // leaves to the end of that `break`/`continue` keyword.
+        if let Some(keyword) = snapshot
+            .jump_at(&at.text_document.uri, cursor(at.position))
+            .and_then(|jump| jump.children.first())
+        {
+            range = Range { start: lsp_position(found.node.start), end: lsp_position(keyword.end) };
+        }
+        let location = Location { uri: target.clone(), range };
         drop(snapshot);
         // A class read from its class file is decompiled when it is opened,
         // as jdtls does; then the declaration is found again in the code.
@@ -940,7 +949,7 @@ impl LanguageServer for Backend {
             if let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position)) {
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                     uri: found.file.uri.clone(),
-                    range: at_name(found.selection()),
+                    range: name_range(found.name),
                 })));
             }
         }
@@ -964,7 +973,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(request::GotoDeclarationResponse::Scalar(Location {
             uri: overridden.file.uri.clone(),
-            range: at_name(overridden.selection()),
+            range: name_range(overridden.name),
         })))
     }
 
@@ -1002,14 +1011,14 @@ impl LanguageServer for Backend {
                     };
                     return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
                         uri: found.file.uri.clone(),
-                        range: at_name(class.start),
+                        range: name_range(class),
                     })));
                 }
                 // A type variable is a type: its own declaration.
                 "type_parameter" => {
                     return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
                         uri: found.file.uri.clone(),
-                        range: at_name(found.selection()),
+                        range: name_range(found.name),
                     })));
                 }
                 _ => {}
@@ -1023,7 +1032,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
             uri: declaration.file.uri.clone(),
-            range: at_name(declaration.selection()),
+            range: name_range(declaration.name),
         })))
     }
 
@@ -1859,13 +1868,24 @@ fn references_now(indexer: &Indexer, params: ReferenceParams) -> Result<Option<V
         }
         uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         uses.dedup();
+        let name = found.name.text.as_str();
         let places = uses
             .into_iter()
             .map(|(uri, at)| {
                 snapshot.extract_if_searched(uri);
+                let end = match snapshot.file(uri) {
+                    Some(file) => {
+                        let whole = java && file.language == Language::Java;
+                        highlight::reference_end(file, at, name, whole)
+                    }
+                    None => Position {
+                        line: at.line,
+                        column: at.column + name.encode_utf16().count() as u32,
+                    },
+                };
                 Location {
                     uri: uri.clone(),
-                    range: at_name(at),
+                    range: Range { start: lsp_position(at), end: lsp_position(end) },
                 }
             })
             .collect();
@@ -1880,7 +1900,7 @@ fn goto_implementation_now(indexer: &Indexer, params: request::GotoImplementatio
             .into_iter()
             .map(|found| Location {
                 uri: found.file.uri.clone(),
-                range: at_name(found.selection()),
+                range: name_range(found.name),
             })
             .collect();
         Ok(Some(request::GotoImplementationResponse::Array(places)))

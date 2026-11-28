@@ -2759,6 +2759,15 @@ impl Snapshot {
         self.supertypes(&of).into_iter().next()
     }
 
+    /// The `break` or `continue` at `at` in `uri`, if the cursor is on one.
+    pub fn jump_at(&self, uri: &Url, at: Position) -> Option<&Syn> {
+        let file = self.file(uri)?;
+        path_to(&file.tree, at)
+            .into_iter()
+            .rev()
+            .find(|node| matches!(node.kind.as_str(), "break_statement" | "continue_statement"))
+    }
+
     /// `break`/`continue`, with a label or without: the loop they leave.
     fn label_at<'a>(&'a self, path: &[&'a Syn], file: &'a FileView) -> Option<Found<'a>> {
         let jump = path
@@ -2776,14 +2785,10 @@ impl Snapshot {
                 .rev()
                 .find(|node| is_loop_or_switch(node))?,
         };
-        let named = match label {
-            Some(_) => loop_or_label.children.first()?,
-            None => loop_or_label.children.first()?,
-        };
         Some(Found {
             file,
             node: loop_or_label,
-            name: named,
+            name: loop_or_label.children.first()?,
             bindings: Bindings::new(),
         })
     }
