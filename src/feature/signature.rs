@@ -42,9 +42,13 @@ pub fn help_at(snapshot: &Snapshot, file: &FileView, at: Position) -> Option<Hel
         // where the one being typed is still missing (`f("t", )`).
         let patch = if commas_after(&file.text, at).is_some() { "null" } else { ");" };
         if let Some(closed) = closed_at(file, at, patch) {
+            // The declarations are read from the closed file too: the
+            // parser may have put those after the call in its error.
+            let world = snapshot.with_file(closed);
+            let closed = world.file(&file.uri)?;
             let closed_path = path_to(&closed.tree, at);
             if closed_path.iter().any(|node| node.kind == "argument_list" && node.start < at && at < node.end)
-                && let Some(help) = help_in(snapshot, &closed, at, &closed_path)
+                && let Some(help) = help_in(&world, closed, at, &closed_path)
             {
                 return Some(help);
             }
@@ -462,7 +466,7 @@ fn candidates_of<'a>(
     match call.kind.as_str() {
         "identifier" | "field_identifier" => {
             let owner = snapshot.enclosing(file, at)?;
-            Some(snapshot.members_called(&owner, &call.text))
+            Some(callable_here(file, at, snapshot.members_called(&owner, &call.text)))
         }
         "method_invocation" => {
             let name = call.child("name")?;
@@ -480,6 +484,9 @@ fn candidates_of<'a>(
                 None => snapshot.enclosing(file, at)?,
             };
             let mut called = snapshot.members_called(&owner, &name.text);
+            if call.child("object").is_none() {
+                called = callable_here(file, at, called);
+            }
             // Every class is an `Object`, whether or not it says so.
             if called.is_empty()
                 && file.language == crate::language::Language::Java
@@ -493,7 +500,7 @@ fn candidates_of<'a>(
             let created = call.child("type")?;
             let written = crate::feature::semantic::type_of_node(created);
             let declaration = snapshot.of_type(&written, file)?;
-            let constructors = snapshot.constructors_of(&declaration);
+            let constructors = snapshot.constructors_of(&declaration, file, false);
             Some(constructors)
         }
         "explicit_constructor_invocation" => {
@@ -504,10 +511,34 @@ fn candidates_of<'a>(
             } else {
                 enclosing
             };
-            Some(snapshot.constructors_of(&declaration))
+            Some(snapshot.constructors_of(&declaration, file, of.kind == "super"))
         }
         _ => None,
     }
+}
+
+/// The methods of `candidates` an unqualified call at `at` can call: in a
+/// static method, the static ones alone, as jdtls offers them.
+fn callable_here<'a>(file: &FileView, at: Position, candidates: Vec<Found<'a>>) -> Vec<Found<'a>> {
+    let path = path_to(&file.tree, at);
+    let in_static = path
+        .iter()
+        .rev()
+        .find(|node| matches!(node.kind.as_str(), "method_declaration" | "constructor_declaration" | "lambda_expression" | "class_body"))
+        .is_some_and(|member| member.kind == "method_declaration" && is_static(member));
+    if !in_static {
+        return candidates;
+    }
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.node.kind != "method_declaration" || is_static(candidate.node))
+        .collect()
+}
+
+fn is_static(declaration: &Syn) -> bool {
+    declaration
+        .first("modifiers")
+        .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|word| word == "static"))
 }
 
 /// The candidate a call with this many arguments means: one that has room

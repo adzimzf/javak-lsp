@@ -443,8 +443,7 @@ fn gather(
     }
     let probed = probe(&file.text, at, &prefix);
     let tree = syntax(file.language).tree(&probed);
-    let world = replaced(
-        snapshot,
+    let world = snapshot.with_file(
         FileView {
             uri: file.uri.clone(),
             language: file.language,
@@ -1242,18 +1241,6 @@ fn probe_node(tree: &Syn) -> Option<&Syn> {
         .find(|node| is_identifier(node) && node.text == PROBE)
 }
 
-/// The workspace with one file read as probed.
-fn replaced(snapshot: &Snapshot, probed: FileView) -> Snapshot {
-    let probed_uri = probed.uri.clone();
-    let files = snapshot
-        .files
-        .iter()
-        .filter(|file| file.uri != probed_uri)
-        .cloned()
-        .chain(std::iter::once(probed))
-        .collect();
-    Snapshot::new(files).reading(snapshot.libraries())
-}
 
 /// Whether the cursor is in a comment or in a string: nothing is offered
 /// in text.

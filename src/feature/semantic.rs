@@ -423,6 +423,21 @@ impl Snapshot {
     }
 
     /// The libraries this snapshot reads from.
+    /// This snapshot with `file` in place of the file at its URI: what is
+    /// read of a file as it is about to be (a name completed, a call
+    /// closed).
+    pub fn with_file(&self, file: FileView) -> Snapshot {
+        let uri = file.uri.clone();
+        let files = self
+            .files
+            .iter()
+            .filter(|known| known.uri != uri)
+            .cloned()
+            .chain(std::iter::once(file))
+            .collect();
+        Snapshot::new(files).reading(self.libraries())
+    }
+
     pub fn libraries(&self) -> Option<Arc<Libraries>> {
         self.libraries.clone()
     }
@@ -4937,13 +4952,31 @@ impl Snapshot {
     }
 
     /// The constructors of a type: the ones it declares, the canonical one
-    /// of a record, or the default one. A constructor another class cannot
-    /// call is left out.
-    pub fn constructors_of<'a>(&'a self, of: &Found<'a>) -> Vec<Found<'a>> {
+    /// of a record, or the default one. A constructor `from` cannot call
+    /// is left out: a private one outside its file, a package-private one
+    /// outside its package, and a protected one there too unless it is
+    /// called as `super(…)`.
+    pub fn constructors_of<'a>(&'a self, of: &Found<'a>, from: &FileView, as_super: bool) -> Vec<Found<'a>> {
+        let same_package = self.package(of.file) == self.package(from);
         let declared: Vec<Found<'a>> = members_of(of.node)
             .into_iter()
             .filter(|(member, _)| member.kind == "constructor_declaration")
-            .filter(|(member, _)| !member.text.contains("private"))
+            .filter(|(member, _)| {
+                let says = |word: &str| {
+                    member
+                        .first("modifiers")
+                        .is_some_and(|modifiers| modifiers.text.split_whitespace().any(|written| written == word))
+                };
+                if says("private") {
+                    of.file.uri == from.uri
+                } else if says("protected") {
+                    same_package || as_super
+                } else if says("public") {
+                    true
+                } else {
+                    same_package
+                }
+            })
             .map(|(member, named)| Found {
                 file: of.file,
                 node: member,
@@ -4956,13 +4989,24 @@ impl Snapshot {
         }
         // A record's components are its canonical constructor; a class
         // with none gets the default one — the declaration itself stands
-        // for both, as it has the parameters each would take.
-        vec![Found {
+        // for both, as it has the parameters each would take. jdtls lists
+        // a record's `Edge()` beside its canonical one: its name stands
+        // for that, as it has no parameters.
+        let mut constructors = vec![Found {
             file: of.file,
             node: of.node,
             name: of.name,
             bindings: of.bindings.clone(),
-        }]
+        }];
+        if of.node.kind == "record_declaration" {
+            constructors.push(Found {
+                file: of.file,
+                node: of.name,
+                name: of.name,
+                bindings: of.bindings.clone(),
+            });
+        }
+        constructors
     }
 
     pub fn supertype_of<'a>(&'a self, of: &Found<'a>) -> Option<Found<'a>> {
