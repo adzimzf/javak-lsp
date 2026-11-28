@@ -5,5 +5,10 @@ public class Foo {
 	}
 }
 //= expected
-BiConsumer
-Foo
+BiConsumer<java.lang.Integer,java.lang.Long> · java.util.function  interface
+  inserts BiConsumer over ""
+  detail java.util.function.BiConsumer<java.lang.Integer,java.lang.Long>
+  adds import java.util.function.BiConsumer;
+Foo  class
+  inserts Foo over ""
+  detail Foo

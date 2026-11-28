@@ -15,4 +15,6 @@ public class Arr {
     }
 }
 //= expected
-length
+length · int  field
+  inserts length over "leng"
+  detail String[].length : int

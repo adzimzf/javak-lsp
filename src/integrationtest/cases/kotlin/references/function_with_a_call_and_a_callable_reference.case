@@ -16,6 +16,6 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.kt:4:9  fun area(): Double {
-/com/demo/Main.kt:5:31  val measure = circle::area
-/com/demo/Main.kt:6:35  return measure() + circle.area()
+/com/demo/Circle.kt:4:9-13  fun area(): Double {
+/com/demo/Main.kt:5:31-35  val measure = circle::area
+/com/demo/Main.kt:6:35-39  return measure() + circle.area()

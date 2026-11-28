@@ -5,11 +5,11 @@ public class A {
 	$0public S$1tring name = "name";
 }
 //= expected
-Add Javadoc comment
-Change modifier for 'name'
-Generate Getter and Setter for 'name'
-Generate Getter for 'name'
-Generate Getters
-Generate Getters and Setters
-Generate Setter for 'name'
-Generate Setters
+Add Javadoc comment  (quickassist)
+Change modifier for 'name'  (quickassist)
+Generate Getter and Setter for 'name'  (quickassist)
+Generate Getter for 'name'  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setter for 'name'  (quickassist)
+Generate Setters  (source.generate.accessors)

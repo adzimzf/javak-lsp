@@ -790,4 +790,4 @@ public class Test{
     }
 }
 //= expected
-/src/java/FooWithField.java:3:14  public class FooWithField {
+/src/java/FooWithField.java:3:14-26  public class FooWithField {

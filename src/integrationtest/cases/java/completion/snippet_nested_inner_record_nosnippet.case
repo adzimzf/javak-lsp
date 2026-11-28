@@ -4,6 +4,14 @@ public record Test() {}
 public record InnerTest(){
 $0
 //= expected
-InnerTest
-Test
-public
+InnerTest · org.sample  struct
+  inserts InnerTest over ""
+  detail org.sample.InnerTest
+Test · org.sample  struct
+  inserts Test over ""
+  detail org.sample.Test
+public static void main(String[] args) · public static main method  snippet
+  inserts public static void main(String[] args) {\n\t${0}\n} over ""
+  detail public static main method
+public  keyword
+  inserts public  over ""

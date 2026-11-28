@@ -14,4 +14,6 @@ public class Test {
     }
 }
 //= expected
-pathSeparatorChar
+pathSeparatorChar · char  constant
+  inserts pathSeparatorChar over "pathSeparatorC"
+  detail Paths.pathSeparatorChar : char

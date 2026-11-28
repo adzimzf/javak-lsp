@@ -5,12 +5,12 @@ public class A {
 	public java$0.lang.$1String name = "name";
 }
 //= expected
-Add Javadoc comment
-Add import
-Change modifier for 'name'
-Generate Getter and Setter for 'name'
-Generate Getter for 'name'
-Generate Getters
-Generate Getters and Setters
-Generate Setter for 'name'
-Generate Setters
+Add Javadoc comment  (quickassist)
+Add import  (refactor)
+Change modifier for 'name'  (quickassist)
+Generate Getter and Setter for 'name'  (quickassist)
+Generate Getter for 'name'  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setter for 'name'  (quickassist)
+Generate Setters  (source.generate.accessors)

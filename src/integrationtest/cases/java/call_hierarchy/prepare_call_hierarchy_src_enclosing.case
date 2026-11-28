@@ -67,6 +67,8 @@ $0/*should resolve to enclosing "method/constructor/initializer"*/
   }
 }
 //= expected
-item Base()  /src/org/sample/CallHierarchy.java:19:12  public Base() {
-incoming Child()  /src/org/sample/CallHierarchy.java:44:7  super();
-incoming main(String[]) : void  /src/org/sample/CallHierarchy.java:7:5  new Base();
+item constructor Base() org.sample.CallHierarchy$Base  /src/org/sample/CallHierarchy.java:19:12-16  public Base() {
+incoming constructor Child() org.sample.CallHierarchy$Child  /src/org/sample/CallHierarchy.java:44:7-15  super();
+    called at 44:7-15
+incoming method main(String[]) : void org.sample.CallHierarchy  /src/org/sample/CallHierarchy.java:7:5-15  new Base();
+    called at 7:5-15

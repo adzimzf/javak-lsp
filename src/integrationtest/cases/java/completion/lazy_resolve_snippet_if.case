@@ -5,4 +5,9 @@ public class Test {
 		if$0	}
 }
 //= expected
-if
+if · if statement  snippet
+  inserts if (${1:con}) {\n\t$TM_SELECTED_TEXT${0}\n} over "if"
+  detail if statement
+  doc if (con) {
+if  keyword
+  inserts if over "if"

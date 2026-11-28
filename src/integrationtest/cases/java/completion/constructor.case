@@ -5,4 +5,6 @@ public class Foo {
 	}
 }
 //= expected
-Object
+Object()  constructor
+  inserts Object() over "O"
+  detail java.lang.Object.Object()

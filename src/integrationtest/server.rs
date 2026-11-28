@@ -687,7 +687,10 @@ impl Session {
                 // Progress while a project is imported, for whoever watches.
                 "window": {"workDoneProgress": true},
                 "workspace": {
-                    "workspaceEdit": {"documentChanges": true},
+                    "workspaceEdit": {
+                        "documentChanges": true,
+                        "resourceOperations": ["create", "rename", "delete"],
+                    },
                     "symbol": {},
                     "configuration": true,
                     "didChangeWatchedFiles": {"dynamicRegistration": true},

@@ -17,4 +17,4 @@ class Main {
     Outer.In$0ner inner;
 }
 //= expected
-/com/demo/Outer.java:4:18  static class Inner {
+/com/demo/Outer.java:4:18-23  static class Inner {

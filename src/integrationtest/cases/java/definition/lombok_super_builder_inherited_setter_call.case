@@ -52,4 +52,4 @@ public @interface SuperBuilder {
     boolean toBuilder() default false;
 }
 //= expected
-/src/main/java/com/demo/Person.java:5:1  @SuperBuilder(toBuilder = true)
+/src/main/java/com/demo/Person.java:5:1-1  @SuperBuilder(toBuilder = true)

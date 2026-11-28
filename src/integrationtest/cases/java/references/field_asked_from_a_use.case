@@ -17,7 +17,7 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.java:4:12  double radius;
-/com/demo/Circle.java:7:23  return 3.14 * radius * radius;
-/com/demo/Circle.java:7:32  return 3.14 * radius * radius;
-/com/demo/Main.java:5:23  return circle.radius;
+/com/demo/Circle.java:4:12-18  double radius;
+/com/demo/Circle.java:7:23-29  return 3.14 * radius * radius;
+/com/demo/Circle.java:7:32-38  return 3.14 * radius * radius;
+/com/demo/Main.java:5:23-29  return circle.radius;

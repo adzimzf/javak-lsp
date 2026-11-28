@@ -10,4 +10,5 @@ class E {
     }
 }
 //= expected
-E([int a], int b)
+  E(int a)
+> E([int a], int b)

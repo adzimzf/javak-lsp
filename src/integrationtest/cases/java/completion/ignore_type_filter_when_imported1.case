@@ -8,4 +8,12 @@ import java.util.List;public class Test {
 	}
 }
 //= expected
-List
+List · java.util  interface
+  inserts List over "List"
+  detail java.util.List
+List · java.awt  class
+  inserts java.awt.List over "List"
+  detail java.awt.List
+List · com.sun.tools.javac.util  class
+  inserts com.sun.tools.javac.util.List over "List"
+  detail com.sun.tools.javac.util.List

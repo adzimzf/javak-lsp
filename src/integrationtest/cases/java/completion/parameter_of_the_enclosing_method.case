@@ -7,4 +7,5 @@ public class Test {
     }
 }
 //= expected
-width
+width · int  variable
+  inserts width over "widt"

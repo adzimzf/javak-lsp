@@ -9,4 +9,6 @@ public class Foo {
 
 }
 //= expected
-test
+test(int i, int j) · void  method
+  inserts test(${1:i}, ${2:j}); over "tes"
+  detail Foo.test(int i, int j) : void

@@ -3,4 +3,4 @@ $0package test1;
 import java.security.Certificate;
 public interface E extends Certificate {}
 //= expected (pending)
-/src/main/java/test1/E.java:3:28  The type Certificate has been deprecated since version 1.2 and marked for removal
+/src/main/java/test1/E.java:3:28-39  warning [16778626] The type Certificate has been deprecated since version 1.2 and marked for removal

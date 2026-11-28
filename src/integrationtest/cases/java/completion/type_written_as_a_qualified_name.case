@@ -12,4 +12,6 @@ public class Test {
     }
 }
 //= expected
-ArrayListing
+ArrayListing()  constructor
+  inserts com.demo.data.ArrayListing() over "com.demo.data.ArrayL"
+  detail com.demo.data.ArrayListing.ArrayListing()

@@ -19,4 +19,6 @@ public class Derived extends Base {
     }
 }
 //= expected
-counter
+counter · int  field
+  inserts counter over "cou"
+  detail Base.counter : int

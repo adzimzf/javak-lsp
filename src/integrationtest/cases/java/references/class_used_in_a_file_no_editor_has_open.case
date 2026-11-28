@@ -10,5 +10,5 @@ class Main {
     Greeter greeter;
 }
 //= expected
-/src/main/java/com/demo/Greeter.java:3:14  public class Greeter {
-/src/main/java/com/demo/Main.java:4:5  Greeter greeter;
+/src/main/java/com/demo/Greeter.java:3:14-21  public class Greeter {
+/src/main/java/com/demo/Main.java:4:5-12  Greeter greeter;

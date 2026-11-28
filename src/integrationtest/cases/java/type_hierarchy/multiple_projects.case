@@ -8,5 +8,5 @@ package org.sample;
 public class Second extends First{
 }
 //= expected
-item First  /project1/src/org/sample/First.java:2:23  public abstract class First
-supertype Object  <library>/java.base/java/lang/Object.java
+item class First project1.src.org.sample  /project1/src/org/sample/First.java:2:23-28  public abstract class First
+supertype class Object java.lang  <library>/java.base/java/lang/Object.java

@@ -790,4 +790,4 @@ public class Test{
     }
 }
 //= expected
-/src/java/IFoo.java:6:18  public interface IFoo {
+/src/java/IFoo.java:6:18-22  public interface IFoo {

@@ -16,4 +16,6 @@ class E {
     }
 }
 //= expected
-foo([String s], String b)
+  foo() : void
+  foo(String s) : void
+> foo([String s], String b) : void

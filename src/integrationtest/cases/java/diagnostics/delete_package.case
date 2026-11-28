@@ -16,4 +16,4 @@ public interface IFoo {
 
 }
 //= expected (pending)
-/src/pckg/Foo.java:1:1  Foo.java is not on the classpath of project compat, only syntax errors are reported
+/src/pckg/Foo.java:1:1-2  warning [32] Foo.java is not on the classpath of project compat, only syntax errors are reported

@@ -18,4 +18,4 @@ class Caller {
     }
 }
 //= expected
-/com/demo/TestSame.java:9:10  void someMethod();
+/com/demo/TestSame.java:9:10-20  void someMethod();

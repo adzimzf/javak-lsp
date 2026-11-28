@@ -12,4 +12,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Point.java:3:18  record Point(int x, int y) {
+/com/demo/Point.java:3:18-19  record Point(int x, int y) {

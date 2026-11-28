@@ -17,4 +17,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.java:7:5  Circle(double radius) {
+/com/demo/Circle.java:7:5-11  Circle(double radius) {

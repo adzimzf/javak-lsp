@@ -6,13 +6,13 @@ public class A {
 	private String $0test;$1
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'test'
-Change modifier for 'test'
-Change modifiers to final where possible
-Generate Getter and Setter for 'test'
-Generate Getter for 'test'
-Generate Getters
-Generate Getters and Setters
-Generate Setter for 'test'
-Generate Setters
+Add Javadoc comment  (quickassist)
+Add final modifier for 'test'  (quickassist)
+Change modifier for 'test'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getter and Setter for 'test'  (quickassist)
+Generate Getter for 'test'  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setter for 'test'  (quickassist)
+Generate Setters  (source.generate.accessors)

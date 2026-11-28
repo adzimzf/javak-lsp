@@ -11,4 +11,4 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:9:21  return this.bar();
+/com/demo/E.java:9:21-24  return this.bar();

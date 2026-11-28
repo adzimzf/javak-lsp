@@ -12,7 +12,14 @@ public class Foo {
 	}
 }
 //= expected
-Object
-chain
-Foo
-ObjectChain
+Object · java.lang  class
+  inserts Object over ""
+  detail java.lang.Object
+chain · Foo.ObjectChain  variable
+  inserts chain over ""
+Foo  class
+  inserts Foo over ""
+  detail Foo
+ObjectChain · Foo  class
+  inserts ObjectChain over ""
+  detail Foo.ObjectChain

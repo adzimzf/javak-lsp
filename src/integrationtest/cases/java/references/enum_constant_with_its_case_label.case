@@ -23,6 +23,6 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:4:22  Unit unit = Unit.METRE;
-/com/demo/Main.java:8:18  case METRE:
-/com/demo/Unit.java:4:5  METRE,
+/com/demo/Main.java:4:22-27  Unit unit = Unit.METRE;
+/com/demo/Main.java:8:18-23  case METRE:
+/com/demo/Unit.java:4:5-10  METRE,

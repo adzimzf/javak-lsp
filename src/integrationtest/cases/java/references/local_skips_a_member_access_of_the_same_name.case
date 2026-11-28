@@ -15,7 +15,7 @@ class Reader {
     }
 }
 //= expected
-/com/demo/Reader.java:5:13  int count = 0;
-/com/demo/Reader.java:6:9  count = count + holder.count;
-/com/demo/Reader.java:6:17  count = count + holder.count;
-/com/demo/Reader.java:7:16  return count;
+/com/demo/Reader.java:5:13-18  int count = 0;
+/com/demo/Reader.java:6:9-14  count = count + holder.count;
+/com/demo/Reader.java:6:17-22  count = count + holder.count;
+/com/demo/Reader.java:7:16-21  return count;

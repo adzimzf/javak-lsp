@@ -14,5 +14,6 @@ class E$0 {
     }
 }
 //= expected
-/com/demo/E.java:3:7  class E {
-/com/demo/E.java:4:5  E() {
+/com/demo/E.java:3  class Renamed {
+/com/demo/E.java:4  Renamed() {
+moves /com/demo/E.java -> /com/demo/Renamed.java

@@ -40,3 +40,27 @@ public class Te$0st {
 }
 //= expected
 Test
+**language**
+ISO 639 alpha-2 or alpha-3 language code, or registered
+language subtags up to 8 alpha letters (for future enhancements).
+When a language has both an alpha-2 code and an alpha-3 code, the
+alpha-2 code must be used. You can find a full list of valid
+language codes in the IANA Language Subtag Registry (search for
+"Type: language"). The language field is case insensitive, but
+`Locale` always canonicalizes to lower case.
+Well-formed language values have the form
+`[a-zA-Z]{2,8}`. Note that this is not the full
+BCP47 language production, since it excludes extlang. They are
+not needed since modern three-letter language codes replace
+them.
+Example: "en" (English), "ja" (Japanese), "kok" (Konkani)
+**script**
+ISO 15924 alpha-4 script code. You can find a full list of
+valid script codes in the IANA Language Subtag Registry (search
+for "Type: script"). The script field is case insensitive, but
+`Locale` always canonicalizes to title case (the first
+letter is upper case and the rest of the letters are lower
+case).
+Well-formed script values have the form
+`[a-zA-Z]{4}`
+Example: "Latn" (Latin), "Cyrl" (Cyrillic)

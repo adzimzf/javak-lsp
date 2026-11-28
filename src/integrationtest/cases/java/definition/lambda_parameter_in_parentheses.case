@@ -7,4 +7,4 @@ class Main {
     BiFunction<Integer, Integer, Integer> sum = (left, right) -> left + rig$0ht;
 }
 //= expected
-/com/demo/Main.java:6:56  BiFunction<Integer, Integer, Integer> sum = (left, right) -> left + right;
+/com/demo/Main.java:6:56-61  BiFunction<Integer, Integer, Integer> sum = (left, right) -> left + right;

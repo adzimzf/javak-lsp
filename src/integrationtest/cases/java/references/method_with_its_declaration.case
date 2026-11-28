@@ -11,5 +11,5 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:5:26  String message = getMessage();
-/com/demo/Main.java:8:12  String getMessage() {
+/com/demo/Main.java:5:26-38  String message = getMessage();
+/com/demo/Main.java:8:12-22  String getMessage() {

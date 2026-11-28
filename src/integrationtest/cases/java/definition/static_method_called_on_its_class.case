@@ -23,4 +23,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Maths.java:4:16  static int twice(int value) {
+/com/demo/Maths.java:4:16-21  static int twice(int value) {

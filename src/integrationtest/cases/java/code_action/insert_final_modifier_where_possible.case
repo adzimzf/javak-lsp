@@ -6,5 +6,5 @@ public class A {
   }
 }
 //= expected
-Change modifiers to final where possible
-Generate toString()
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate toString()  (source.generate.toString)

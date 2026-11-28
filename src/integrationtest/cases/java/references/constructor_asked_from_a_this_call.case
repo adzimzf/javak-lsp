@@ -36,7 +36,7 @@ class Main {
     }
 }
 //= expected
-/com/demo/CharacterReader.java:5:9  this(input);
-/com/demo/CharacterReader.java:8:12  public CharacterReader(Reader input) {
-/com/demo/CharacterReader.java:12:9  this(new StringReader(input));
-/com/demo/Main.java:5:31  CharacterReader one = new CharacterReader(in);
+/com/demo/CharacterReader.java:5:9-21  this(input);
+/com/demo/CharacterReader.java:8:12-27  public CharacterReader(Reader input) {
+/com/demo/CharacterReader.java:12:9-39  this(new StringReader(input));
+/com/demo/Main.java:5:31-54  CharacterReader one = new CharacterReader(in);

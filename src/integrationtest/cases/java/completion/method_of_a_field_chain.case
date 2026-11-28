@@ -16,4 +16,6 @@ public class Car {
     }
 }
 //= expected
-ignite
+ignite() · void  method
+  inserts ignite(); over "ig"
+  detail Engine.ignite() : void

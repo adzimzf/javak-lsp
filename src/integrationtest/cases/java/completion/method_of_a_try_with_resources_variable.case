@@ -29,4 +29,6 @@ public class Main {
     }
 }
 //= expected
-read
+read() · String  method
+  inserts read() over "re"
+  detail Reader.read() : String

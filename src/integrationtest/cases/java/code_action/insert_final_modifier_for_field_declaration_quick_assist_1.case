@@ -6,13 +6,13 @@ public class A {
 	private String test;
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'name'
-Change modifier for 'name'
-Change modifiers to final where possible
-Generate Getter and Setter for 'name'
-Generate Getter for 'name'
-Generate Getters
-Generate Getters and Setters
-Generate Setter for 'name'
-Generate Setters
+Add Javadoc comment  (quickassist)
+Add final modifier for 'name'  (quickassist)
+Change modifier for 'name'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getter and Setter for 'name'  (quickassist)
+Generate Getter for 'name'  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setter for 'name'  (quickassist)
+Generate Setters  (source.generate.accessors)

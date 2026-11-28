@@ -12,4 +12,6 @@ public class Foo {
     }
 }
 //= expected
-Inner
+Inner()  constructor
+  inserts Inner() over "Inne"
+  detail com.demo.Foo.Inner.Inner()

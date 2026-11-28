@@ -5,4 +5,7 @@ public class Test {
 		dowhile$0	}
 }
 //= expected
-(nothing)
+dowhile · do-while statement  snippet
+  inserts do {\n\t$TM_SELECTED_TEXT${0}\n} while (${1:con}); over "dowhile"
+  detail do-while statement
+  doc do {

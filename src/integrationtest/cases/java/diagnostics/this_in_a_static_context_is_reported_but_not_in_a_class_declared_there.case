@@ -14,7 +14,7 @@ public class Statics {
     static class Nested { Object o = this; }
 }
 //= expected
-/src/main/java/p/Statics.java:3:27  Cannot use this in a static context
-/src/main/java/p/Statics.java:5:25  Cannot use this in a static context
-/src/main/java/p/Statics.java:7:25  Cannot use this in a static context
-/src/main/java/p/Statics.java:8:52  Cannot use this in a static context
+/src/main/java/p/Statics.java:3:27-31  error [536871112] Cannot use this in a static context
+/src/main/java/p/Statics.java:5:25-29  error [536871112] Cannot use this in a static context
+/src/main/java/p/Statics.java:7:25-29  error [536871112] Cannot use this in a static context
+/src/main/java/p/Statics.java:8:52-56  error [536871112] Cannot use this in a static context

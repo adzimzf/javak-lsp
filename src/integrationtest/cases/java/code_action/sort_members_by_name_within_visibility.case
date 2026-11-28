@@ -6,7 +6,7 @@ public class C {
     void consume() {}
 }
 //= expected
-Add Javadoc comment
-Generate toString()
-Inline Method
-Sort Members for 'C.java'
+Add Javadoc comment  (quickassist)
+Generate toString()  (source.generate.toString)
+Inline Method  (refactor.inline)
+Sort Members for 'C.java'  (source.sortMembers)

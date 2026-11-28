@@ -21,6 +21,6 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:5:25  return ShapesKt.unitCircle();
-/com/demo/Shapes.kt:3:5  fun unitCircle(): Circle {
-/com/demo/Shapes.kt:11:16  return unitCircle()
+/com/demo/Main.java:5:25-35  return ShapesKt.unitCircle();
+/com/demo/Shapes.kt:3:5-15  fun unitCircle(): Circle {
+/com/demo/Shapes.kt:11:16-26  return unitCircle()

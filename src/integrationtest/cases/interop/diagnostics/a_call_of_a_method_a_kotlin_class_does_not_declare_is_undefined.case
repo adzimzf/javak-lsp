@@ -11,4 +11,4 @@ class Ma$0in {
     }
 }
 //= expected
-/src/main/java/com/demo/Main.java:5:23  The method getDiameter() is undefined for the type Circle
+/src/main/java/com/demo/Main.java:5:23-34  error [67108964] The method getDiameter() is undefined for the type Circle

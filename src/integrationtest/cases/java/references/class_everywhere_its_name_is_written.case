@@ -31,12 +31,12 @@ package com.demo;
 class Round extends Circle {
 }
 //= expected
-/com/demo/Circle.java:3:7  class Circle {
-/com/demo/Circle.java:6:12  static Circle unit() {
-/com/demo/Circle.java:7:20  return new Circle();
-/com/demo/Main.java:4:5  Circle circle;
-/com/demo/Main.java:5:9  Box<Circle> box;
-/com/demo/Main.java:8:9  Circle same = (Circle) shape;
-/com/demo/Main.java:8:24  Circle same = (Circle) shape;
-/com/demo/Main.java:9:16  return Circle.count;
-/com/demo/Round.java:3:21  class Round extends Circle {
+/com/demo/Circle.java:3:7-13  class Circle {
+/com/demo/Circle.java:6:12-18  static Circle unit() {
+/com/demo/Circle.java:7:20-26  return new Circle();
+/com/demo/Main.java:4:5-11  Circle circle;
+/com/demo/Main.java:5:9-15  Box<Circle> box;
+/com/demo/Main.java:8:9-15  Circle same = (Circle) shape;
+/com/demo/Main.java:8:24-30  Circle same = (Circle) shape;
+/com/demo/Main.java:9:16-22  return Circle.count;
+/com/demo/Round.java:3:21-27  class Round extends Circle {

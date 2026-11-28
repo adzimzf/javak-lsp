@@ -11,4 +11,4 @@ class Names {
     }
 }
 //= expected
-/com/demo/Names.java:7:29  total = total + name.length();
+/com/demo/Names.java:7:29-33  total = total + name.length();

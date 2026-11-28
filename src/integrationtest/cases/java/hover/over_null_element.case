@@ -4,3 +4,4 @@ import j$0avax.xml.bind.Binder;
 public class E {}
 //= expected
 javax
+Source: *Java 25.0.5.1 (module: java.rmi)*

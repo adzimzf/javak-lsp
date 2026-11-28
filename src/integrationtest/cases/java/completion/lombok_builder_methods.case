@@ -41,11 +41,27 @@ public @interface Singular {
     String value() default "";
 }
 //= expected
-build
-clearItems
-customer
-express
-item
-items
-quantity
-toString
+build() · Order  method
+  inserts build() over ""
+  detail OrderBuilder.build() : Order
+clearItems() · OrderBuilder  method
+  inserts clearItems() over ""
+  detail OrderBuilder.clearItems() : OrderBuilder
+customer(String customer) · OrderBuilder  method
+  inserts customer(${1:customer}) over ""
+  detail OrderBuilder.customer(String customer) : OrderBuilder
+express(boolean express) · OrderBuilder  method
+  inserts express(${1:express}) over ""
+  detail OrderBuilder.express(boolean express) : OrderBuilder
+item(String item) · OrderBuilder  method
+  inserts item(${1:item}) over ""
+  detail OrderBuilder.item(String item) : OrderBuilder
+items(Collection<? extends String> items) · OrderBuilder  method
+  inserts items(${1:items}) over ""
+  detail OrderBuilder.items(Collection<? extends String> items) : OrderBuilder
+quantity(int quantity) · OrderBuilder  method
+  inserts quantity(${1:quantity}) over ""
+  detail OrderBuilder.quantity(int quantity) : OrderBuilder
+toString() · String  method
+  inserts toString() over ""
+  detail OrderBuilder.toString() : String

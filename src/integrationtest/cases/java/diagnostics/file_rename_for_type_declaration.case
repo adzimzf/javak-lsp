@@ -8,6 +8,6 @@ public class Bar {
 public class Biz {
 }
 //= expected
-/src/main/java/Other.java:1:14  The public type Foo must be defined in its own file
-/src/main/java/Other.java:4:14  The public type Bar must be defined in its own file
-/src/main/java/Other.java:7:14  The public type Biz must be defined in its own file
+/src/main/java/Other.java:1:14-17  error [16777541] The public type Foo must be defined in its own file
+/src/main/java/Other.java:4:14-17  error [16777541] The public type Bar must be defined in its own file
+/src/main/java/Other.java:7:14-17  error [16777541] The public type Biz must be defined in its own file

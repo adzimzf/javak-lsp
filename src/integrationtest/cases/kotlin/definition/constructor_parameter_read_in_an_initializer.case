@@ -5,4 +5,4 @@ class Circle(radius: Double) {
     val diameter: Double = rad$0ius * 2
 }
 //= expected
-/com/demo/Circle.kt:3:14  class Circle(radius: Double) {
+/com/demo/Circle.kt:3:14-20  class Circle(radius: Double) {

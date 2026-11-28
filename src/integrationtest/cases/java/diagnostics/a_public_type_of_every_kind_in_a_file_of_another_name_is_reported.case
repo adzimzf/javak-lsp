@@ -8,7 +8,7 @@ public @interface Marker {}
 public record Point() {}
 class Plain {}
 //= expected
-/src/main/java/p/Kinds.java:4:13  The public type Colour must be defined in its own file
-/src/main/java/p/Kinds.java:5:18  The public type Shape must be defined in its own file
-/src/main/java/p/Kinds.java:6:19  The public type Marker must be defined in its own file
-/src/main/java/p/Kinds.java:7:15  The public type Point must be defined in its own file
+/src/main/java/p/Kinds.java:4:13-19  error [16777541] The public type Colour must be defined in its own file
+/src/main/java/p/Kinds.java:5:18-23  error [16777541] The public type Shape must be defined in its own file
+/src/main/java/p/Kinds.java:6:19-25  error [16777541] The public type Marker must be defined in its own file
+/src/main/java/p/Kinds.java:7:15-20  error [16777541] The public type Point must be defined in its own file

@@ -8,11 +8,11 @@ public class A {
 	}
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'c'
-Change modifiers to final where possible
-Change type of 'c' to 'var'
-Extract to field
-Generate toString()
-Split variable declaration
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Add final modifier for 'c'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Change type of 'c' to 'var'  (refactor)
+Extract to field  (refactor.extract.field)
+Generate toString()  (source.generate.toString)
+Split variable declaration  (quickassist)
+Surround with try/catch  (refactor)

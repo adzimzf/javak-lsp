@@ -8,4 +8,5 @@ public class Foo {
     }
 }
 //= expected
-Runnable
+Runnable() · Anonymous Inner Type  class
+  inserts () {\n\t${0}\n} over ""

@@ -15,4 +15,4 @@ class E {
     }
 }
 //= expected
-Circle()
+> Circle()

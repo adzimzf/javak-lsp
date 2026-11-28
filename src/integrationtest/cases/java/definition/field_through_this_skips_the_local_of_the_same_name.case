@@ -10,4 +10,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:4:9  int total;
+/com/demo/Main.java:4:9-14  int total;

@@ -10,10 +10,10 @@ public class Notes {
     // TODO: colon
 }
 //= expected
-/src/main/java/p/Notes.java:3:8  TODO first
-/src/main/java/p/Notes.java:3:19  FIXME second
-/src/main/java/p/Notes.java:4:8  XXX in block
-/src/main/java/p/Notes.java:5:9  TODO in javadoc
-/src/main/java/p/Notes.java:6:8  FIXME next line
-/src/main/java/p/Notes.java:8:7  TODO no space
-/src/main/java/p/Notes.java:9:8  TODO: colon
+/src/main/java/p/Notes.java:3:8-18  info [536871362] TODO first
+/src/main/java/p/Notes.java:3:19-31  info [536871362] FIXME second
+/src/main/java/p/Notes.java:4:8-20  info [536871362] XXX in block
+/src/main/java/p/Notes.java:5:9-24  info [536871362] TODO in javadoc
+/src/main/java/p/Notes.java:6:8-23  info [536871362] FIXME next line
+/src/main/java/p/Notes.java:8:7-20  info [536871362] TODO no space
+/src/main/java/p/Notes.java:9:8-19  info [536871362] TODO: colon

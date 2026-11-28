@@ -18,4 +18,6 @@ class Main {
     }
 }
 //= expected
-METRE
+METRE · Unit  enum-member
+  inserts METRE over "ME"
+  detail Unit.METRE : Unit

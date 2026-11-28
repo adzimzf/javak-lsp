@@ -30,4 +30,5 @@ class G extends F {
     }
 }
 //= expected
-foo()
+> foo() : String
+  foo(String a) : String

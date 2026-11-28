@@ -7,4 +7,6 @@ public class Foo {
     private MyRecordKin$0
 }
 //= expected
-MyRecordKind
+MyRecordKind · com.demo.Foo  struct
+  inserts MyRecordKind over "MyRecordKin"
+  detail com.demo.Foo.MyRecordKind

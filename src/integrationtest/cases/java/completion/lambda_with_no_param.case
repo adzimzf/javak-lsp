@@ -5,5 +5,9 @@ public class Foo {
 	}
 }
 //= expected
-Runnable
-Foo
+Runnable · java.lang  interface
+  inserts Runnable over ""
+  detail java.lang.Runnable
+Foo  class
+  inserts Foo over ""
+  detail Foo

@@ -14,4 +14,5 @@ class E {
     }
 }
 //= expected
-foo(String s, [boolean bar])
+  foo(String s) : void
+> foo(String s, [boolean bar]) : void

@@ -9,4 +9,5 @@ public class Test {
     }
 }
 //= expected
-greeting
+greeting · String  variable
+  inserts greeting over "gree"

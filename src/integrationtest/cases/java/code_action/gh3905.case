@@ -7,7 +7,8 @@ public class E {
     }
 }
 //= expected
-Add Javadoc comment
-Change modifiers to final where possible
-Generate toString()
-Sort Members for 'E.java'
+Add Javadoc comment  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate toString()  (quickassist)
+Generate toString()  (source.generate.toString)
+Sort Members for 'E.java'  (source.sortMembers)

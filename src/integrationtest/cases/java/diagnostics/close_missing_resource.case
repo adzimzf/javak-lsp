@@ -6,4 +6,4 @@ public class E123 {
     }
 }
 //= expected (pending)
-/src/main/java/test1/E123.java:4:16  x cannot be resolved to a variable
+/src/main/java/test1/E123.java:4:16-17  error [33554515] x cannot be resolved to a variable

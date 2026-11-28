@@ -6,4 +6,5 @@ public class Foo {
     }
 }
 //= expected
-new
+new  keyword
+  inserts new  over "new"

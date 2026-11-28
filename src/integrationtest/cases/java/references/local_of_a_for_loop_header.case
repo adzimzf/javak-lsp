@@ -14,7 +14,7 @@ class Loops {
     }
 }
 //= expected
-/com/demo/Loops.java:6:18  for (int index = 0; index < 3; index++) {
-/com/demo/Loops.java:6:29  for (int index = 0; index < 3; index++) {
-/com/demo/Loops.java:6:40  for (int index = 0; index < 3; index++) {
-/com/demo/Loops.java:7:29  total = total + index;
+/com/demo/Loops.java:6:18-23  for (int index = 0; index < 3; index++) {
+/com/demo/Loops.java:6:29-34  for (int index = 0; index < 3; index++) {
+/com/demo/Loops.java:6:40-45  for (int index = 0; index < 3; index++) {
+/com/demo/Loops.java:7:29-34  total = total + index;

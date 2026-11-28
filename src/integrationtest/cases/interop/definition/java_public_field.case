@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Point.java:5:16  public int y;
+/com/demo/Point.java:5:16-17  public int y;

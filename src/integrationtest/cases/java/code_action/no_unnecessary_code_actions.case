@@ -12,6 +12,6 @@ public class Foo {
 	}
 }
 //= expected
-Add Javadoc comment
-Change modifier for 'foo'
-Change modifiers to final where possible
+Add Javadoc comment  (quickassist)
+Change modifier for 'foo'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)

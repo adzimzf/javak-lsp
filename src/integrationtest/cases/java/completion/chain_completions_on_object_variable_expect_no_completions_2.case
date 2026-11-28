@@ -12,5 +12,8 @@ public class Foo {
 	}
 }
 //= expected
-equals
-chain
+equals(Object obj) · boolean  method
+  inserts  over ""
+  detail Object.equals(Object obj) : boolean
+chain · Foo.ObjectChain  variable
+  inserts chain over ""

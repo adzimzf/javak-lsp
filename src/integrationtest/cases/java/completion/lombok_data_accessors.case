@@ -114,6 +114,12 @@ public final class LoggerFactory {
     }
 }
 //= expected
-getName
-isActive
-setActive
+getName() · String  method
+  inserts getName() over ""
+  detail Person.getName() : String
+isActive() · boolean  method
+  inserts isActive() over ""
+  detail Person.isActive() : boolean
+setActive(boolean active) · void  method
+  inserts setActive(${1:active}); over ""
+  detail Person.setActive(boolean active) : void

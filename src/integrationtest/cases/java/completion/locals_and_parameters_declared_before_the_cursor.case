@@ -19,5 +19,7 @@ class Main {
     }
 }
 //= expected
-totalBefore
-totalCount
+totalBefore · int  variable
+  inserts totalBefore over "tot"
+totalCount · int  variable
+  inserts totalCount over "tot"

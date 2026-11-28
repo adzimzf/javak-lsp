@@ -18,6 +18,12 @@ public class Foo {
     }
 }
 //= expected
-HEARTS
-SPADES
-class
+HEARTS · Suit  enum-member
+  inserts HEARTS over ""
+  detail Suit.HEARTS : Suit
+SPADES · Suit  enum-member
+  inserts SPADES over ""
+  detail Suit.SPADES : Suit
+class · Class<com.demo.Suit>  field
+  inserts class over ""
+  detail class : Class<com.demo.Suit>

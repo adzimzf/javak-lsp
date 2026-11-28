@@ -12,4 +12,6 @@ public class Foo {
 	}
 }
 //= expected
-concat
+concat(String str) · String  method
+  inserts  over ""
+  detail String.concat(String str) : String

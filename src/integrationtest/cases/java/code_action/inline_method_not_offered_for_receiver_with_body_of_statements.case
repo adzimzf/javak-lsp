@@ -14,8 +14,8 @@ public class G {
     }
 }
 //= expected
-Add Javadoc comment
-Change modifiers to final where possible
-Generate Getters
-Invert conditions
-Sort Members for 'G.java'
+Add Javadoc comment  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getters  (source.generate.accessors)
+Invert conditions  (refactor)
+Sort Members for 'G.java'  (source.sortMembers)

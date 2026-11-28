@@ -113,6 +113,6 @@ public final class LoggerFactory {
     }
 }
 //= expected
-/com/demo/Person.java:3:8  import lombok.Data;
-/com/demo/Person.java:5:2  @Data
-/lombok/Data.java:3:19  public @interface Data {
+/com/demo/Person.java:3:8-19  import lombok.Data;
+/com/demo/Person.java:5:2-6  @Data
+/lombok/Data.java:3:19-23  public @interface Data {

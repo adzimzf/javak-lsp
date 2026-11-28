@@ -9,4 +9,4 @@ class Box<T> {
     }
 }
 //= expected
-/com/demo/Box.java:3:11  class Box<T> {
+/com/demo/Box.java:3:11-12  class Box<T> {

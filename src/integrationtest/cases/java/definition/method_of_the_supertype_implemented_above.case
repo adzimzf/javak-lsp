@@ -23,4 +23,4 @@ public class Car extends Vehicle {
     }
 }
 //= expected
-/com/demo/Vehicle.java:6:16  public int speed() {
+/com/demo/Vehicle.java:6:16-21  public int speed() {

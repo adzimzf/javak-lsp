@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Printer.kt:4:29  fun print(text: String, copies: Int) {
+/com/demo/Printer.kt:4:29-35  fun print(text: String, copies: Int) {

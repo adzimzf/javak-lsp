@@ -13,4 +13,4 @@ class Circle : Shape {
     }
 }
 //= expected
-/com/demo/Circle.kt:4:18  override fun area(): Double {
+/com/demo/Circle.kt:4:18-22  override fun area(): Double {

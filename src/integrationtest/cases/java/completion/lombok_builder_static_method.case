@@ -40,5 +40,9 @@ public @interface Singular {
     String value() default "";
 }
 //= expected
-class
-builder
+class · Class<com.demo.Order>  field
+  inserts class over ""
+  detail class : Class<com.demo.Order>
+builder() · OrderBuilder  method
+  inserts builder() over ""
+  detail Order.builder() : OrderBuilder

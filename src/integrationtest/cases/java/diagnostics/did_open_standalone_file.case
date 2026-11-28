@@ -4,5 +4,5 @@ public class Foo extends UnknownType {	public void method1(){
 		super.whatever();	}
 }
 //= expected (pending)
-/src/main/java/java/Foo.java:2:26  UnknownType cannot be resolved to a type
-/src/main/java/java/Foo.java:3:3  UnknownType cannot be resolved to a type
+/src/main/java/java/Foo.java:2:26-37  error [16777218] UnknownType cannot be resolved to a type
+/src/main/java/java/Foo.java:3:3-8  error [16777218] UnknownType cannot be resolved to a type

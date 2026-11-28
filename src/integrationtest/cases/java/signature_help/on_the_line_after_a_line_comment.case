@@ -42,4 +42,4 @@ public class Controller {
     }
 }
 //= expected
-generator([Config config], List<String> columns)
+> generator([Config config], List<String> columns) : void

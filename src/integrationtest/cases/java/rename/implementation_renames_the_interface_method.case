@@ -13,5 +13,5 @@ class B implements A {
     }
 }
 //= expected
-/com/demo/A.java:4:10  void foo();
-/com/demo/B.java:5:17  public void foo() {
+/com/demo/A.java:4  void renamed();
+/com/demo/B.java:5  public void renamed() {

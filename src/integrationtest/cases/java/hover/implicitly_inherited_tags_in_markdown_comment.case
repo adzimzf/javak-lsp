@@ -21,3 +21,7 @@ public class Test {
 }
 //= expected
 int subtract(int a, int b)
+Calculates a difference.
+* **a** the inherited first number
+<!-- -->
+* **b** the inherited second number

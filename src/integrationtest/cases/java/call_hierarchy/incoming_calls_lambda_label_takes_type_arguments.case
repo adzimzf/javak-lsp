@@ -19,5 +19,6 @@ public class Use {
     }
 }
 //= expected
-item remove() : void  /p/Node.java:3:17  public void remove() {}
-incoming accept(Node) : void  /p/Use.java:5:18  node.remove();
+item method remove() : void p.Node  /p/Node.java:3:17-23  public void remove() {}
+incoming method accept(Node) : void p.Use$1  /p/Use.java:5:18-26  node.remove();
+    called at 5:18-26

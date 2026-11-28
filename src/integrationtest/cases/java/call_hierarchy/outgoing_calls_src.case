@@ -67,8 +67,14 @@ public class CallHierarchy {
   }
 }
 //= expected
-item method_1() : void  /src/org/sample/CallHierarchy.java:34:20  protected void method_1() {
-incoming Child()  /src/org/sample/CallHierarchy.java:47:7  method_1();
-incoming method_2() : void  /src/org/sample/CallHierarchy.java:53:7  method_1();
-outgoing bar() : void  /src/org/sample/CallHierarchy.java:27:17  public void bar() {
-outgoing foo() : void  /src/org/sample/CallHierarchy.java:23:17  public void foo() {
+item method method_1() : void org.sample.CallHierarchy$Base  /src/org/sample/CallHierarchy.java:34:20-28  protected void method_1() {
+incoming constructor Child() org.sample.CallHierarchy$Child  /src/org/sample/CallHierarchy.java:47:7-17  method_1();
+    called at 47:7-17
+incoming method method_2() : void org.sample.CallHierarchy$Child  /src/org/sample/CallHierarchy.java:53:7-17  method_1();
+    called at 53:7-17
+    called at 54:7-17
+    called at 55:7-17
+outgoing method bar() : void org.sample.CallHierarchy$Base  /src/org/sample/CallHierarchy.java:27:17-20  public void bar() {
+    called at 36:7-12
+outgoing method foo() : void org.sample.CallHierarchy$Base  /src/org/sample/CallHierarchy.java:23:17-20  public void foo() {
+    called at 35:7-12

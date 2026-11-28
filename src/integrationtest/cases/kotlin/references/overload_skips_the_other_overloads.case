@@ -18,5 +18,5 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.kt:6:17  printer.print("page")
-/com/demo/Printer.kt:7:9  fun print(text: String) {
+/com/demo/Main.kt:6:17-22  printer.print("page")
+/com/demo/Printer.kt:7:9-14  fun print(text: String) {

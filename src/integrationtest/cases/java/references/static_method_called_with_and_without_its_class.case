@@ -19,7 +19,7 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:5:22  return Maths.twice(1);
-/com/demo/Maths.java:4:16  static int twice(int value) {
-/com/demo/Maths.java:9:16  return twice(twice(value));
-/com/demo/Maths.java:9:22  return twice(twice(value));
+/com/demo/Main.java:5:22-30  return Maths.twice(1);
+/com/demo/Maths.java:4:16-21  static int twice(int value) {
+/com/demo/Maths.java:9:16-35  return twice(twice(value));
+/com/demo/Maths.java:9:22-34  return twice(twice(value));

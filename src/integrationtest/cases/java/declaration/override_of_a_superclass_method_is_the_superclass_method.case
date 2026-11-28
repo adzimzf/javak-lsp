@@ -16,4 +16,4 @@ public class Dog extends Animal {
     }
 }
 //= expected
-/com/demo/Animal.java:4:19  public String sound() {
+/com/demo/Animal.java:4:19-24  public String sound() {

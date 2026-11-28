@@ -113,5 +113,5 @@ public final class LoggerFactory {
     }
 }
 //= expected
-/com/demo/Person.java:7:20  private String name;
-/com/demo/Service.java:16:25  log.info(person.getName());
+/com/demo/Person.java:7:20-24  private String name;
+/com/demo/Service.java:16:25-34  log.info(person.getName());

@@ -4,6 +4,6 @@ package p;
 public record $0A$1(String name, int age) {
 }
 //= expected
-Add Javadoc comment
-Generate Getters
-Generate toString()
+Add Javadoc comment  (quickassist)
+Generate Getters  (source.generate.accessors)
+Generate toString()  (source.generate.toString)

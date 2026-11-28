@@ -18,9 +18,9 @@ public class Reader {
     }
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'numRef'
-Change modifiers to final where possible
-Generate Getters
-Generate Getters and Setters
-Generate Setters
+Add Javadoc comment  (quickassist)
+Add final modifier for 'numRef'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setters  (source.generate.accessors)

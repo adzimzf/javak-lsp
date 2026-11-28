@@ -12,7 +12,17 @@ public class Test {
   } 
 }
 //= expected
-c
-flag
-test
-Test
+c · List<java.lang.String>  variable
+  inserts c over ""
+flag · boolean  field
+  inserts flag over ""
+  detail Test.flag : boolean
+test() · String  method
+  inserts test over ""
+  detail Test.test() : String
+test(List<String> c) · void  method
+  inserts test over ""
+  detail Test.test(List<String> c) : void
+Test  class
+  inserts Test over ""
+  detail Test

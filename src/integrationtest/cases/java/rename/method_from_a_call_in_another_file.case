@@ -15,5 +15,5 @@ class B {
     }
 }
 //= expected
-/com/demo/A.java:4:10  void foo() {
-/com/demo/B.java:6:11  a.foo();
+/com/demo/A.java:4  void renamed() {
+/com/demo/B.java:6  a.renamed();

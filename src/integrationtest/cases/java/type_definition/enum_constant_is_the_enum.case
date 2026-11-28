@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Unit.java:3:6  enum Unit {
+/com/demo/Unit.java:3:6-10  enum Unit {

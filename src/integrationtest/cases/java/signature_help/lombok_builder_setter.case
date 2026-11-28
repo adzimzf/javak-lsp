@@ -42,4 +42,4 @@ public @interface Singular {
     String value() default "";
 }
 //= expected
-quantity([int quantity])
+> quantity([int quantity]) : OrderBuilder

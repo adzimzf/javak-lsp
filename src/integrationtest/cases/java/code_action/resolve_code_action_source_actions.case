@@ -4,8 +4,8 @@ public class E {
     }
 }
 //= expected
-Add Javadoc comment
-Change signature for 'hello'
-Generate toString()
-Inline Method
-Make Static
+Add Javadoc comment  (quickassist)
+Change signature for 'hello'  (refactor.change.signature)
+Generate toString()  (source.generate.toString)
+Inline Method  (refactor.inline)
+Make Static  (refactor.inline)

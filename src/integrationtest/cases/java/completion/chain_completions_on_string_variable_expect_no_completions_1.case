@@ -12,7 +12,14 @@ public class Foo {
 	}
 }
 //= expected
-String
-chain
-Foo
-StringChain
+String · java.lang  class
+  inserts String over ""
+  detail java.lang.String
+chain · Foo.StringChain  variable
+  inserts chain over ""
+Foo  class
+  inserts Foo over ""
+  detail Foo
+StringChain · Foo  class
+  inserts StringChain over ""
+  detail Foo.StringChain

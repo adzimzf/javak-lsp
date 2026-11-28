@@ -22,4 +22,6 @@ class E {
     }
 }
 //= expected
-show([Object value])
+> show([Object value]) : void
+  show(String text) : void
+  show(int number) : void

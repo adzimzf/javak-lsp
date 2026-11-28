@@ -19,5 +19,5 @@ class Ma$0in {
   }
 }
 //= expected
-/src/main/java/com/demo/Main.java:5:13  The enum constant BROKEN needs a corresponding case label in this enum switch on State
-/src/main/java/com/demo/Main.java:5:13  The enum constant CLOSED needs a corresponding case label in this enum switch on State
+/src/main/java/com/demo/Main.java:5:13-18  warning [33555193] The enum constant BROKEN needs a corresponding case label in this enum switch on State
+/src/main/java/com/demo/Main.java:5:13-18  warning [33555193] The enum constant CLOSED needs a corresponding case label in this enum switch on State

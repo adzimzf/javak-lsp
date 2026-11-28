@@ -7,5 +7,5 @@ record R(int value) {
     }
 }
 //= expected
-/com/demo/R.java:4:19  int other(int value) {
-/com/demo/R.java:5:16  return value + 1;
+/com/demo/R.java:4  int other(int renamed) {
+/com/demo/R.java:5  return renamed + 1;

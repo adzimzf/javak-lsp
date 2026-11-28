@@ -13,4 +13,6 @@ public class Main {
     }
 }
 //= expected
-tally
+tally() · int  method
+  inserts tally() over "tal"
+  detail Main.tally() : int

@@ -6,6 +6,11 @@ public class Foo {
     }
 }
 //= expected
-List
-args
-Foo
+List<java.lang.String> · java.util  interface
+  inserts List over ""
+  detail java.util.List<java.lang.String>
+args · String[]  variable
+  inserts args over ""
+Foo  class
+  inserts Foo over ""
+  detail Foo

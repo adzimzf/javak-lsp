@@ -4,10 +4,10 @@ public class Foo {
 		Integer $0bar$1 = 2000;	}
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 'bar'
-Change modifiers to final where possible
-Extract to field
-Generate toString()
-Split variable declaration
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Add final modifier for 'bar'  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Extract to field  (refactor.extract.field)
+Generate toString()  (source.generate.toString)
+Split variable declaration  (quickassist)
+Surround with try/catch  (refactor)

@@ -7,3 +7,6 @@ package test1;
 public class H$0over {}
 //= expected
 Hover
+Some javadoc and then ...
+* **@jls**
+* 9.6.4.1 @Target

@@ -20,4 +20,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circles.java:4:26  public static Circle unit() {
+/com/demo/Circles.java:4:26-30  public static Circle unit() {

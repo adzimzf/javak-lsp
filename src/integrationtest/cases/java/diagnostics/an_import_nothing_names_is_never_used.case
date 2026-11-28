@@ -12,7 +12,7 @@ public class Imports {
     int f(Map<String, String> m) { return max(1, 2); }
 }
 //= expected
-/src/main/java/p/Imports.java:2:8  The import java.util.List is never used
-/src/main/java/p/Imports.java:5:8  The import java.util.Set is never used
-/src/main/java/p/Imports.java:6:8  The import java.util.Map is never used
-/src/main/java/p/Imports.java:7:15  The import java.lang.Math.abs is never used
+/src/main/java/p/Imports.java:2:8-22  warning [268435844] The import java.util.List is never used
+/src/main/java/p/Imports.java:5:8-21  warning [268435844] The import java.util.Set is never used
+/src/main/java/p/Imports.java:6:8-21  warning [268435844] The import java.util.Map is never used
+/src/main/java/p/Imports.java:7:15-33  warning [268435844] The import java.lang.Math.abs is never used

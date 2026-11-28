@@ -16,4 +16,6 @@ import com.demo.data.Ro$0
 public class Foo {
 }
 //= expected
-Row
+Row · com.demo.data  class
+  inserts Row; over "Ro"
+  detail com.demo.data.Row

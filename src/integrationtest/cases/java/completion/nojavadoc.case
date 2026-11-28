@@ -1570,14 +1570,37 @@ public class Foo {
 	}
 }
 //= expected
-abstract
-class
-enum
-final
-import
-interface
-non
-package
-public
-record
-sealed
+class  snippet
+  inserts /**\n * ${1:InnerFoo5}\n */\npublic class ${1:InnerFoo5} {\n\n\t${0}\n} over ""
+  doc /**
+enum  snippet
+  inserts /**\n * ${1:InnerFoo5}\n */\npublic enum ${1:InnerFoo5} {\n\n\t${0}\n} over ""
+  doc /**
+interface  snippet
+  inserts /**\n * ${1:InnerFoo5}\n */\npublic interface ${1:InnerFoo5} {\n\n\t${0}\n} over ""
+  doc /**
+record  snippet
+  inserts /**\n * ${1:InnerFoo5}\n */\npublic record ${1:InnerFoo5}(${0}) {\n} over ""
+  doc /**
+abstract  keyword
+  inserts abstract over ""
+class  keyword
+  inserts class over ""
+enum  keyword
+  inserts enum over ""
+final  keyword
+  inserts final over ""
+import  keyword
+  inserts import over ""
+interface  keyword
+  inserts interface over ""
+non-sealed  keyword
+  inserts non-sealed over ""
+package  keyword
+  inserts package over ""
+public  keyword
+  inserts public over ""
+record  keyword
+  inserts record over ""
+sealed  keyword
+  inserts sealed over ""

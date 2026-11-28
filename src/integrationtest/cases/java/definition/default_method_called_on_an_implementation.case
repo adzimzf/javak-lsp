@@ -26,4 +26,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Shape.java:6:20  default String describe() {
+/com/demo/Shape.java:6:20-28  default String describe() {

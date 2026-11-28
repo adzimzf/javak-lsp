@@ -17,4 +17,4 @@ class Square extends Shape {
     }
 }
 //= expected
-/com/demo/Shape.java:7:5  Shape(int sides) {
+/com/demo/Shape.java:7:5-10  Shape(int sides) {

@@ -14,5 +14,5 @@ package org.sample;
 public class Foo implements IFoo$0 {
 }
 //= expected
-IFoo  /org/other/IFoo.java:3
-IFoo  /org/sample/IFoo.java:3
+IFoo  interface in org.other  /org/other/IFoo.java:3
+IFoo  interface in org.sample  /org/sample/IFoo.java:3

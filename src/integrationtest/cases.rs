@@ -348,8 +348,10 @@ fn block_span(text: &str, header: &str) -> Option<(usize, usize)> {
 /// ones around them, ending in one newline. An empty one stays empty, so a
 /// case file committed without an answer disagrees with every answer.
 fn normalized(expected: &str) -> String {
-    let body = expected.trim();
-    if body.is_empty() {
+    // Blank lines around it go, the indent of its first line stays: an
+    // answer may start with an indented line (an inactive signature).
+    let body = expected.trim_start_matches(['\n', '\r']).trim_end();
+    if body.trim().is_empty() {
         return String::new();
     }
     body.to_owned() + "\n"

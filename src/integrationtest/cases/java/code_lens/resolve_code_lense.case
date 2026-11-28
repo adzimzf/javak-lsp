@@ -790,6 +790,6 @@ public class Test{
     }
 }
 //= expected
-/src/java/Foo.java:6:14  public class Foo {
-/src/java/Foo.java:8:21  public static void main(String[] args) {
-/src/java/Foo.java:16:14  public void foo(String input) {}
+/src/java/Foo.java:6:14-17  public class Foo {
+/src/java/Foo.java:8:21-25  public static void main(String[] args) {
+/src/java/Foo.java:16:14-17  public void foo(String input) {}

@@ -12,7 +12,7 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.java:3:14  public class Circle {
-/com/demo/Main.kt:4:22  fun copy(circle: Circle): Circle {
-/com/demo/Main.kt:4:31  fun copy(circle: Circle): Circle {
-/com/demo/Main.kt:5:16  return Circle()
+/com/demo/Circle.java:3  public class Renamed {
+/com/demo/Main.kt:4  fun copy(circle: Renamed): Renamed {
+/com/demo/Main.kt:5  return Renamed()
+moves /com/demo/Circle.java -> /com/demo/Renamed.java

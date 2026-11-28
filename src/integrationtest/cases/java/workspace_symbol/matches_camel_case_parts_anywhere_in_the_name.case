@@ -30,5 +30,5 @@ class Main {
     // CirTe$0
 }
 //= expected
-CircleTest  /com/demo/CircleTest.java:3
-SemiCircleTest  /com/demo/SemiCircleTest.java:3
+CircleTest  class in com.demo  /com/demo/CircleTest.java:3
+SemiCircleTest  class in com.demo  /com/demo/SemiCircleTest.java:3

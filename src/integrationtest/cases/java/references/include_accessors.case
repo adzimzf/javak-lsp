@@ -790,7 +790,7 @@ public class Test{
     }
 }
 //= expected
-/src/org/ref/Apple.java:4:17  private String name;
-/src/org/ref/Apple.java:7:8  this.name = name;
-/src/org/ref/Apple.java:11:10  return name;
-/src/org/ref/Apple.java:15:8  this.name = name;
+/src/org/ref/Apple.java:4:17-21  private String name;
+/src/org/ref/Apple.java:7:8-12  this.name = name;
+/src/org/ref/Apple.java:11:10-14  return name;
+/src/org/ref/Apple.java:15:8-12  this.name = name;

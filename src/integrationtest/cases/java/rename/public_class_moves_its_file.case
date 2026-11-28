@@ -1,0 +1,20 @@
+//- /com/demo/Circle.java
+package com.demo;
+
+public class Circle {
+    public Circle() {}
+}
+//- /com/demo/Main.java
+package com.demo;
+
+class Main {
+    Circle make() {
+        return new Cir$0cle();
+    }
+}
+//= expected
+/com/demo/Circle.java:3  public class Renamed {
+/com/demo/Circle.java:4  public Renamed() {}
+/com/demo/Main.java:4  Renamed make() {
+/com/demo/Main.java:5  return new Renamed();
+moves /com/demo/Circle.java -> /com/demo/Renamed.java

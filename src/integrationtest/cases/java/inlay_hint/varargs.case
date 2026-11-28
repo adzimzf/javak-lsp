@@ -6,4 +6,4 @@ $0public class Foo {
 	}
 }
 //= expected
-4:7  ...args:
+4:7  ...args:␣

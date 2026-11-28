@@ -24,4 +24,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Square.java:5:12  double area() {
+/com/demo/Square.java:5:12-16  double area() {

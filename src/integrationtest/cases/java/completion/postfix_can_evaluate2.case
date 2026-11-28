@@ -10,4 +10,6 @@ public class Test {
 	}
 }
 //= expected
-isEmpty
+isEmpty() · boolean  method
+  inserts isEmpty() over ""
+  detail List.isEmpty() : boolean

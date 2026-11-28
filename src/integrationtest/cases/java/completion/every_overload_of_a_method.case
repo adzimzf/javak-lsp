@@ -14,4 +14,12 @@ public class Test {
     }
 }
 //= expected
-test
+test(String x) · void  method
+  inserts test(${1:x}); over "tes"
+  detail Test.test(String x) : void
+test(String x, int y) · void  method
+  inserts test(${1:x}, ${2:y}); over "tes"
+  detail Test.test(String x, int y) : void
+test(String x, int y, boolean z) · void  method
+  inserts test(${1:x}, ${2:y}, ${3:z}); over "tes"
+  detail Test.test(String x, int y, boolean z) : void

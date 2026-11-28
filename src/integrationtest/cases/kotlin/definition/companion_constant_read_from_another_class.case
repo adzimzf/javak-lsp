@@ -15,4 +15,4 @@ class Main {
     }
 }
 //= expected (pending)
-/com/demo/Circle.kt:5:19  const val PI = 3.14
+/com/demo/Circle.kt:5:19-21  const val PI = 3.14

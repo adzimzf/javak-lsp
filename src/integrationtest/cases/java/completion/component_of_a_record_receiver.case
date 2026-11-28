@@ -12,5 +12,9 @@ public class Foo {
     }
 }
 //= expected
-x
-y
+x() · int  method
+  inserts x() over ""
+  detail Point.x() : int
+y() · int  method
+  inserts y() over ""
+  detail Point.y() : int

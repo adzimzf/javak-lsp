@@ -7,5 +7,5 @@ public class E123 {
     }
 }
 //= expected (pending)
-/src/main/java/test1/E123.java:5:17  someInteger cannot be resolved to a variable
-/src/main/java/test1/E123.java:5:31  Syntax error, insert ";" to complete LocalVariableDeclarationStatement
+/src/main/java/test1/E123.java:5:17-28  error [33554515] someInteger cannot be resolved to a variable
+/src/main/java/test1/E123.java:5:31-32  error [1610612976] Syntax error, insert ";" to complete LocalVariableDeclarationStatement

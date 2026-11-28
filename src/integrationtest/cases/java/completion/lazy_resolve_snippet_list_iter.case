@@ -6,4 +6,6 @@ public class Test {
 		iter$0	}
 }
 //= expected
-(nothing)
+iter · iterate over an array or Iterable  snippet
+  inserts for (${1:String} ${2:string} : ${3:args}) {\n\t$TM_SELECTED_TEXT${0}\n} over "iter"
+  detail iterate over an array or Iterable

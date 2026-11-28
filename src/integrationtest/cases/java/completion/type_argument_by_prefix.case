@@ -20,4 +20,6 @@ public class Main {
     Box<Do$0> box;
 }
 //= expected
-Dog
+Dog · com.demo  class
+  inserts Dog over "Do"
+  detail com.demo.Dog

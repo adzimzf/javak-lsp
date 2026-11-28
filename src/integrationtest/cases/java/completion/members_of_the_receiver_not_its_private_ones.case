@@ -25,6 +25,12 @@ class Main {
     }
 }
 //= expected
-radius
-area
-unit
+radius · double  field
+  inserts radius over ""
+  detail Circle.radius : double
+area() · double  method
+  inserts area() over ""
+  detail Circle.area() : double
+unit() · Circle  method
+  inserts unit() over ""
+  detail Circle.unit() : Circle

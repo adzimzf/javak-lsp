@@ -10,4 +10,4 @@ public class E {
 	}
 }
 //= expected
-getKey()
+> getKey() : Object

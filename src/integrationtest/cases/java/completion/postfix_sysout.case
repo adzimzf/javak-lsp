@@ -5,4 +5,6 @@ public class Test {
 		a.sysout$0	}
 }
 //= expected
-(nothing)
+sysout · Sends the affected object to a System.out.println(..) call  snippet
+  inserts System.out.println(a);${0} over "a.sysout"
+  detail Sends the affected object to a System.out.println(..) call

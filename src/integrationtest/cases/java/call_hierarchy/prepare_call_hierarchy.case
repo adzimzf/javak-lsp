@@ -67,5 +67,7 @@ public class CallHierarchy {
   }
 }
 //= expected
-item protectedField  /src/org/sample/CallHierarchy.java:15:19  protected int protectedField = 200;
-incoming Child()  /src/org/sample/CallHierarchy.java:48:7  protectedField = 300;
+item field protectedField org.sample.CallHierarchy$Base  /src/org/sample/CallHierarchy.java:15:19-33  protected int protectedField = 200;
+incoming constructor Child() org.sample.CallHierarchy$Child  /src/org/sample/CallHierarchy.java:48:7-21  protectedField = 300;
+    called at 48:7-21
+    called at 49:7-21

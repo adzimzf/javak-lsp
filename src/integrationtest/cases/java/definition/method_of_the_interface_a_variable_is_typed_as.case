@@ -21,4 +21,4 @@ class Distance {
     }
 }
 //= expected
-/com/demo/MovingObject.java:4:9  int speed();
+/com/demo/MovingObject.java:4:9-14  int speed();

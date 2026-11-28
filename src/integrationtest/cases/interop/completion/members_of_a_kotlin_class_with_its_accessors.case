@@ -17,6 +17,12 @@ class Main {
     }
 }
 //= expected (pending)
-area
-getRadius
-setRadius
+area() · double  method
+  inserts area() over ""
+  detail Circle.area() : double
+getRadius() · double  method
+  inserts getRadius() over ""
+  detail Circle.getRadius() : double
+setRadius(double radius) · void  method
+  inserts setRadius(${1:radius}) over ""
+  detail Circle.setRadius(double radius) : void

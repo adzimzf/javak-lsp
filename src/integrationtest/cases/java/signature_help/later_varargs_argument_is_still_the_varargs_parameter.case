@@ -10,4 +10,4 @@ class E {
     }
 }
 //= expected
-foo(int a, [String... args])
+> foo(int a, [String... args]) : void

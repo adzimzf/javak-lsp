@@ -10,4 +10,4 @@ class E {
     }
 }
 //= expected
-unique([double d])
+> unique([double d]) : void

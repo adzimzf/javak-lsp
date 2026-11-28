@@ -5,6 +5,7 @@ public class Foo {
 		String bar = "astring";	}
 }
 //= expected
-Change modifiers to final where possible
-Generate toString()
-Organize imports
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate toString()  (source.generate.toString)
+Organize imports  (quickassist)
+Organize imports  (source.organizeImports)

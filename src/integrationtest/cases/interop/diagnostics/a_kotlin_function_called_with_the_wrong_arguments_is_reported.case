@@ -15,4 +15,4 @@ class Ma$0in {
     }
 }
 //= expected
-/src/main/java/com/demo/Main.java:5:23  The method scaled(double) in the type Circle is not applicable for the arguments ()
+/src/main/java/com/demo/Main.java:5:23-29  error [67108979] The method scaled(double) in the type Circle is not applicable for the arguments ()

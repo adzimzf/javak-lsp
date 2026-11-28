@@ -14,4 +14,4 @@ class Main {
     }
 }
 //= expected
-print(text: String, [copies: Int])
+> print(text: String, [copies: Int])

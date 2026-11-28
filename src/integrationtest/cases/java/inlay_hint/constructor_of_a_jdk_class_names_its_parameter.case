@@ -11,4 +11,4 @@ class Reader {
 	}
 }
 //= expected
-8:26  message:
+8:26  message:␣

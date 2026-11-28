@@ -113,4 +113,4 @@ public final class LoggerFactory {
     }
 }
 //= expected
-/com/demo/Service.java:8:1  @RequiredArgsConstructor
+/com/demo/Service.java:8:1-25  @RequiredArgsConstructor

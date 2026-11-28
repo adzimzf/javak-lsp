@@ -11,5 +11,9 @@ import com.dem$0
 public class Foo {
 }
 //= expected
-com.demo
-com.demo.data
+com.demo · (package)  module
+  inserts com.demo.${0:*}; over "com.dem"
+  detail (package) com.demo
+com.demo.data · (package)  module
+  inserts com.demo.data.${0:*}; over "com.dem"
+  detail (package) com.demo.data

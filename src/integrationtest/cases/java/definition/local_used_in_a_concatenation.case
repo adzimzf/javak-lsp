@@ -8,4 +8,4 @@ public class Single {
     }
 }
 //= expected
-/com/demo/Single.java:5:16  String greeting = "1";
+/com/demo/Single.java:5:16-24  String greeting = "1";

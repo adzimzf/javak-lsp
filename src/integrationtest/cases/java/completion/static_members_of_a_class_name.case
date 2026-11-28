@@ -23,7 +23,15 @@ public class Foo {
     }
 }
 //= expected
-DAYS
-HOURS
-valueOf
-class
+DAYS · int  constant
+  inserts DAYS over ""
+  detail Units.DAYS : int
+HOURS · int  constant
+  inserts HOURS over ""
+  detail Units.HOURS : int
+valueOf(String name) · int  method
+  inserts valueOf(${1:name}) over ""
+  detail Units.valueOf(String name) : int
+class · Class<com.demo.Units>  field
+  inserts class over ""
+  detail class : Class<com.demo.Units>

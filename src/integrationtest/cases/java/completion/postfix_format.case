@@ -5,4 +5,12 @@ public class Test {
 		a.format$0	}
 }
 //= expected
-format
+format(Locale l, String format, Object... args) · String  method
+  inserts format(${1:l}, ${2:format}, ${3:args}) over "format"
+  detail String.format(Locale l, String format, Object... args) : String
+format(String format, Object... args) · String  method
+  inserts format(${1:format}, ${2:args}) over "format"
+  detail String.format(String format, Object... args) : String
+format · Sends the affected object to the String.format(..) method  snippet
+  inserts String.format(a, ${0}); over "a.format"
+  detail Sends the affected object to the String.format(..) method

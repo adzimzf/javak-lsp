@@ -9,6 +9,8 @@ public class Use {
     }
 }
 //= expected
-item println(String) : void  <library>/java.base/java/io/PrintStream.java
-incoming log(String) : void  /p/Use.java:7:20  System.out.println(s);
-incoming print(String, Object...) : void  /p/Use.java:4:20  System.out.println(String.format(msg, args));
+item method println(String) : void java.io.PrintStream  <library>/java.base/java/io/PrintStream.java
+incoming method log(String) : void p.Use  /p/Use.java:7:20-30  System.out.println(s);
+    called at 7:20-30
+incoming method print(String, Object...) : void p.Use  /p/Use.java:4:20-53  System.out.println(String.format(msg, args));
+    called at 4:20-53

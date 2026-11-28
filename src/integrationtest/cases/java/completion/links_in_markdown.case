@@ -13,4 +13,6 @@ public class Test {
     }
 }
 //= expected
-zzzzzzz
+zzzzzzz() · Baz  method
+  inserts zzzzzzz() over "zz"
+  detail Test.zzzzzzz() : Baz

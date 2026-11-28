@@ -7,8 +7,13 @@ public class Circle {
     }
     p$0
 }
-
 //= expected
-private
-protected
-public
+private  keyword
+  inserts private  over "p"
+protected  keyword
+  inserts protected  over "p"
+public  keyword
+  inserts public  over "p"
+public static void main(String[] args) · public static main method  snippet
+  inserts public static void main(String[] args) {\n\t${0}\n} over "p"
+  detail public static main method

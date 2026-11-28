@@ -19,4 +19,6 @@ public class Main {
     }
 }
 //= expected
-ping
+ping() · void  method
+  inserts ping(); over "p"
+  detail Inner.ping() : void

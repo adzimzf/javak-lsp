@@ -58,3 +58,4 @@ public class Foo2 {
 }
 //= expected
 String mySimpleString = "SimpleStringData"
+["SimpleStringData"] is a simple String

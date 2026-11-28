@@ -6,6 +6,6 @@ public class Foo {
 	}
 }
 //= expected
-Add Javadoc comment
-Generate toString()
-Surround with try/catch
+Add Javadoc comment  (quickassist)
+Generate toString()  (source.generate.toString)
+Surround with try/catch  (refactor)

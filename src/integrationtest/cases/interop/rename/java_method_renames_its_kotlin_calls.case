@@ -23,5 +23,5 @@ class Main {
     }
 }
 //= expected
-/com/demo/Circle.java:4:19  public double area() {
-/com/demo/Main.kt:5:39  return square.area() + circle.area()
+/com/demo/Circle.java:4  public double renamed() {
+/com/demo/Main.kt:5  return square.area() + circle.renamed()

@@ -17,7 +17,7 @@ class User {
     }
 }
 //= expected
-/com/demo/R.java:3:14  record R(int value) {
-/com/demo/R.java:5:13  if (value < 0) {
-/com/demo/R.java:6:13  value = 0;
-/com/demo/User.java:5:18  return r.value();
+/com/demo/R.java:3  record R(int renamed) {
+/com/demo/R.java:5  if (renamed < 0) {
+/com/demo/R.java:6  renamed = 0;
+/com/demo/User.java:5  return r.renamed();

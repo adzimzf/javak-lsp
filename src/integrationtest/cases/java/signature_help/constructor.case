@@ -6,4 +6,7 @@ public class E {
    }
 }
 //= expected
-RuntimeException()
+> RuntimeException()
+  RuntimeException(Throwable cause)
+  RuntimeException(String message)
+  RuntimeException(String message, Throwable cause)

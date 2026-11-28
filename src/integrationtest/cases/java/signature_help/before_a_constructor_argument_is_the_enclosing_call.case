@@ -15,4 +15,4 @@ class E {
     }
 }
 //= expected
-foo([Circle a])
+> foo([Circle a]) : void

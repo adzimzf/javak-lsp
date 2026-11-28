@@ -22,6 +22,8 @@ public class Use {
     }
 }
 //= expected
-item error(String) : void  /p/Use.java:4:10  void error(String message) {
-outgoing add(E) : boolean  <library>/java.base/java/util/ArrayList.java
-outgoing asList() : List<String>  /java/util/Arrays.java:3:42  public static java.util.List<String> asList() { return new ArrayList<>(); }
+item method error(String) : void p.Use  /p/Use.java:4:10-15  void error(String message) {
+outgoing method add(E) : boolean java.util.ArrayList  <library>/java.base/java/util/ArrayList.java
+    called at 6:9-28
+outgoing method asList() : List<String> java.util.Arrays  /java/util/Arrays.java:3:42-48  public static java.util.List<String> asList() { return new ArrayList<>(); }
+    called at 5:9-34

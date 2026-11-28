@@ -11,4 +11,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Nullable.java:3:12  @interface Nullable {
+/com/demo/Nullable.java:3:12-20  @interface Nullable {

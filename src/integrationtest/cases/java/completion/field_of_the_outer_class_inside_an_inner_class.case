@@ -11,4 +11,6 @@ class Outer {
     }
 }
 //= expected
-radius
+radius · double  field
+  inserts radius over "rad"
+  detail Outer.radius : double

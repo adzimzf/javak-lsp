@@ -15,4 +15,6 @@ public class Main {
     }
 }
 //= expected
-DAYS
+DAYS · int  constant
+  inserts DAYS over "DA"
+  detail Units.DAYS : int

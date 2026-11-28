@@ -11,3 +11,9 @@ package test1;
 public class Me$0h {}
 //= expected
 Meh
+Some text.
+* **Since:**
+* 9
+* **Uses:**
+* java.sql.Driver
+* **@moduleGraph**

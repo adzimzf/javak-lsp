@@ -3,4 +3,6 @@ package org.sample;
 import java.util.List$0
 public class Test {}
 //= expected
-List
+List · java.util  interface
+  inserts List; over "List"
+  detail java.util.List

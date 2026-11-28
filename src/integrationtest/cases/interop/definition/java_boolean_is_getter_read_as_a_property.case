@@ -15,4 +15,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Box.java:4:20  public boolean isEmpty() {
+/com/demo/Box.java:4:20-27  public boolean isEmpty() {

@@ -5,6 +5,6 @@ public class $0A$1 {
 	public final String name = "test";
 }
 //= expected
-Add Javadoc comment
-Generate Getter for 'name'
-Generate Getters
+Add Javadoc comment  (quickassist)
+Generate Getter for 'name'  (quickassist)
+Generate Getters  (source.generate.accessors)

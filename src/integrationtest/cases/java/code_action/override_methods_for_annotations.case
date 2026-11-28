@@ -3,4 +3,4 @@ package p;
 
 public @interface My$0A$1nnotation {}
 //= expected
-Add Javadoc comment
+Add Javadoc comment  (quickassist)

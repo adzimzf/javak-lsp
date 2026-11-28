@@ -13,4 +13,4 @@ class Main {
     }
 }
 //= expected
-/com/demo/Shapes.kt:3:7  class Point(val x: Double, val y: Double)
+/com/demo/Shapes.kt:3:7-12  class Point(val x: Double, val y: Double)

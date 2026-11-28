@@ -15,4 +15,6 @@ public class Test {
     }
 }
 //= expected
-run
+run() · void  method
+  inserts run(); over "ru"
+  detail Runner.run() : void

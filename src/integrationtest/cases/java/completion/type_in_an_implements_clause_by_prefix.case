@@ -10,4 +10,6 @@ package com.demo;
 public class Dog implements Bar$0 {
 }
 //= expected
-Barker
+Barker · com.demo  interface
+  inserts Barker over "Bar"
+  detail com.demo.Barker

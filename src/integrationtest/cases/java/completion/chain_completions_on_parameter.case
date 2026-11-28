@@ -6,4 +6,9 @@ public class Foo {
     }
 }
 //= expected
-collect
+collect(Collector<? super String,A,R> arg0) · R  method
+  inserts  over ""
+  detail Stream.collect(Collector<? super String,A,R> arg0) : R
+collect(Supplier<R> arg0, BiConsumer<R,? super String> arg1, BiConsumer<R,R> arg2) · R  method
+  inserts  over ""
+  detail Stream.collect(Supplier<R> arg0, BiConsumer<R,? super String> arg1, BiConsumer<R,R> arg2) : R

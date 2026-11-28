@@ -23,5 +23,9 @@ public class Foo {
     }
 }
 //= expected
-identity
-size
+identity() · String  method
+  inserts identity() over ""
+  detail Base.identity() : String
+size() · int  method
+  inserts size() over ""
+  detail Derived.size() : int

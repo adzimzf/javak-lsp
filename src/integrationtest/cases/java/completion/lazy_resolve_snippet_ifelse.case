@@ -5,4 +5,7 @@ public class Test {
 		ifelse$0	}
 }
 //= expected
-(nothing)
+ifelse · if-else statement  snippet
+  inserts if (${1:con}) {\n\t${2}\n} else {\n\t${0}\n} over "ifelse"
+  detail if-else statement
+  doc if (con) {

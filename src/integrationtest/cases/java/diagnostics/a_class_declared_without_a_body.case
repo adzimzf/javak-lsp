@@ -2,4 +2,4 @@
 package com.demo;
 class Ma$0in
 //= expected
-/src/main/java/com/demo/Main.java:2:7  Syntax error, insert "ClassBody" to complete ClassDeclaration
+/src/main/java/com/demo/Main.java:2:7-11  error [1610612976] Syntax error, insert "ClassBody" to complete ClassDeclaration

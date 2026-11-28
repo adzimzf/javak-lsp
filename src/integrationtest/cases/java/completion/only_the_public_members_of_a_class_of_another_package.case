@@ -29,4 +29,6 @@ class Main {
     }
 }
 //= expected
-name
+name() · String  method
+  inserts name() over ""
+  detail Shape.name() : String

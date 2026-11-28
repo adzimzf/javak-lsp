@@ -5,4 +5,7 @@ public class Foo {
     }
 }
 //= expected
-ArrayList
+ArrayList · java.util  class
+  inserts ArrayList over "ArrayList"
+  detail java.util.ArrayList
+  adds import java.util.ArrayList;

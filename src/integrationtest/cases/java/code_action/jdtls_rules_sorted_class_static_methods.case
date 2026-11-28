@@ -14,7 +14,7 @@ public class Links {
     }
 }
 //= expected
-Add Javadoc comment
-Change modifiers to final where possible
-Generate toString()
-Inline Method
+Add Javadoc comment  (refactor)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Generate toString()  (source.generate.toString)
+Inline Method  (refactor.inline)

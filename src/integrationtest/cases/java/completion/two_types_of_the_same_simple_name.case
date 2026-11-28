@@ -19,4 +19,9 @@ public class Foo {
     }
 }
 //= expected
-Listing
+Listing()  constructor
+  inserts Listing() over "Listin"
+  detail com.demo.util.Listing.Listing()
+Listing()  constructor
+  inserts com.demo.other.Listing() over "Listin"
+  detail com.demo.other.Listing.Listing()

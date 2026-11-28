@@ -16,10 +16,10 @@ public class Fields {
     }
 }
 //= expected
-/src/main/java/p/Fields.java:3:17  The value of the field Fields.unused is not used
-/src/main/java/p/Fields.java:5:17  The value of the field Fields.written is not used
-/src/main/java/p/Fields.java:6:29  The value of the field Fields.annotated is not used
-/src/main/java/p/Fields.java:7:31  The value of the field Fields.serialVersionUID is not used
-/src/main/java/p/Fields.java:8:17  The value of the field Fields.a is not used
-/src/main/java/p/Fields.java:9:17  The value of the field Fields.self is not used
-/src/main/java/p/Fields.java:14:24  The value of the field Fields.Inner.alsoUnused is not used
+/src/main/java/p/Fields.java:3:17-23  warning [570425421] The value of the field Fields.unused is not used
+/src/main/java/p/Fields.java:5:17-24  warning [570425421] The value of the field Fields.written is not used
+/src/main/java/p/Fields.java:6:29-38  warning [570425421] The value of the field Fields.annotated is not used
+/src/main/java/p/Fields.java:7:31-47  warning [570425421] The value of the field Fields.serialVersionUID is not used
+/src/main/java/p/Fields.java:8:17-18  warning [570425421] The value of the field Fields.a is not used
+/src/main/java/p/Fields.java:9:17-21  warning [570425421] The value of the field Fields.self is not used
+/src/main/java/p/Fields.java:14:24-34  warning [570425421] The value of the field Fields.Inner.alsoUnused is not used

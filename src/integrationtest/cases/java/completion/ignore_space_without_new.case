@@ -5,7 +5,13 @@ public class Test {
 	}
 }
 //= expected
-args
-s
-main
-Test
+args · String[]  variable
+  inserts args over ""
+s · String  variable
+  inserts s over ""
+main(String[] args) · void  method
+  inserts main(${1:args}); over ""
+  detail Test.main(String[] args) : void
+Test  class
+  inserts Test over ""
+  detail Test

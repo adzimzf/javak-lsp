@@ -14,4 +14,4 @@ class E$0 {
     }
 }
 //= expected
-/com/demo/E.java:3:7  class E {
+/com/demo/E.java:3:7-8  class E {

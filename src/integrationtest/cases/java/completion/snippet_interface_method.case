@@ -4,4 +4,6 @@ public interface Test {
 method$0
 }
 //= expected
-(nothing)
+method · method  snippet
+  inserts ${1|public,private|} ${2:void} ${3:name}(${4}); over "method"
+  detail method

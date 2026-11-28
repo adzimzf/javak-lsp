@@ -13,4 +13,4 @@ class E {
     }
 }
 //= expected
-/com/demo/E.java:11:16  return str.length();
+/com/demo/E.java:11:16-19  return str.length();

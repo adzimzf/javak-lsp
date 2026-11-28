@@ -5,4 +5,6 @@ package foo.bar;
 public class Foo {
 }
 //= expected
-Foo
+Foo · foo.bar  class  deprecated
+  inserts Foo over ""
+  detail foo.bar.Foo

@@ -16,6 +16,6 @@ class Main {
     }
 }
 //= expected
-/com/demo/Main.java:6:22  return first.area() + second.area();
-/com/demo/Main.java:6:38  return first.area() + second.area();
-/com/demo/Shape.java:4:12  double area();
+/com/demo/Main.java:6:22-28  return first.area() + second.area();
+/com/demo/Main.java:6:38-44  return first.area() + second.area();
+/com/demo/Shape.java:4:12-16  double area();

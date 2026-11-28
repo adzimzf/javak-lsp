@@ -5,4 +5,6 @@ public class Test {
 		soutm$0	}
 }
 //= expected
-(nothing)
+soutm · print current method to standard out  snippet
+  inserts System.out.println("Test.testMethod()"); over "soutm"
+  detail print current method to standard out

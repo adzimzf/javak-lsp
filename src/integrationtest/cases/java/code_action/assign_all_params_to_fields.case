@@ -6,13 +6,13 @@ public class App {
     }
 }
 //= expected
-Add Javadoc comment
-Add final modifier for 's3'
-Assign all parameters to new fields
-Assign parameter to field 's'
-Assign parameter to new field
-Change modifiers to final where possible
-Change signature for 'App'
-Generate Getters
-Generate Getters and Setters
-Generate Setters
+Add Javadoc comment  (quickassist)
+Add final modifier for 's3'  (quickassist)
+Assign all parameters to new fields  (quickassist)
+Assign parameter to field 's'  (quickassist)
+Assign parameter to new field  (quickassist)
+Change modifiers to final where possible  (source.generate.finalModifiers)
+Change signature for 'App'  (refactor.change.signature)
+Generate Getters  (source.generate.accessors)
+Generate Getters and Setters  (source.generate.accessors)
+Generate Setters  (source.generate.accessors)

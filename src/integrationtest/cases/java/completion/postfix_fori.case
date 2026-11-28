@@ -5,4 +5,6 @@ public class Test {
 		a.fori$0	}
 }
 //= expected
-(nothing)
+fori · Creates a for statement which iterates over an array  snippet
+  inserts for (int ${1:a2} = 0; ${1:a2} < a.length; ${1:a2}++) {\n\t${0}\n} over "a.fori"
+  detail Creates a for statement which iterates over an array

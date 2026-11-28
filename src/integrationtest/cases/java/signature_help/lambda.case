@@ -13,4 +13,4 @@ public class SignatureHelp
   }
 }
 //= expected
-test([Function<String,String> f])
+> test([Function<String,String> f]) : void

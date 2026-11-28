@@ -790,5 +790,5 @@ public class Test{
     }
 }
 //= expected (pending)
-/nopackage/Test2.java:1:1  Test2.java is not on the classpath of project compat, only syntax errors are reported
-/nopackage/Test2.java:1:8  Syntax error on token "clas", class expected
+/nopackage/Test2.java:1:1-2  warning [32] Test2.java is not on the classpath of project compat, only syntax errors are reported
+/nopackage/Test2.java:1:8-12  error [1610612940] Syntax error on token "clas", class expected

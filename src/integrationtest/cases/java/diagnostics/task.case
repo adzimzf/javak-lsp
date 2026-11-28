@@ -4,4 +4,4 @@ public class E {
     // TODO task
 }
 //= expected
-/src/main/java/test1/E.java:3:8  TODO task
+/src/main/java/test1/E.java:3:8-17  info [536871362] TODO task

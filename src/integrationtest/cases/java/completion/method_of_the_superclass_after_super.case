@@ -16,4 +16,6 @@ class Square extends Shape {
     }
 }
 //= expected
-describe
+describe() · String  method
+  inserts describe() over "desc"
+  detail Shape.describe() : String

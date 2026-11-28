@@ -602,16 +602,18 @@ Their `//= expected` block is empty: each one fails with
 hand (or recorded with `compat`, then checked). A jdtls test that asks
 several questions is one case per question, numbered `_1`, `_2`, ….
 
-The answer of some of these is more than the rendering shows: a hover is its
-signature line, not its Javadoc; a completion is the names offered, not the
-text a snippet inserts. Those cases still ask the question at the jdtls
-position; what the rendering leaves out is not checked.
+The rendering of each request is described under "Notes on how an answer
+is written down" above: it keeps what an editor acts on (kinds, ranges,
+inserted text, documentation, codes), so a case checks the whole answer,
+not only that the right name came back.
 
 ### completion
 
-Answer: the names offered, best first, as a client sorts them, of those the
-fixture spells or the case lists. The expectations were recorded with jdtls
-1.63.0 (`compat.rs`), so they follow jdtls's defaults: a type matches a prefix
+Answer: the items offered, best first, as a client sorts them, of those the
+fixture spells or the case lists, each with its kind, the text it inserts
+and what it replaces, its detail, documentation and the edits it adds (see
+the notes above). The expectations were recorded with jdtls 1.64.0
+(`compat.rs`), so they follow jdtls's defaults: a type matches a prefix
 whatever its case, anything else only with its first letter as typed
 (`java.completion.matchCase`); with no prefix the only types offered are the
 file's own; a declared type puts itself first in the value being written.

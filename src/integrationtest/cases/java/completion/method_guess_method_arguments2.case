@@ -8,4 +8,6 @@ public class Foo {
 
 }
 //= expected
-test
+test(String name, int i) · void  method
+  inserts test(${1:name}, ${2:i}); over "tes"
+  detail Foo.test(String name, int i) : void

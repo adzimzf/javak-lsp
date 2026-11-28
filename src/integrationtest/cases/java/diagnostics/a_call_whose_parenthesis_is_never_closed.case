@@ -6,4 +6,4 @@ class Ma$0in {
   }
 }
 //= expected
-/src/main/java/com/demo/Main.java:4:24  Syntax error, insert ")" to complete Expression
+/src/main/java/com/demo/Main.java:4:24-28  error [1610612976] Syntax error, insert ")" to complete Expression

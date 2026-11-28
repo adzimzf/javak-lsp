@@ -71,5 +71,5 @@ public interface IF$0oo {
     void someMethod();
 }
 //= expected
-/org/sample/Foo2.java:3:14  public class Foo2 implements IFoo {
-/org/sample/Foo3.java:3:14  public class Foo3 extends Foo2 {
+/org/sample/Foo2.java:3:14-18  public class Foo2 implements IFoo {
+/org/sample/Foo3.java:3:14-18  public class Foo3 extends Foo2 {

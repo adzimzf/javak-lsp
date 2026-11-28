@@ -7,4 +7,4 @@ record R(int value) {
     }
 }
 //= expected
-/com/demo/R.java:4:16  public int value() {
+/com/demo/R.java:4:16-21  public int value() {

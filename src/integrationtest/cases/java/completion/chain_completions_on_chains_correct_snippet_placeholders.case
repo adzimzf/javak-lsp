@@ -14,9 +14,18 @@ public class Foo {
     }
 }
 //= expected
-List
-args
-stream
-streams
-Foo
-Stream
+List<java.lang.String> · java.util  interface
+  inserts List over ""
+  detail java.util.List<java.lang.String>
+args · String[]  variable
+  inserts args over ""
+stream · Foo.Stream  variable
+  inserts stream over ""
+streams · Foo.Stream[]  variable
+  inserts streams over ""
+Foo  class
+  inserts Foo over ""
+  detail Foo
+Stream · Foo  class
+  inserts Stream over ""
+  detail Foo.Stream

@@ -5,4 +5,6 @@ public class Test {
 		a.for$0	}
 }
 //= expected
-(nothing)
+for · Creates a for statement  snippet
+  inserts for (String ${1:a2} : a) {\n\t${0}\n} over "a.for"
+  detail Creates a for statement
