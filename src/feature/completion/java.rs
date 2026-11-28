@@ -692,7 +692,9 @@ fn creations(context: &Context<'_>, offers: Vec<Offer>, qualified_from: Option<P
             };
             created.push(Offer {
                 name: found.name.text.clone(),
-                rank: offer.rank.clone(),
+                // One the file names by its simple name before one it has
+                // to qualify.
+                rank: if hidden { format!("{}~", offer.rank) } else { offer.rank.clone() },
                 kind: super::OfferKind::Type,
                 constructs: true,
                 qualified: offer.qualified.clone(),

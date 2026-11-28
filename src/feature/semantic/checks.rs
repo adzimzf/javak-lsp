@@ -195,7 +195,8 @@ impl Snapshot {
         {
             return None;
         }
-        Some(Finding { end: None,
+        Some(Finding {
+            end: Some(name.end),
             at: name.start,
             message: format!(
                 "The method {}({}) in the type {owner} is not applicable for the arguments ({})",

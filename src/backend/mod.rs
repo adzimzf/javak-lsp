@@ -51,6 +51,7 @@ pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
         dependencies: Arc::new(DependencySync::default()),
         debug: Arc::new(DebugCommands::new(indexer_for_debug)),
         symbol_tags: AtomicBool::new(false),
+        diagnostic_tags: AtomicBool::new(false),
         work_done_progress: AtomicBool::new(false),
     }
 }
@@ -64,6 +65,9 @@ pub struct Backend {
     /// Whether the client reads a symbol's `tags`; one that does not is
     /// told a symbol is deprecated by its `deprecated` field, as jdtls does.
     symbol_tags: AtomicBool,
+    /// Whether the client reads a diagnostic's `unnecessary` tag
+    /// (`publishDiagnostics.tagSupport`): jdtls tags only for one that does.
+    diagnostic_tags: AtomicBool,
     /// Whether the client shows `$/progress` (`window.workDoneProgress`).
     work_done_progress: AtomicBool,
 }
@@ -304,7 +308,15 @@ impl Backend {
                     diagnostic
                 }),
         );
-        diagnostics.extend(reports.into_iter().map(reported_by_compiler));
+        let tags = self.diagnostic_tags.load(Ordering::Relaxed);
+        diagnostics.extend(reports.into_iter().map(|report| reported_by_compiler(report, tags)));
+        // Each with the number Eclipse files it under, as jdtls sends it.
+        if language == Language::Java {
+            for diagnostic in &mut diagnostics {
+                diagnostic.code = compiler::problem_id(&diagnostic.message)
+                    .map(|id| NumberOrString::String(id.to_string()));
+            }
+        }
         diagnostics
     }
 
@@ -533,12 +545,15 @@ fn package_mismatch(
                 .map_or(Position { line: 0, column: 0 }, |offset| {
                     crate::parser::position_of(text, offset)
                 });
-            Some(reported(
+            let mut diagnostic = reported(
                 at,
                 format!(
                     "The declared package \"{declared_name}\" does not match the expected package \"{expected}\""
                 ),
-            ))
+            );
+            // On the name declared, or on the file's first character.
+            diagnostic.range.end.character += declared_name.encode_utf16().count().max(1) as u32;
+            Some(diagnostic)
         }
     }
 }
@@ -572,7 +587,7 @@ fn reported(at: Position, message: String) -> Diagnostic {
     }
 }
 
-fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
+fn reported_by_compiler(report: compiler::Report, tags: bool) -> Diagnostic {
     let severity = match report.level {
         compiler::Level::Error => DiagnosticSeverity::ERROR,
         compiler::Level::Warning => DiagnosticSeverity::WARNING,
@@ -581,7 +596,7 @@ fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
     let end = report.finding.end;
     let mut diagnostic = Diagnostic {
         severity: Some(severity),
-        tags: report.unnecessary.then(|| vec![DiagnosticTag::UNNECESSARY]),
+        tags: (tags && report.unnecessary).then(|| vec![DiagnosticTag::UNNECESSARY]),
         ..reported(report.finding.at, report.finding.message)
     };
     if let Some(end) = end {
@@ -747,6 +762,14 @@ impl LanguageServer for Backend {
             .and_then(|symbols| symbols.tag_support.as_ref())
             .is_some_and(|support| support.value_set.contains(&SymbolTag::DEPRECATED));
         self.symbol_tags.store(tags, Ordering::Relaxed);
+        let diagnostic_tags = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|document| document.publish_diagnostics.as_ref())
+            .and_then(|diagnostics| diagnostics.tag_support.as_ref())
+            .is_some_and(|support| support.value_set.contains(&DiagnosticTag::UNNECESSARY));
+        self.diagnostic_tags.store(diagnostic_tags, Ordering::Relaxed);
         let progress = params
             .capabilities
             .window
