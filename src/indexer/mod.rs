@@ -547,17 +547,15 @@ impl Indexer {
             let is_type = |entry: &crate::parser::Outline| {
                 matches!(entry.kind, Kind::Class | Kind::Interface | Kind::Enum)
             };
-            let package = (language == Language::Java)
-                .then(|| syntax(language).package(&text))
-                .flatten();
+            let package = syntax(language).package(&text);
             for entry in &outline {
                 if !is_type(entry) || !query::matches(query, &entry.name) {
                     continue;
                 }
                 let mut symbol = located(uri.clone(), entry);
                 // jdtls names where a type is: its package, and the types
-                // it is nested in (`org.demo.Outer`).
-                if language == Language::Java {
+                // it is nested in (`org.demo.Outer`); the Kotlin LSP the same.
+                {
                     let mut outer: Vec<&crate::parser::Outline> = outline
                         .iter()
                         .filter(|other| {

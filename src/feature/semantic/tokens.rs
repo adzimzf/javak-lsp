@@ -140,30 +140,16 @@ impl Snapshot {
                             tokens.push(keyword(word, MODIFIER));
                         }
                     }
-                    // With supertypes, jdtls shows the header's first
-                    // `extends`, a type parameter's bound's as well, and
-                    // `implements`.
-                    let supertypes: Vec<&Syn> = node
+                    // jdtls shows the `extends`, `implements` and `permits`
+                    // of the supertype clauses, not a type parameter's bound.
+                    for list in node
                         .children
                         .iter()
                         .filter(|child| matches!(child.kind.as_str(), "superclass" | "super_interfaces" | "extends_interfaces" | "permits"))
-                        .collect();
-                    if !supertypes.is_empty() {
-                        let header: Vec<&Syn> = node
-                            .children
-                            .iter()
-                            .filter(|child| matches!(child.kind.as_str(), "type_parameters" | "superclass" | "super_interfaces" | "extends_interfaces" | "permits"))
-                            .collect();
-                        let first_extends = header
-                            .iter()
-                            .flat_map(|part| part.walk())
-                            .find(|word| word.kind == "extends");
-                        tokens.extend(first_extends.map(|word| keyword(word, MODIFIER)));
-                        for list in &supertypes {
-                            for word in &list.children {
-                                if matches!(word.kind.as_str(), "implements" | "permits") {
-                                    tokens.push(keyword(word, MODIFIER));
-                                }
+                    {
+                        for word in &list.children {
+                            if matches!(word.kind.as_str(), "extends" | "implements" | "permits") {
+                                tokens.push(keyword(word, MODIFIER));
                             }
                         }
                     }

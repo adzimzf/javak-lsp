@@ -52,6 +52,7 @@ pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
         debug: Arc::new(DebugCommands::new(indexer_for_debug)),
         symbol_tags: AtomicBool::new(false),
         diagnostic_tags: AtomicBool::new(false),
+        renames_files: AtomicBool::new(false),
         work_done_progress: AtomicBool::new(false),
     }
 }
@@ -68,6 +69,10 @@ pub struct Backend {
     /// Whether the client reads a diagnostic's `unnecessary` tag
     /// (`publishDiagnostics.tagSupport`): jdtls tags only for one that does.
     diagnostic_tags: AtomicBool,
+    /// Whether the client takes a file's rename in a workspace edit
+    /// (`documentChanges` with the `rename` resource operation): jdtls then
+    /// moves a type's file with the type.
+    renames_files: AtomicBool,
     /// Whether the client shows `$/progress` (`window.workDoneProgress`).
     work_done_progress: AtomicBool,
 }
@@ -770,6 +775,19 @@ impl LanguageServer for Backend {
             .and_then(|diagnostics| diagnostics.tag_support.as_ref())
             .is_some_and(|support| support.value_set.contains(&DiagnosticTag::UNNECESSARY));
         self.diagnostic_tags.store(diagnostic_tags, Ordering::Relaxed);
+        let renames_files = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.workspace_edit.as_ref())
+            .is_some_and(|edit| {
+                edit.document_changes == Some(true)
+                    && edit
+                        .resource_operations
+                        .as_ref()
+                        .is_some_and(|operations| operations.contains(&ResourceOperationKind::Rename))
+            });
+        self.renames_files.store(renames_files, Ordering::Relaxed);
         let progress = params
             .capabilities
             .window
@@ -1274,6 +1292,21 @@ impl LanguageServer for Backend {
         if found.file.language == Language::Java && tied.iter().any(|tied| tied.file.library) {
             return Ok(None);
         }
+        // A top-level type its file is named after moves the file with it.
+        let moved = tied
+            .iter()
+            .find(|tied| {
+                tied.file.language == Language::Java
+                    && crate::feature::semantic::is_type_declaration(tied.node)
+                    && tied.file.tree.children.iter().any(|top| std::ptr::eq(top, tied.node))
+                    && tied
+                        .file
+                        .uri
+                        .path_segments()
+                        .and_then(|mut segments| segments.next_back())
+                        .is_some_and(|file_name| file_name == format!("{}.java", tied.name.text))
+            })
+            .map(|tied| tied.file.uri.clone());
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut places: Vec<(&Url, Position)> = Vec::new();
         for tied in tied {
@@ -1295,6 +1328,32 @@ impl LanguageServer for Backend {
                 },
                 new_text: params.new_name.clone(),
             });
+        }
+        if let Some(old_uri) = moved.filter(|_| self.renames_files.load(Ordering::Relaxed))
+            && let Ok(new_uri) = old_uri.join(&format!("{}.java", params.new_name))
+        {
+            // The edits, then the move, as jdtls sends them.
+            let mut uris: Vec<&Url> = changes.keys().collect();
+            uris.sort();
+            let mut operations: Vec<DocumentChangeOperation> = uris
+                .into_iter()
+                .map(|uri| {
+                    DocumentChangeOperation::Edit(TextDocumentEdit {
+                        text_document: OptionalVersionedTextDocumentIdentifier { uri: uri.clone(), version: None },
+                        edits: changes[uri].iter().cloned().map(OneOf::Left).collect(),
+                    })
+                })
+                .collect();
+            operations.push(DocumentChangeOperation::Op(ResourceOp::Rename(RenameFile {
+                old_uri,
+                new_uri,
+                options: None,
+                annotation_id: None,
+            })));
+            return Ok(Some(WorkspaceEdit {
+                document_changes: Some(DocumentChanges::Operations(operations)),
+                ..WorkspaceEdit::default()
+            }));
         }
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),
@@ -1393,10 +1452,24 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(
             offers
                 .into_iter()
-                .map(|offer| CompletionItem {
-                    label: offer.name,
-                    sort_text: Some(offer.rank),
-                    ..CompletionItem::default()
+                .map(|offer| {
+                    use crate::feature::completion::OfferKind;
+                    // As the Kotlin LSP files them: a member that holds a
+                    // value is a property.
+                    let kind = match offer.kind {
+                        OfferKind::Field => CompletionItemKind::PROPERTY,
+                        OfferKind::Keyword => CompletionItemKind::KEYWORD,
+                        OfferKind::Local => CompletionItemKind::VARIABLE,
+                        OfferKind::Method => CompletionItemKind::METHOD,
+                        OfferKind::Package => CompletionItemKind::MODULE,
+                        OfferKind::Type => CompletionItemKind::CLASS,
+                    };
+                    CompletionItem {
+                        label: offer.name,
+                        kind: Some(kind),
+                        sort_text: Some(offer.rank),
+                        ..CompletionItem::default()
+                    }
                 })
                 .collect(),
         )))
@@ -1745,22 +1818,14 @@ fn call_item(
     found: &Found<'_>,
     shown_at: Option<(Position, Position)>,
 ) -> CallHierarchyItem {
-    let name_end = Position {
-        line: found.name.start.line,
-        column: found.name.start.column
-            + if std::ptr::eq(found.name, found.node) {
-                0
-            } else {
-                found.name.text.encode_utf16().count() as u32
-            },
-    };
+    // A generated member (Lombok's) is where its name stands for it.
+    let name_end = if std::ptr::eq(found.name, found.node) { found.name.start } else { found.name.end };
     let selection = shown_at.unwrap_or((found.name.start, name_end));
-    let package = snapshot.package(found.file);
     CallHierarchyItem {
         name: call_hierarchy::label(snapshot, found),
         kind: symbol_kind(call_hierarchy::kind_of(found).unwrap_or(Kind::Method)),
         tags: None,
-        detail: package,
+        detail: call_hierarchy::detail(snapshot, found),
         uri: found.file.uri.clone(),
         range: span_range((found.node.start, found.node.end)),
         selection_range: span_range(selection),

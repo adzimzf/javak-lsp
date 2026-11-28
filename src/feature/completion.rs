@@ -631,6 +631,7 @@ fn keywords(file: &FileView, path: &[&Syn]) -> Vec<Offer> {
         .map(|word| Offer {
             name: (*word).to_owned(),
             rank: format!("9{word}"),
+            kind: OfferKind::Keyword,
             ..Offer::default()
         })
         .collect()
@@ -1147,6 +1148,7 @@ fn scope(snapshot: &Snapshot, file: &FileView, at: Position) -> Vec<Offer> {
         offers.push(Offer {
             name,
             rank: format!("0{index:04}"),
+            kind: OfferKind::Local,
             ..Offer::default()
         });
     }
