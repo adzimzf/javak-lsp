@@ -1593,14 +1593,20 @@ impl LanguageServer for Backend {
                             (uri, edits)
                         })
                         .collect();
+                    let title = action.title;
                     CodeActionOrCommand::CodeAction(CodeAction {
-                        title: action.title,
+                        title: title.clone(),
                         kind: Some(CodeActionKind::from(action.kind.to_owned())),
-                        edit: action.disabled.is_none().then(|| WorkspaceEdit {
+                        edit: action.asks.is_none().then(|| WorkspaceEdit {
                             changes: Some(changes),
                             ..WorkspaceEdit::default()
                         }),
-                        disabled: action.disabled.map(|reason| CodeActionDisabled { reason: reason.to_owned() }),
+                        // What asks its user first is jdtls's client command.
+                        command: action.asks.map(|refactoring| Command {
+                            title: title.clone(),
+                            command: "java.action.applyRefactoringCommand".to_owned(),
+                            arguments: Some(vec![serde_json::Value::String(refactoring.to_owned())]),
+                        }),
                         ..CodeAction::default()
                     })
                 })

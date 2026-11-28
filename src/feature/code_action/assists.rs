@@ -2,7 +2,7 @@
 //! covering and covered nodes decide them: the field assists of the fields
 //! a selection touches, and `final` for several declarations at once.
 
-use super::{accessor_plan, final_candidates, one_per_declaration, single, Action, Edit, GENERATE_ACCESSORS, QUICK_ASSIST};
+use super::{accessor_plan, final_candidates, one_per_declaration, single, Action, Edit, QUICK_ASSIST};
 use crate::feature::semantic::{is_type_declaration, path_to, FileView, Snapshot};
 use crate::parser::{Position, Syn};
 
@@ -30,18 +30,15 @@ impl Selection {
     }
 }
 
-/// Why an action that asks its user something cannot be made here: jdtls
-/// leaves the asking to a client command this server does not have.
-pub const NEEDS_INPUT: &str = "Asks for input that this server cannot ask for";
-
 /// An action jdtls offers but that needs the client to ask its user
-/// something first: offered, and disabled with the reason.
-pub fn needs_input(file: &FileView, title: impl Into<String>, kind: &'static str) -> Action {
+/// something first: offered as jdtls offers it, as the command that asks
+/// (`java.action.applyRefactoringCommand` with `refactoring`), no edit.
+pub fn needs_input(file: &FileView, title: impl Into<String>, kind: &'static str, refactoring: &'static str) -> Action {
     Action {
         title: title.into(),
         kind,
         edits: vec![(file.uri.clone(), Vec::new())],
-        disabled: Some(NEEDS_INPUT),
+        asks: Some(refactoring),
     }
 }
 
@@ -119,8 +116,10 @@ pub fn field_assists(snapshot: &Snapshot, file: &FileView, selection: &Selection
     if let Some(first) = touched.first() {
         let name = first_name(first);
         match (first.first("modifiers"), name) {
-            (None, Some(_)) => actions.push(needs_input(file, "Add Access Modifier", QUICK_ASSIST)),
-            (Some(_), Some((_, name))) => actions.push(needs_input(file, format!("Change modifier for '{name}'"), QUICK_ASSIST)),
+            (None, Some(_)) => actions.push(needs_input(file, "Add Access Modifier", QUICK_ASSIST, "changeModifier")),
+            (Some(_), Some((_, name))) => {
+                actions.push(needs_input(file, format!("Change modifier for '{name}'"), QUICK_ASSIST, "changeModifier"));
+            }
             _ => {}
         }
     }
@@ -146,16 +145,16 @@ pub fn field_assists(snapshot: &Snapshot, file: &FileView, selection: &Selection
         insert.edits(&methods)
     };
     if let Some(getter) = &field.getter {
-        actions.push(single(file, format!("Generate Getter for '{}'", field.name), GENERATE_ACCESSORS, edits(vec![getter])));
+        actions.push(single(file, format!("Generate Getter for '{}'", field.name), QUICK_ASSIST, edits(vec![getter])));
     }
     if let Some(setter) = &field.setter {
-        actions.push(single(file, format!("Generate Setter for '{}'", field.name), GENERATE_ACCESSORS, edits(vec![setter])));
+        actions.push(single(file, format!("Generate Setter for '{}'", field.name), QUICK_ASSIST, edits(vec![setter])));
     }
     if let (Some(getter), Some(setter)) = (&field.getter, &field.setter) {
         actions.push(single(
             file,
             format!("Generate Getter and Setter for '{}'", field.name),
-            GENERATE_ACCESSORS,
+            QUICK_ASSIST,
             edits(vec![getter, setter]),
         ));
     }

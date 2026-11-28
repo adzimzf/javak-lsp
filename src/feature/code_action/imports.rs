@@ -129,5 +129,5 @@ pub fn add_import(file: &FileView, selection: &super::assists::Selection) -> Opt
         };
         edits.insert(0, super::Edit { start: at, end: at, text });
     }
-    Some(super::single(file, "Add import", super::QUICK_ASSIST, edits))
+    Some(super::single(file, "Add import", super::REFACTOR, edits))
 }

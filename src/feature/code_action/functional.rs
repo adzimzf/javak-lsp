@@ -118,7 +118,7 @@ fn anonymous_to_lambda(snapshot: &Snapshot, file: &FileView, anonymous: &Syn) ->
     Some(single(
         file,
         "Convert to lambda expression",
-        QUICK_ASSIST,
+        super::REFACTOR,
         vec![Edit { start: anonymous.start, end: anonymous.end, text }],
     ))
 }
@@ -167,7 +167,7 @@ fn anonymous_to_nested(snapshot: &Snapshot, file: &FileView, anonymous: &Syn, pa
     Some(single(
         file,
         "Convert anonymous to nested class",
-        QUICK_ASSIST,
+        super::REFACTOR,
         vec![
             Edit {
                 start: anonymous.start,
@@ -232,7 +232,7 @@ fn lambda_to_anonymous(snapshot: &Snapshot, file: &FileView, lambda: &Syn) -> Op
     Some(single(
         file,
         "Convert to anonymous class creation",
-        QUICK_ASSIST,
+        super::REFACTOR,
         vec![Edit { start: lambda.start, end: lambda.end, text }],
     ))
 }
@@ -304,7 +304,7 @@ fn reference_actions(snapshot: &Snapshot, file: &FileView, reference: &Syn, path
     actions.push(single(
         file,
         format!("Add missing method '{}' to class '{}'", name.text, class.name.text),
-        "quickfix",
+        QUICK_ASSIST,
         vec![Edit {
             start: at,
             end: at,
