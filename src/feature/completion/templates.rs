@@ -141,6 +141,12 @@ pub(super) fn local_class(context: &Context<'_>) -> Vec<Offer> {
     if !rest.trim().is_empty() {
         return Vec::new();
     }
+    plain_class(context)
+}
+
+/// The class template without Javadoc or modifier, wherever it is asked
+/// for (jdtls offers it in an annotation's value too).
+pub(super) fn plain_class(context: &Context<'_>) -> Vec<Offer> {
     types(context, &["class"], false)
 }
 

@@ -195,7 +195,14 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
             .and_then(|access| snapshot.expected_type_of(access, file))
             .map(|expected| expected.written())
             .or_else(|| expected_from_text(file, path, receiver));
-        let offers = members(snapshot, file, receiver, prefix, calling, expected.as_deref());
+        let mut offers = members(snapshot, file, receiver, prefix, calling, expected.as_deref());
+        // In an annotation's value, `Name.class` only where a class is
+        // wanted.
+        if enclosing_kind(path, "annotation_argument_list").is_some()
+            && element_type(context).is_some_and(|wanted| wanted.name != "Class")
+        {
+            offers.retain(|offer| !(offer.name == "class" && offer.kind == super::OfferKind::Keyword));
+        }
         // `new com.demo.data.ArrayL|`: the constructors of the types.
         let start = receiver_chain_start(path, receiver);
         if creates_an_object(context) || written_after_new(context, start) {
@@ -327,9 +334,11 @@ pub(super) fn contextual(context: &Context<'_>) -> Vec<Offer> {
 /// text is a literal or a constant, never a type's name.
 fn element_values(context: &Context<'_>) -> Vec<Offer> {
     let wanted = element_type(context);
+    // A text is wanted only where the element is one `String`, not an
+    // array of them (`@SuppressWarnings(value = |)`).
     let is_text = wanted
         .as_ref()
-        .is_some_and(|wanted| wanted.name == "String");
+        .is_some_and(|wanted| wanted.name == "String" && wanted.dimensions == 0);
     let mut offers: Vec<Offer> = in_scope(context)
         .into_iter()
         .filter(|value| !value.is_void)
@@ -347,6 +356,12 @@ fn element_values(context: &Context<'_>) -> Vec<Offer> {
         .collect();
     if !is_text {
         offers.extend(types(context));
+        // jdtls offers a class template where the element is of a
+        // reference type, not a primitive one.
+        let reference = wanted.as_ref().is_some_and(|wanted| wanted.name.starts_with(char::is_uppercase));
+        if reference {
+            offers.extend(super::templates::plain_class(context));
+        }
     }
     offers
 }
