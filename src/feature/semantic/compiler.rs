@@ -32,6 +32,59 @@ pub struct Report {
     pub unnecessary: bool,
 }
 
+/// The number Eclipse files a problem under (JDT's `IProblem` id), read
+/// from its message: jdtls sends it as the diagnostic's code. `None` for
+/// one it sends without (a feature above the source level).
+pub fn problem_id(message: &str) -> Option<u32> {
+    let has = |part: &str| message.contains(part);
+    let id = if message.ends_with("only syntax errors are reported") {
+        32
+    } else if message.starts_with("Syntax error, insert ") {
+        1_610_612_976
+    } else if message.starts_with("Syntax error on token ") && message.ends_with("delete this token") {
+        1_610_612_968
+    } else if message.starts_with("Syntax error on token ") && message.ends_with("expected after this token") {
+        1_610_612_967
+    } else if message.starts_with("Syntax error on token ") && message.ends_with(" expected") {
+        1_610_612_940
+    } else if message.starts_with("String literal is not properly closed") {
+        1_610_612_995
+    } else if message == "Dead code" {
+        536_871_061
+    } else if message.starts_with("The declared package ") {
+        536_871_240
+    } else if message.starts_with("The public type ") && message.ends_with(" must be defined in its own file") {
+        16_777_541
+    } else if message.starts_with("The import ") && message.ends_with(" is never used") {
+        268_435_844
+    } else if message == "Cannot use this in a static context" {
+        536_871_112
+    } else if message.starts_with("Duplicate method ") {
+        67_109_219
+    } else if message.starts_with("The method ") && has(" is undefined for the type ") {
+        67_108_964
+    } else if message.starts_with("The method ") && has(" is not applicable for the arguments ") {
+        67_108_979
+    } else if message.ends_with(" cannot be resolved to a type") {
+        16_777_218
+    } else if message.ends_with(" cannot be resolved to a variable") {
+        33_554_515
+    } else if message.starts_with("The value of the field ") && message.ends_with(" is not used") {
+        570_425_421
+    } else if message.starts_with("The enum constant ") && has(" needs a corresponding case label") {
+        33_555_193
+    } else if has(" has been deprecated since version ") && message.ends_with(" and marked for removal") {
+        16_778_626
+    } else if has(" must implement the inherited abstract method ") {
+        67_109_264
+    } else if TASK_TAGS.iter().any(|tag| message.starts_with(tag)) {
+        536_871_362
+    } else {
+        return None;
+    };
+    Some(id)
+}
+
 /// The task tags Eclipse looks for in comments by default.
 const TASK_TAGS: &[&str] = &["TODO", "FIXME", "XXX"];
 
@@ -64,7 +117,8 @@ fn tasks(file: &FileView) -> Vec<Report> {
                 .map_or(line_end, |&(next, _)| next.min(line_end));
             let message = text[start..end].trim_end();
             reports.push(Report {
-                finding: Finding { end: None,
+                finding: Finding {
+                    end: Some(offset_from(comment.start, text, start + message.len())),
                     at: offset_from(comment.start, text, start),
                     message: message.to_owned(),
                 },
@@ -159,9 +213,9 @@ pub struct Errors {
     pub wrong_package: bool,
 }
 
-fn unnecessary(at: Position, message: String) -> Report {
+fn unnecessary(at: Position, end: Position, message: String) -> Report {
     Report {
-        finding: Finding { end: None, at, message },
+        finding: Finding { end: Some(end), at, message },
         level: Level::Warning,
         unnecessary: true,
     }
@@ -219,7 +273,8 @@ fn types_in_another_file(file: &FileView) -> Vec<Finding> {
         .filter(|node| is_type_declaration(node) && has_modifier(node, "public"))
         .filter_map(|node| node.child("name"))
         .filter(|name| name.text != stem)
-        .map(|name| Finding { end: None,
+        .map(|name| Finding {
+            end: Some(name.end),
             at: name.start,
             message: format!(
                 "The public type {} must be defined in its own file",
@@ -267,14 +322,16 @@ fn duplicate_methods(file: &FileView) -> Vec<Finding> {
                 .collect();
             seen.entry((name.text.clone(), key))
                 .or_default()
-                .push((name, written));
+                .push((name, written, member.child("parameters").map_or(name.end, |parameters| parameters.end)));
         }
         for declarations in seen
             .into_values()
             .filter(|declarations| declarations.len() > 1)
         {
-            for (name, written) in declarations {
-                findings.push(Finding { end: None,
+            // From the name to the end of the parameters, as Eclipse marks it.
+            for (name, written, end) in declarations {
+                findings.push(Finding {
+                    end: Some(end),
                     at: name.start,
                     message: format!(
                         "Duplicate method {}({}) in type {owner}",
@@ -289,7 +346,7 @@ fn duplicate_methods(file: &FileView) -> Vec<Finding> {
 }
 
 /// A method's name, and its parameter types as written.
-type Declared<'a> = (&'a Syn, Vec<String>);
+type Declared<'a> = (&'a Syn, Vec<String>, Position);
 
 /// The parameter types of a method as written, `String...` for varargs:
 /// `None` where one is not simple enough to compare as text.
@@ -347,7 +404,8 @@ fn this_without_instance(file: &FileView) -> (Vec<Finding>, Vec<Finding>) {
         if qualified || explicit_call {
             return;
         }
-        let finding = || Finding { end: None,
+        let finding = || Finding {
+            end: Some(node.end),
             at: node.start,
             message: "Cannot use this in a static context".to_owned(),
         };
@@ -401,7 +459,7 @@ fn dead_branches(file: &FileView) -> Vec<Report> {
             statement.child("consequence")
         };
         if let Some(dead) = dead {
-            reports.push(unnecessary(dead.start, "Dead code".to_owned()));
+            reports.push(unnecessary(dead.start, dead.end, "Dead code".to_owned()));
         }
     }
     reports
@@ -489,6 +547,7 @@ fn unread_fields(file: &FileView) -> Vec<Report> {
         .map(|(name, owner)| {
             unnecessary(
                 name.start,
+                name.end,
                 format!("The value of the field {owner}.{} is not used", name.text),
             )
         })
@@ -564,9 +623,7 @@ fn unused_imports(file: &FileView, has_errors: bool) -> Vec<Report> {
             && (import.is_static || import.qualifier() != package);
         if repeated || unused {
             // On the whole imported name, as Eclipse marks it.
-            let mut report = unnecessary(name.start, format!("The import {} is never used", import.name));
-            report.finding.end = Some(name.end);
-            reports.push(report);
+            reports.push(unnecessary(name.start, name.end, format!("The import {} is never used", import.name)));
         }
     }
     reports

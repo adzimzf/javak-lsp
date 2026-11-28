@@ -27,7 +27,7 @@
 //!   lambdas and method references ([`functional`]); imports ([`imports`]).
 //!   An action that needs its user to answer something first (`Change
 //!   signature`, `Change modifier`, `Introduce Parameter...`) is offered
-//!   disabled, saying why.
+//!   as jdtls offers it: the client command that asks, no edit.
 
 use tower_lsp::lsp_types::Url;
 
@@ -42,8 +42,9 @@ pub struct Action {
     pub title: String,
     pub kind: &'static str,
     pub edits: Vec<(Url, Vec<Edit>)>,
-    /// Why the action cannot be made here, where it is offered all the same.
-    pub disabled: Option<&'static str>,
+    /// The refactoring a client asks its user about before it is made
+    /// (`changeSignature`), sent as jdtls sends it: a command, no edit.
+    pub asks: Option<&'static str>,
 }
 
 /// Text to put between two places of a file.
@@ -60,9 +61,13 @@ pub const SORT_MEMBERS: &str = "source.sortMembers";
 pub const FINAL_MODIFIERS: &str = "source.generate.finalModifiers";
 pub const GENERATE_ACCESSORS: &str = "source.generate.accessors";
 pub const GENERATE_TO_STRING: &str = "source.generate.toString";
-pub const QUICK_ASSIST: &str = "refactor";
+/// What jdtls files a quick assist under; some it files as refactorings.
+pub const QUICK_ASSIST: &str = "quickassist";
+pub const REFACTOR: &str = "refactor";
 pub const INLINE: &str = "refactor.inline";
-pub const ASSIGN: &str = "refactor.assign";
+pub const ASSIGN_VARIABLE: &str = "refactor.assign.variable";
+pub const ASSIGN_FIELD: &str = "refactor.assign.field";
+pub const CHANGE_SIGNATURE: &str = "refactor.change.signature";
 
 mod assists;
 mod functional;
@@ -107,12 +112,65 @@ pub fn actions(snapshot: &Snapshot, file: &FileView, at: Position, end: Position
         actions.extend(assign_to_variable(snapshot, file, &path));
     }
     actions.extend(change_to_final(snapshot, file));
-    actions.extend(generate_accessors(snapshot, file, at));
-    actions.extend(generate_to_string(snapshot, file, at));
-    actions.extend(organize_imports(snapshot, file));
-    actions.extend(sort_members(file));
+    let mut source = generate_accessors(snapshot, file, at);
+    source.extend(generate_to_string(snapshot, file, at));
+    source.extend(organize_imports(snapshot, file));
+    source.extend(sort_members(file));
+    // Where the source action is about the place (a type's header, the
+    // fields selected, the imports), jdtls offers it as a quick assist too.
+    let assisted: Vec<Action> = source
+        .iter()
+        .filter(|action| offered_as_assist_too(file, &path, &selection, action.kind))
+        .map(|action| Action {
+            title: action.title.clone(),
+            kind: QUICK_ASSIST,
+            edits: action.edits.clone(),
+            asks: action.asks,
+        })
+        .collect();
+    actions.extend(source);
+    actions.extend(assisted);
     actions.extend(sort_selected_members(file, at, end.max(at)));
     actions
+}
+
+/// Whether jdtls offers the source action of `kind` as a quick assist at
+/// `path` too: the accessors, `toString()` and the member order on a
+/// type's header, the accessors where several fields are selected, the
+/// imports' order in an import.
+fn offered_as_assist_too(file: &FileView, path: &[&Syn], selection: &assists::Selection, kind: &str) -> bool {
+    // A class's header (a record's has none of these); one field's
+    // accessors are that field's own assists there instead.
+    let header = path
+        .iter()
+        .rev()
+        .find(|node| is_type_declaration(node))
+        .filter(|declaration| declaration.kind != "record_declaration")
+        .filter(|declaration| declaration.child("body").is_none_or(|body| selection.end <= body.start));
+    let on_header = header.is_some();
+    let fields_of_header = header.map_or(0, |declaration| {
+        members_of(declaration)
+            .iter()
+            .filter(|(member, _)| member.kind == "field_declaration")
+            .count()
+    });
+    let members_of_header = header.map_or(0, |declaration| members_of(declaration).len());
+    let fields_selected = !selection.is_empty()
+        && file
+            .tree
+            .walk()
+            .into_iter()
+            .filter(|node| node.kind == "field_declaration" && node.start < selection.end && selection.start < node.end)
+            .count()
+            > 1;
+    let in_import = path.iter().any(|node| node.kind == "import_declaration");
+    match kind {
+        GENERATE_ACCESSORS => (on_header && fields_of_header > 1) || fields_selected,
+        GENERATE_TO_STRING => on_header,
+        SORT_MEMBERS => on_header && members_of_header > 1,
+        ORGANIZE_IMPORTS => in_import,
+        _ => false,
+    }
 }
 
 fn single(file: &FileView, title: impl Into<String>, kind: &'static str, edits: Vec<Edit>) -> Action {
@@ -120,7 +178,7 @@ fn single(file: &FileView, title: impl Into<String>, kind: &'static str, edits: 
         title: title.into(),
         kind,
         edits: vec![(file.uri.clone(), edits)],
-        disabled: None,
+        asks: None,
     }
 }
 
@@ -1061,8 +1119,8 @@ fn assign_to_variable(snapshot: &Snapshot, file: &FileView, path: &[&Syn]) -> Ve
         });
     }
     vec![
-        single(file, "Assign statement to new local variable", ASSIGN, assign_local),
-        single(file, "Assign statement to new field", ASSIGN, assign_field),
+        single(file, "Assign statement to new local variable", ASSIGN_VARIABLE, assign_local),
+        single(file, "Assign statement to new field", ASSIGN_FIELD, assign_field),
     ]
 }
 
@@ -1108,7 +1166,7 @@ fn invert_conditions(snapshot: &Snapshot, file: &FileView, path: &[&Syn]) -> Opt
     Some(single(
         file,
         "Invert conditions",
-        QUICK_ASSIST,
+        REFACTOR,
         vec![Edit {
             start: found.start,
             end: found.end,
@@ -1964,7 +2022,7 @@ fn organize_imports(snapshot: &Snapshot, file: &FileView) -> Vec<Action> {
         }],
     )];
     if !missing.is_empty() {
-        actions.push(single(file, "Add all missing imports", ORGANIZE_IMPORTS, vec![Edit { start: first, end: last, text }]));
+        actions.push(single(file, "Add all missing imports", SOURCE, vec![Edit { start: first, end: last, text }]));
     }
     actions
 }
@@ -2063,7 +2121,7 @@ fn sort_selected_members(file: &FileView, start: Position, end: Position) -> Opt
         return None;
     }
     let edit = sorted_body(file, body, Some((start, end)))?;
-    Some(single(file, "Sort Selected Members", SORT_MEMBERS, vec![edit]))
+    Some(single(file, "Sort Selected Members", QUICK_ASSIST, vec![edit]))
 }
 
 /// The members of `body` sorted, or only those `only` overlaps.

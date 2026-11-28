@@ -2,7 +2,7 @@
 //! them there:
 //!
 //! - `Change signature for 'm'`, which asks for the new signature and is
-//!   offered disabled;
+//!   offered as the command that asks;
 //! - `Make Static` on an instance method of a class that reads no member of
 //!   its instance;
 //! - on a parameter's name: `Assign parameter to new field`, `Assign
@@ -12,7 +12,7 @@
 //!   then goes.
 
 use super::assists::{needs_input, Selection};
-use super::{deeper, fresh, indentation, single, Action, Edit, ASSIGN, INLINE, QUICK_ASSIST};
+use super::{deeper, fresh, indentation, single, Action, Edit, CHANGE_SIGNATURE, INLINE, QUICK_ASSIST};
 use crate::feature::semantic::{is_anonymous_class, is_type_declaration, parameters_of, path_to, FileView, Snapshot};
 use crate::parser::{Position, Syn};
 
@@ -36,7 +36,7 @@ pub fn actions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
         return actions;
     };
     let owner = path[..index].iter().rev().find(|node| is_type_declaration(node) || is_anonymous_class(node)).copied();
-    actions.push(needs_input(file, format!("Change signature for '{}'", name.text), QUICK_ASSIST));
+    actions.push(needs_input(file, format!("Change signature for '{}'", name.text), CHANGE_SIGNATURE, "changeSignature"));
     actions.extend(make_static(snapshot, file, method, owner, &path[..index]));
     actions.extend(assign_parameters(file, method, owner, selection));
     actions.extend(inline_unused(snapshot, file, method, name, selection));
@@ -98,7 +98,7 @@ fn make_static(snapshot: &Snapshot, file: &FileView, method: &Syn, owner: Option
         .child("type_parameters")
         .or_else(|| method.child("type"))
         .map_or(method.start, |written| written.start);
-    Some(single(file, "Make Static", QUICK_ASSIST, vec![Edit { start: at, end: at, text: "static ".to_owned() }]))
+    Some(single(file, "Make Static", INLINE, vec![Edit { start: at, end: at, text: "static ".to_owned() }]))
 }
 
 /// A parameter's type as written and its name.
@@ -173,7 +173,7 @@ fn assign_parameters(file: &FileView, method: &Syn, owner: Option<&Syn>, selecti
             },
         ]
     };
-    actions.push(single(file, "Assign parameter to new field", ASSIGN, assign_new(&mut taken.clone(), written, name)));
+    actions.push(single(file, "Assign parameter to new field", QUICK_ASSIST, assign_new(&mut taken.clone(), written, name)));
     // A field of the class the parameter's value fits.
     for field in class_body.children.iter().filter(|member| member.kind == "field_declaration") {
         let field_static = says(field, "static");
@@ -191,7 +191,7 @@ fn assign_parameters(file: &FileView, method: &Syn, owner: Option<&Syn>, selecti
             actions.push(single(
                 file,
                 format!("Assign parameter to field '{}'", field_name.text),
-                ASSIGN,
+                QUICK_ASSIST,
                 vec![Edit {
                     start: after,
                     end: after,
@@ -211,7 +211,7 @@ fn assign_parameters(file: &FileView, method: &Syn, owner: Option<&Syn>, selecti
         actions.push(single(
             file,
             "Assign all parameters to new fields",
-            ASSIGN,
+            QUICK_ASSIST,
             vec![
                 Edit { start: class_open, end: class_open, text: fields },
                 Edit { start: after, end: after, text: assignments },

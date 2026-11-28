@@ -167,6 +167,63 @@ pub fn shown(file: &FileView, at: Position, names_a_type: bool) -> Option<Highli
     })
 }
 
+/// Where a reference to `name` found at `at` ends, as jdtls reports it:
+/// the name, except that a Java search of a Java declaration reports the
+/// whole of what refers to it — a call from its name to its `)`, a
+/// `new T(…)` or a `this(…);`, a qualified name ending in it
+/// (`import lombok.Data;`). Where the tree has nothing there (a Javadoc
+/// link), the name's length.
+pub fn reference_end(file: &FileView, at: Position, name: &str, whole: bool) -> Position {
+    let by_length = Position {
+        line: at.line,
+        column: at.column + name.encode_utf16().count() as u32,
+    };
+    let path = path_to(&file.tree, at);
+    if whole
+        && let Some(call) = path.iter().find(|node| {
+            node.start == at
+                && matches!(
+                    node.kind.as_str(),
+                    "object_creation_expression" | "explicit_constructor_invocation"
+                )
+        })
+    {
+        return call.end;
+    }
+    let Some((index, identifier)) = path
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, node)| node.start == at && is_identifier(node))
+    else {
+        return by_length;
+    };
+    if !whole {
+        return identifier.end;
+    }
+    if let Some(parent) = index.checked_sub(1).map(|parent| path[parent])
+        && parent.kind == "method_invocation"
+        && parent.child("name").is_some_and(|named| std::ptr::eq(named, *identifier))
+    {
+        return parent.end;
+    }
+    if identifier.text != name {
+        // `lombok.Data` found at `lombok`: the qualified name it starts.
+        for outer in path[..index].iter().rev() {
+            if outer.start != at
+                || !matches!(outer.kind.as_str(), "scoped_identifier" | "scoped_type_identifier")
+            {
+                break;
+            }
+            let last = outer.children.iter().rev().find(|child| is_identifier(child));
+            if last.is_some_and(|last| last.text == name) {
+                return outer.end;
+            }
+        }
+    }
+    identifier.end
+}
+
 /// Whether `name`, under `ancestors`, declares a variable or gives one a
 /// value.
 fn is_written(ancestors: &[&Syn], name: &Syn) -> bool {

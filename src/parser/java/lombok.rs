@@ -623,7 +623,7 @@ fn plan_with(class: &Syn, imports: &[String]) -> Plan {
 /// each field is (a `@Singular` collection's adders and `clear…`, a
 /// `@Builder.Default` field's value and whether it was set), `build()` and
 /// `toString()`. jdtls puts all of them at the annotation, from its `@` to
-/// the end of its name.
+/// the end of its name (`@SuperBuilder`'s at its `@` alone).
 ///
 /// `@SuperBuilder` (`hierarchical`) makes the builder an abstract class
 /// `XBuilder<C extends X, B extends XBuilder<C, B>>` that extends the
@@ -639,7 +639,13 @@ fn plan_builder(
     taken: &[String],
     hierarchical: bool,
 ) {
-    let at = (annotation.whole.0, annotation.name_at.1);
+    // jdtls places `@SuperBuilder`'s members at the `@` alone, an empty
+    // range; `@Builder`'s run to the end of the annotation's name.
+    let at = if hierarchical {
+        (annotation.whole.0, annotation.whole.0)
+    } else {
+        (annotation.whole.0, annotation.name_at.1)
+    };
     let argument = |name: &str| builder_argument(&annotation.arguments, name);
     let builder_class = argument("builderClassName").unwrap_or_else(|| format!("{class_name}Builder"));
     let builder_method = argument("builderMethodName").unwrap_or_else(|| "builder".to_owned());

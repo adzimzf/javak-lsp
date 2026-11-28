@@ -78,7 +78,9 @@ pub(super) fn syntax_errors(text: &str) -> Vec<Finding> {
     // reports it and its parser takes the literal as given.
     let literals: Vec<_> = unclosed.iter().map(|&offset| at(offset, text)).collect();
     findings.retain(|finding| !literals.contains(&finding.at));
-    findings.extend(unclosed.into_iter().map(|offset| Finding { end: None,
+    // Eclipse's range runs to the start of the next line.
+    findings.extend(unclosed.into_iter().map(|offset| Finding {
+        end: Some(Position { line: at(offset, text).line + 1, column: 0 }),
         at: at(offset, text),
         message: "String literal is not properly closed by a double-quote".to_owned(),
     }));
@@ -592,7 +594,8 @@ fn unplaced(node: Node, text: &str, findings: &mut Vec<Finding>) {
                 "record" => ("RecordBody", "RecordDeclaration"),
                 _ => ("ClassBody", "ClassDeclaration"),
             };
-            findings.push(Finding { end: None,
+            findings.push(Finding {
+                end: Some(at(name.end_byte(), text)),
                 at: at(name.start_byte(), text),
                 message: format!("Syntax error, insert \"{body}\" to complete {declaration}"),
             });
@@ -603,7 +606,8 @@ fn unplaced(node: Node, text: &str, findings: &mut Vec<Finding>) {
     // `int x = ;`
     let last = *tokens.last().expect("not empty");
     if last.kind() == "=" {
-        findings.push(Finding { end: None,
+        findings.push(Finding {
+            end: Some(at(last.end_byte(), text)),
             at: at(last.start_byte(), text),
             message: "Syntax error on token \"=\", VariableInitializer expected after this token"
                 .to_owned(),
@@ -611,7 +615,8 @@ fn unplaced(node: Node, text: &str, findings: &mut Vec<Finding>) {
         return;
     }
 
-    findings.push(Finding { end: None,
+    findings.push(Finding {
+        end: Some(at(first.end_byte(), text)),
         at: at(first.start_byte(), text),
         message: format!(
             "Syntax error on token \"{}\", delete this token",
@@ -689,7 +694,8 @@ pub(super) fn above_java_level(tree: &Syn, level: u32) -> Vec<Finding> {
             let feature = FEATURES
                 .iter()
                 .find(|feature| level < feature.since && (feature.written_by)(node))?;
-            Some(Finding { end: None,
+            Some(Finding {
+                end: Some(node.end),
                 at: node.start,
                 message: format!(
                     "The Java feature '{}' is only available with source level {} and above",

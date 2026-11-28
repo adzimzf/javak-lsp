@@ -453,6 +453,58 @@ pub fn call_sites_of_any<'a>(
     sites
 }
 
+/// What jdtls shows beside a member of the hierarchy: the binary name of
+/// the type declaring it (`org.sample.Outer$Inner`, `p.Use$1` in an
+/// anonymous class), or a top-level type's package.
+pub fn detail(snapshot: &Snapshot, found: &Found<'_>) -> Option<String> {
+    let package = snapshot.package(found.file).filter(|package| !package.is_empty());
+    let path = path_to(&found.file.tree, found.node.start);
+    let is_type = crate::feature::semantic::is_type_declaration;
+    // jdtls numbers an anonymous class, and a lambda (which it models as
+    // one), in the named class holding it, in source order.
+    let anonymous = |node: &Syn| {
+        node.kind == "lambda_expression"
+            || (node.kind == "object_creation_expression" && node.first("class_body").is_some())
+    };
+    let number_in = |named: Option<&&Syn>, node: &Syn| {
+        named.map_or(1, |named| {
+            named
+                .walk()
+                .into_iter()
+                .filter(|inner| anonymous(inner))
+                .take_while(|inner| inner.start <= node.start)
+                .count()
+        })
+    };
+    let mut owner: Option<String> = None;
+    for (index, node) in path.iter().enumerate() {
+        let itself = std::ptr::eq(*node, found.node);
+        if itself && !anonymous(node) {
+            break;
+        }
+        if is_type(node) && node.start <= found.node.start {
+            let Some(name) = node.child("name") else { continue };
+            owner = Some(match owner {
+                None => name.text.clone(),
+                Some(outer) => format!("{outer}${}", name.text),
+            });
+        } else if anonymous(node)
+            && let Some(outer) = &owner
+        {
+            let named = path[..index].iter().rev().find(|around| is_type(around));
+            owner = Some(format!("{outer}${}", number_in(named, node)));
+        }
+        if itself {
+            break;
+        }
+    }
+    match (package, owner) {
+        (Some(package), Some(owner)) => Some(format!("{package}.{owner}")),
+        (None, Some(owner)) => Some(owner),
+        (package, None) => package,
+    }
+}
+
 /// What `of` calls, each callee once, in the order first called.
 pub fn outgoing<'a>(snapshot: &'a Snapshot, of: &Found<'a>) -> Vec<Calls<'a>> {
     let body: Vec<&Syn> = match of.node.kind.as_str() {
@@ -470,6 +522,8 @@ pub fn outgoing<'a>(snapshot: &'a Snapshot, of: &Found<'a>) -> Vec<Calls<'a>> {
             let Some((called, start, end)) = call_of(snapshot, node, of.file) else {
                 continue;
             };
+            // What a body calls is the whole call, its receiver included.
+            let start = if node.kind == "method_invocation" { node.start } else { start };
             let key = identity(&called);
             match callees
                 .iter_mut()
@@ -537,9 +591,10 @@ fn call_of<'a>(
     file: &'a FileView,
 ) -> Option<(Found<'a>, Position, Position)> {
     match call.kind.as_str() {
+        // From the name to the `)`, as jdtls reports a call it finds.
         "method_invocation" => {
             let name = call.child("name")?;
-            Some((snapshot.invoked(call, file)?, name.start, name.end))
+            Some((snapshot.invoked(call, file)?, name.start, call.end))
         }
         "object_creation_expression" => {
             let end = call

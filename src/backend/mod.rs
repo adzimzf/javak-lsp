@@ -51,6 +51,8 @@ pub fn backend_over(indexer: Arc<Indexer>, client: Client) -> Backend {
         dependencies: Arc::new(DependencySync::default()),
         debug: Arc::new(DebugCommands::new(indexer_for_debug)),
         symbol_tags: AtomicBool::new(false),
+        diagnostic_tags: AtomicBool::new(false),
+        renames_files: AtomicBool::new(false),
         work_done_progress: AtomicBool::new(false),
     }
 }
@@ -64,6 +66,13 @@ pub struct Backend {
     /// Whether the client reads a symbol's `tags`; one that does not is
     /// told a symbol is deprecated by its `deprecated` field, as jdtls does.
     symbol_tags: AtomicBool,
+    /// Whether the client reads a diagnostic's `unnecessary` tag
+    /// (`publishDiagnostics.tagSupport`): jdtls tags only for one that does.
+    diagnostic_tags: AtomicBool,
+    /// Whether the client takes a file's rename in a workspace edit
+    /// (`documentChanges` with the `rename` resource operation): jdtls then
+    /// moves a type's file with the type.
+    renames_files: AtomicBool,
     /// Whether the client shows `$/progress` (`window.workDoneProgress`).
     work_done_progress: AtomicBool,
 }
@@ -219,27 +228,6 @@ impl Backend {
         ))
     }
 
-    /// What jdtls names the place a declaration is in: the project, or for
-    /// a library source the module or jar it was extracted from.
-    fn source_label(&self, file: &crate::feature::semantic::FileView) -> String {
-        if file.library {
-            let path = file.uri.path();
-            if let Some((_, extracted)) = path.split_once("/sources/") {
-                let mut parts = extracted.split('/');
-                let archive = parts.next().unwrap_or_default();
-                if let Some(module) = parts.next().filter(|module| module.contains('.')) {
-                    return format!("module: {module}");
-                }
-                return archive.to_owned();
-            }
-        }
-        self.indexer
-            .workspace_root
-            .get()
-            .and_then(|root| root.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
 
     /// The edits that format a Java file, or the lines `range` touches.
     /// Other files are not formatted.
@@ -325,7 +313,15 @@ impl Backend {
                     diagnostic
                 }),
         );
-        diagnostics.extend(reports.into_iter().map(reported_by_compiler));
+        let tags = self.diagnostic_tags.load(Ordering::Relaxed);
+        diagnostics.extend(reports.into_iter().map(|report| reported_by_compiler(report, tags)));
+        // Each with the number Eclipse files it under, as jdtls sends it.
+        if language == Language::Java {
+            for diagnostic in &mut diagnostics {
+                diagnostic.code = compiler::problem_id(&diagnostic.message)
+                    .map(|id| NumberOrString::String(id.to_string()));
+            }
+        }
         diagnostics
     }
 
@@ -554,12 +550,15 @@ fn package_mismatch(
                 .map_or(Position { line: 0, column: 0 }, |offset| {
                     crate::parser::position_of(text, offset)
                 });
-            Some(reported(
+            let mut diagnostic = reported(
                 at,
                 format!(
                     "The declared package \"{declared_name}\" does not match the expected package \"{expected}\""
                 ),
-            ))
+            );
+            // On the name declared, or on the file's first character.
+            diagnostic.range.end.character += declared_name.encode_utf16().count().max(1) as u32;
+            Some(diagnostic)
         }
     }
 }
@@ -593,7 +592,7 @@ fn reported(at: Position, message: String) -> Diagnostic {
     }
 }
 
-fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
+fn reported_by_compiler(report: compiler::Report, tags: bool) -> Diagnostic {
     let severity = match report.level {
         compiler::Level::Error => DiagnosticSeverity::ERROR,
         compiler::Level::Warning => DiagnosticSeverity::WARNING,
@@ -602,7 +601,7 @@ fn reported_by_compiler(report: compiler::Report) -> Diagnostic {
     let end = report.finding.end;
     let mut diagnostic = Diagnostic {
         severity: Some(severity),
-        tags: report.unnecessary.then(|| vec![DiagnosticTag::UNNECESSARY]),
+        tags: (tags && report.unnecessary).then(|| vec![DiagnosticTag::UNNECESSARY]),
         ..reported(report.finding.at, report.finding.message)
     };
     if let Some(end) = end {
@@ -640,9 +639,99 @@ fn highlighted(place: highlight::Highlight) -> DocumentHighlight {
 }
 
 /// An empty range at a declaration's name: what a client is sent to.
-fn at_name(at: Position) -> Range {
-    let start = lsp_position(at);
-    Range { start, end: start }
+/// A Java proposal as the item jdtls sends: the label with its parameters
+/// beside it and the type or package as their description, the kind, what
+/// it inserts (a snippet where it writes arguments), its detail and
+/// documentation, and the import it adds.
+fn java_completion_item(
+    proposal: crate::feature::completion::Proposal,
+    imports_at: (tower_lsp::lsp_types::Position, bool),
+    cursor_at: tower_lsp::lsp_types::Position,
+) -> CompletionItem {
+    use crate::feature::completion::ItemKind;
+    let shown = proposal.shown;
+    let kind = match shown.kind.unwrap_or_default() {
+        ItemKind::Text => CompletionItemKind::TEXT,
+        ItemKind::Method => CompletionItemKind::METHOD,
+        ItemKind::Constructor => CompletionItemKind::CONSTRUCTOR,
+        ItemKind::Field => CompletionItemKind::FIELD,
+        ItemKind::Constant => CompletionItemKind::CONSTANT,
+        ItemKind::EnumMember => CompletionItemKind::ENUM_MEMBER,
+        ItemKind::Variable => CompletionItemKind::VARIABLE,
+        ItemKind::Class => CompletionItemKind::CLASS,
+        ItemKind::Interface => CompletionItemKind::INTERFACE,
+        ItemKind::Enum => CompletionItemKind::ENUM,
+        ItemKind::Struct => CompletionItemKind::STRUCT,
+        ItemKind::Module => CompletionItemKind::MODULE,
+        ItemKind::Keyword => CompletionItemKind::KEYWORD,
+        ItemKind::Snippet => CompletionItemKind::SNIPPET,
+    };
+    let label = shown.label.unwrap_or(proposal.label);
+    let label_details = (proposal.label_detail.is_some() || shown.description.is_some()).then_some(
+        CompletionItemLabelDetails {
+            detail: proposal.label_detail,
+            description: shown.description,
+        },
+    );
+    let additional_text_edits = shown.import.map(|import| {
+        let (at, after_a_line) = imports_at;
+        let new_text = if after_a_line { format!("\n{}", import.trim_end()) } else { import };
+        vec![TextEdit { range: Range { start: at, end: at }, new_text }]
+    });
+    let inserted = shown.insert.unwrap_or(proposal.name.clone());
+    // What a qualified name being written is replaced with, whole.
+    let replaces = shown.replaces.or(shown.replaces_to.map(|_| crate::parser::Position {
+        line: cursor_at.line,
+        column: cursor_at.character,
+    }));
+    let text_edit = replaces.map(|from| {
+        CompletionTextEdit::Edit(TextEdit {
+            range: Range {
+                start: lsp_position(from),
+                end: shown.replaces_to.map_or(cursor_at, lsp_position),
+            },
+            new_text: inserted.clone(),
+        })
+    });
+    CompletionItem {
+        filter_text: Some(proposal.name.clone()),
+        insert_text: Some(inserted),
+        text_edit,
+        insert_text_format: shown.snippet.then_some(InsertTextFormat::SNIPPET),
+        label,
+        label_details,
+        kind: Some(kind),
+        detail: shown.detail,
+        documentation: shown.documentation.map(|text| {
+            Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: text })
+        }),
+        deprecated: shown.deprecated.then_some(true),
+        tags: shown.deprecated.then(|| vec![CompletionItemTag::DEPRECATED]),
+        sort_text: Some(proposal.sort),
+        additional_text_edits,
+        ..CompletionItem::default()
+    }
+}
+
+/// Where an import goes in `file`: after its last import, else after its
+/// package declaration (the edit then starts a line of its own), else at
+/// its start.
+fn import_position(file: &crate::feature::semantic::FileView) -> (tower_lsp::lsp_types::Position, bool) {
+    let children = &file.tree.children;
+    let last = children
+        .iter()
+        .rev()
+        .find(|child| child.kind == "import_declaration")
+        .or_else(|| children.iter().find(|child| child.kind == "package_declaration"));
+    match last {
+        Some(declaration) => (lsp_position(declaration.end), true),
+        None => (tower_lsp::lsp_types::Position { line: 0, character: 0 }, false),
+    }
+}
+
+/// Where a declaration's name is, start to end, as a location shows it.
+fn name_range(name: &crate::parser::Syn) -> Range {
+    Range { start: lsp_position(name.start), end: lsp_position(name.end) }
 }
 
 /// The language of an opened document: the client's language id, else
@@ -685,6 +774,27 @@ impl LanguageServer for Backend {
             .and_then(|symbols| symbols.tag_support.as_ref())
             .is_some_and(|support| support.value_set.contains(&SymbolTag::DEPRECATED));
         self.symbol_tags.store(tags, Ordering::Relaxed);
+        let diagnostic_tags = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|document| document.publish_diagnostics.as_ref())
+            .and_then(|diagnostics| diagnostics.tag_support.as_ref())
+            .is_some_and(|support| support.value_set.contains(&DiagnosticTag::UNNECESSARY));
+        self.diagnostic_tags.store(diagnostic_tags, Ordering::Relaxed);
+        let renames_files = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|workspace| workspace.workspace_edit.as_ref())
+            .is_some_and(|edit| {
+                edit.document_changes == Some(true)
+                    && edit
+                        .resource_operations
+                        .as_ref()
+                        .is_some_and(|operations| operations.contains(&ResourceOperationKind::Rename))
+            });
+        self.renames_files.store(renames_files, Ordering::Relaxed);
         let progress = params
             .capabilities
             .window
@@ -931,7 +1041,16 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let target = found.file.uri.clone();
-        let location = Location { uri: target.clone(), range: at_name(found.selection()) };
+        let mut range = name_range(found.name);
+        // jdtls goes from the loop (or its label) a `break`/`continue`
+        // leaves to the end of that `break`/`continue` keyword.
+        if let Some(keyword) = snapshot
+            .jump_at(&at.text_document.uri, cursor(at.position))
+            .and_then(|jump| jump.children.first())
+        {
+            range = Range { start: lsp_position(found.node.start), end: lsp_position(keyword.end) };
+        }
+        let location = Location { uri: target.clone(), range };
         drop(snapshot);
         // A class read from its class file is decompiled when it is opened,
         // as jdtls does; then the declaration is found again in the code.
@@ -940,7 +1059,7 @@ impl LanguageServer for Backend {
             if let Some(found) = snapshot.declaration_at(&at.text_document.uri, cursor(at.position)) {
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                     uri: found.file.uri.clone(),
-                    range: at_name(found.selection()),
+                    range: name_range(found.name),
                 })));
             }
         }
@@ -964,7 +1083,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(request::GotoDeclarationResponse::Scalar(Location {
             uri: overridden.file.uri.clone(),
-            range: at_name(overridden.selection()),
+            range: name_range(overridden.name),
         })))
     }
 
@@ -1002,14 +1121,14 @@ impl LanguageServer for Backend {
                     };
                     return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
                         uri: found.file.uri.clone(),
-                        range: at_name(class.start),
+                        range: name_range(class),
                     })));
                 }
                 // A type variable is a type: its own declaration.
                 "type_parameter" => {
                     return Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
                         uri: found.file.uri.clone(),
-                        range: at_name(found.selection()),
+                        range: name_range(found.name),
                     })));
                 }
                 _ => {}
@@ -1023,7 +1142,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(request::GotoTypeDefinitionResponse::Scalar(Location {
             uri: declaration.file.uri.clone(),
-            range: at_name(declaration.selection()),
+            range: name_range(declaration.name),
         })))
     }
 
@@ -1050,18 +1169,12 @@ impl LanguageServer for Backend {
                 range: None,
             }));
         }
-        // jdtls follows the signature with the javadoc and with where the
-        // declaration is: `Source: *[project](file#line)*`.
+        // jdtls follows the signature with the javadoc; a declaration in
+        // the workspace's sources says nothing of where it is.
         let mut parts = vec![signature];
         if let Some(documentation) = hover.documentation {
             parts.push(MarkedString::String(documentation));
         }
-        parts.push(MarkedString::String(format!(
-            "Source: *[{}]({}#{})*",
-            self.source_label(hover.found.file),
-            hover.found.file.uri,
-            hover.found.name.start.line + 1
-        )));
         Ok(Some(Hover {
             contents: HoverContents::Array(parts),
             range: None,
@@ -1186,6 +1299,21 @@ impl LanguageServer for Backend {
         if found.file.language == Language::Java && tied.iter().any(|tied| tied.file.library) {
             return Ok(None);
         }
+        // A top-level type its file is named after moves the file with it.
+        let moved = tied
+            .iter()
+            .find(|tied| {
+                tied.file.language == Language::Java
+                    && crate::feature::semantic::is_type_declaration(tied.node)
+                    && tied.file.tree.children.iter().any(|top| std::ptr::eq(top, tied.node))
+                    && tied
+                        .file
+                        .uri
+                        .path_segments()
+                        .and_then(|mut segments| segments.next_back())
+                        .is_some_and(|file_name| file_name == format!("{}.java", tied.name.text))
+            })
+            .map(|tied| tied.file.uri.clone());
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
         let mut places: Vec<(&Url, Position)> = Vec::new();
         for tied in tied {
@@ -1207,6 +1335,32 @@ impl LanguageServer for Backend {
                 },
                 new_text: params.new_name.clone(),
             });
+        }
+        if let Some(old_uri) = moved.filter(|_| self.renames_files.load(Ordering::Relaxed))
+            && let Ok(new_uri) = old_uri.join(&format!("{}.java", params.new_name))
+        {
+            // The edits, then the move, as jdtls sends them.
+            let mut uris: Vec<&Url> = changes.keys().collect();
+            uris.sort();
+            let mut operations: Vec<DocumentChangeOperation> = uris
+                .into_iter()
+                .map(|uri| {
+                    DocumentChangeOperation::Edit(TextDocumentEdit {
+                        text_document: OptionalVersionedTextDocumentIdentifier { uri: uri.clone(), version: None },
+                        edits: changes[uri].iter().cloned().map(OneOf::Left).collect(),
+                    })
+                })
+                .collect();
+            operations.push(DocumentChangeOperation::Op(ResourceOp::Rename(RenameFile {
+                old_uri,
+                new_uri,
+                options: None,
+                annotation_id: None,
+            })));
+            return Ok(Some(WorkspaceEdit {
+                document_changes: Some(DocumentChanges::Operations(operations)),
+                ..WorkspaceEdit::default()
+            }));
         }
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),
@@ -1277,48 +1431,52 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let implied = self.indexer.implied_package(&at.text_document.uri);
-        let offers = crate::feature::completion::offers(
-            &snapshot,
-            file,
-            cursor(at.position),
-            implied.as_deref(),
-        );
         if file.language == Language::Java {
             // As jdtls offers them: an item per overload, ranked, at most
-            // fifty, the list then incomplete.
-            let prefix = crate::feature::completion::typed_prefix(&file.text, cursor(at.position));
-            let (proposals, incomplete) = crate::feature::completion::proposals(offers, &prefix);
-            use crate::feature::completion::OfferKind;
+            // fifty, the list then incomplete; each as jdtls shows it.
+            let (proposals, incomplete) = crate::feature::completion::items(
+                &snapshot,
+                file,
+                cursor(at.position),
+                implied.as_deref(),
+            );
+            let imports_at = import_position(file);
             let items = proposals
                 .into_iter()
-                .map(|proposal| CompletionItem {
-                    label: proposal.label,
-                    filter_text: Some(proposal.name.clone()),
-                    insert_text: Some(proposal.name),
-                    kind: Some(match proposal.kind {
-                        OfferKind::Field => CompletionItemKind::FIELD,
-                        OfferKind::Keyword => CompletionItemKind::KEYWORD,
-                        OfferKind::Local => CompletionItemKind::VARIABLE,
-                        OfferKind::Method => CompletionItemKind::METHOD,
-                        OfferKind::Package => CompletionItemKind::MODULE,
-                        OfferKind::Type => CompletionItemKind::CLASS,
-                    }),
-                    sort_text: Some(proposal.sort),
-                    ..CompletionItem::default()
-                })
+                .map(|proposal| java_completion_item(proposal, imports_at, at.position))
                 .collect();
             return Ok(Some(CompletionResponse::List(CompletionList {
                 is_incomplete: incomplete,
                 items,
             })));
         }
+        let offers = crate::feature::completion::offers(
+            &snapshot,
+            file,
+            cursor(at.position),
+            implied.as_deref(),
+        );
         Ok(Some(CompletionResponse::Array(
             offers
                 .into_iter()
-                .map(|offer| CompletionItem {
-                    label: offer.name,
-                    sort_text: Some(offer.rank),
-                    ..CompletionItem::default()
+                .map(|offer| {
+                    use crate::feature::completion::OfferKind;
+                    // As the Kotlin LSP files them: a member that holds a
+                    // value is a property.
+                    let kind = match offer.kind {
+                        OfferKind::Field => CompletionItemKind::PROPERTY,
+                        OfferKind::Keyword => CompletionItemKind::KEYWORD,
+                        OfferKind::Local => CompletionItemKind::VARIABLE,
+                        OfferKind::Method => CompletionItemKind::METHOD,
+                        OfferKind::Package => CompletionItemKind::MODULE,
+                        OfferKind::Type => CompletionItemKind::CLASS,
+                    };
+                    CompletionItem {
+                        label: offer.name,
+                        kind: Some(kind),
+                        sort_text: Some(offer.rank),
+                        ..CompletionItem::default()
+                    }
                 })
                 .collect(),
         )))
@@ -1515,14 +1673,20 @@ impl LanguageServer for Backend {
                             (uri, edits)
                         })
                         .collect();
+                    let title = action.title;
                     CodeActionOrCommand::CodeAction(CodeAction {
-                        title: action.title,
+                        title: title.clone(),
                         kind: Some(CodeActionKind::from(action.kind.to_owned())),
-                        edit: action.disabled.is_none().then(|| WorkspaceEdit {
+                        edit: action.asks.is_none().then(|| WorkspaceEdit {
                             changes: Some(changes),
                             ..WorkspaceEdit::default()
                         }),
-                        disabled: action.disabled.map(|reason| CodeActionDisabled { reason: reason.to_owned() }),
+                        // What asks its user first is jdtls's client command.
+                        command: action.asks.map(|refactoring| Command {
+                            title: title.clone(),
+                            command: "java.action.applyRefactoringCommand".to_owned(),
+                            arguments: Some(vec![serde_json::Value::String(refactoring.to_owned())]),
+                        }),
                         ..CodeAction::default()
                     })
                 })
@@ -1661,22 +1825,14 @@ fn call_item(
     found: &Found<'_>,
     shown_at: Option<(Position, Position)>,
 ) -> CallHierarchyItem {
-    let name_end = Position {
-        line: found.name.start.line,
-        column: found.name.start.column
-            + if std::ptr::eq(found.name, found.node) {
-                0
-            } else {
-                found.name.text.encode_utf16().count() as u32
-            },
-    };
+    // A generated member (Lombok's) is where its name stands for it.
+    let name_end = if std::ptr::eq(found.name, found.node) { found.name.start } else { found.name.end };
     let selection = shown_at.unwrap_or((found.name.start, name_end));
-    let package = snapshot.package(found.file);
     CallHierarchyItem {
         name: call_hierarchy::label(snapshot, found),
         kind: symbol_kind(call_hierarchy::kind_of(found).unwrap_or(Kind::Method)),
         tags: None,
-        detail: package,
+        detail: call_hierarchy::detail(snapshot, found),
         uri: found.file.uri.clone(),
         range: span_range((found.node.start, found.node.end)),
         selection_range: span_range(selection),
@@ -1859,13 +2015,24 @@ fn references_now(indexer: &Indexer, params: ReferenceParams) -> Result<Option<V
         }
         uses.sort_by(|left, right| (left.0.as_str(), left.1).cmp(&(right.0.as_str(), right.1)));
         uses.dedup();
+        let name = found.name.text.as_str();
         let places = uses
             .into_iter()
             .map(|(uri, at)| {
                 snapshot.extract_if_searched(uri);
+                let end = match snapshot.file(uri) {
+                    Some(file) => {
+                        let whole = java && file.language == Language::Java;
+                        highlight::reference_end(file, at, name, whole)
+                    }
+                    None => Position {
+                        line: at.line,
+                        column: at.column + name.encode_utf16().count() as u32,
+                    },
+                };
                 Location {
                     uri: uri.clone(),
-                    range: at_name(at),
+                    range: Range { start: lsp_position(at), end: lsp_position(end) },
                 }
             })
             .collect();
@@ -1880,7 +2047,7 @@ fn goto_implementation_now(indexer: &Indexer, params: request::GotoImplementatio
             .into_iter()
             .map(|found| Location {
                 uri: found.file.uri.clone(),
-                range: at_name(found.selection()),
+                range: name_range(found.name),
             })
             .collect();
         Ok(Some(request::GotoImplementationResponse::Array(places)))

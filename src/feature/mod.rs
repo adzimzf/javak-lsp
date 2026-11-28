@@ -12,6 +12,7 @@ pub mod code_action;
 pub mod highlight;
 pub mod inlay;
 pub mod java;
+pub mod javadoc;
 pub mod kotlin;
 pub mod outline;
 pub mod query;

@@ -10,7 +10,8 @@
 //!   `Extract to method`; on such an expression also `Extract to local
 //!   variable` (and `(replace all occurrences)`), `Extract to field`,
 //!   `Extract to constant` (when it reads no local) and `Introduce
-//!   Parameter...`, which asks for a name and is offered disabled.
+//!   Parameter...`, which asks for a name and is offered as the command
+//!   that asks.
 
 use std::collections::HashSet;
 
@@ -19,8 +20,13 @@ use super::{decapitalized, fresh, indentation, names_around, single, Action, Edi
 use crate::feature::semantic::{is_type_declaration, path_to, FileView, Snapshot};
 use crate::parser::{Position, Syn};
 
-pub const EXTRACT: &str = "refactor.extract";
-const SURROUND: &str = "refactor.surround";
+const EXTRACT_FIELD: &str = "refactor.extract.field";
+const EXTRACT_METHOD: &str = "refactor.extract.function";
+const EXTRACT_VARIABLE: &str = "refactor.extract.variable";
+const EXTRACT_CONSTANT: &str = "refactor.extract.constant";
+const INTRODUCE_PARAMETER: &str = "refactor.introduce.parameter";
+/// jdtls files a surround as a plain refactoring.
+const SURROUND: &str = super::REFACTOR;
 
 /// Every refactoring of this module the selection allows.
 pub fn actions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> Vec<Action> {
@@ -315,7 +321,7 @@ fn on_local_name(snapshot: &Snapshot, file: &FileView, selection: &Selection) ->
                 text: replacement,
             });
         }
-        actions.push(single(file, "Extract to field", EXTRACT, edits));
+        actions.push(single(file, "Extract to field", EXTRACT_FIELD, edits));
     }
     let (Some(value), [_]) = (value, declarators.as_slice()) else {
         return actions;
@@ -346,7 +352,7 @@ fn on_local_name(snapshot: &Snapshot, file: &FileView, selection: &Selection) ->
         actions.push(single(
             file,
             format!("Change type of '{}' to 'var'", name.text),
-            QUICK_ASSIST,
+            super::REFACTOR,
             vec![Edit {
                 start: written.start,
                 end: written.end,
@@ -511,7 +517,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
             actions.push(single(
                 file,
                 "Extract to method",
-                EXTRACT,
+                EXTRACT_METHOD,
                 vec![Edit { start: first.start, end: last.end, text: call }, after_member(file, member, &method)],
             ));
         }
@@ -544,7 +550,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
                 end: expression.end,
                 text: by.to_owned(),
             };
-            actions.push(single(file, "Extract to local variable", EXTRACT, vec![declare.clone(), replace(&local)]));
+            actions.push(single(file, "Extract to local variable", EXTRACT_VARIABLE, vec![declare.clone(), replace(&local)]));
             // Every occurrence of the same text in the body.
             let mut all = vec![declare];
             for node in callable.walk() {
@@ -556,7 +562,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
                     });
                 }
             }
-            actions.push(single(file, "Extract to local variable (replace all occurrences)", EXTRACT, all));
+            actions.push(single(file, "Extract to local variable (replace all occurrences)", EXTRACT_VARIABLE, all));
             let method_name = fresh("extracted", &mut taken);
             let arguments: Vec<&str> = parameters.iter().map(|(_, name)| name.as_str()).collect();
             let declared: Vec<String> = parameters.iter().map(|(written, name)| format!("{written} {name}")).collect();
@@ -564,7 +570,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
             actions.push(single(
                 file,
                 "Extract to method",
-                EXTRACT,
+                EXTRACT_METHOD,
                 vec![replace(&format!("{method_name}({})", arguments.join(", "))), after_member(file, member, &method)],
             ));
             if let Some((body, _)) = member_around(&path) {
@@ -573,7 +579,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
                     actions.push(single(
                         file,
                         "Extract to field",
-                        EXTRACT,
+                        EXTRACT_FIELD,
                         vec![
                             new_first_member(file, body, &format!("private {statically}{written} {field} = {text};")),
                             replace(&field),
@@ -583,7 +589,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
                     actions.push(single(
                         file,
                         "Extract to constant",
-                        EXTRACT,
+                        EXTRACT_CONSTANT,
                         vec![
                             new_first_member(file, body, &format!("private static final {written} {constant} = {text};")),
                             replace(&constant),
@@ -593,7 +599,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
                     actions.push(single(
                         file,
                         "Extract to field",
-                        EXTRACT,
+                        EXTRACT_FIELD,
                         vec![
                             new_first_member(file, body, &format!("private {statically}{written} {field};")),
                             Edit {
@@ -606,7 +612,7 @@ fn extractions(snapshot: &Snapshot, file: &FileView, selection: &Selection) -> V
                     ));
                 }
             }
-            actions.push(needs_input(file, "Introduce Parameter...", EXTRACT));
+            actions.push(needs_input(file, "Introduce Parameter...", INTRODUCE_PARAMETER, "introduceParameter"));
         }
     }
     actions
