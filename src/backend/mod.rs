@@ -219,27 +219,6 @@ impl Backend {
         ))
     }
 
-    /// What jdtls names the place a declaration is in: the project, or for
-    /// a library source the module or jar it was extracted from.
-    fn source_label(&self, file: &crate::feature::semantic::FileView) -> String {
-        if file.library {
-            let path = file.uri.path();
-            if let Some((_, extracted)) = path.split_once("/sources/") {
-                let mut parts = extracted.split('/');
-                let archive = parts.next().unwrap_or_default();
-                if let Some(module) = parts.next().filter(|module| module.contains('.')) {
-                    return format!("module: {module}");
-                }
-                return archive.to_owned();
-            }
-        }
-        self.indexer
-            .workspace_root
-            .get()
-            .and_then(|root| root.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
 
     /// The edits that format a Java file, or the lines `range` touches.
     /// Other files are not formatted.
@@ -1142,18 +1121,12 @@ impl LanguageServer for Backend {
                 range: None,
             }));
         }
-        // jdtls follows the signature with the javadoc and with where the
-        // declaration is: `Source: *[project](file#line)*`.
+        // jdtls follows the signature with the javadoc; a declaration in
+        // the workspace's sources says nothing of where it is.
         let mut parts = vec![signature];
         if let Some(documentation) = hover.documentation {
             parts.push(MarkedString::String(documentation));
         }
-        parts.push(MarkedString::String(format!(
-            "Source: *[{}]({}#{})*",
-            self.source_label(hover.found.file),
-            hover.found.file.uri,
-            hover.found.name.start.line + 1
-        )));
         Ok(Some(Hover {
             contents: HoverContents::Array(parts),
             range: None,

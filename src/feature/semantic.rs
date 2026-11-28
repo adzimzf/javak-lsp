@@ -3051,17 +3051,31 @@ impl Snapshot {
 
 impl Snapshot {
     /// A Java declaration's Javadoc as Markdown, as jdtls's hover shows it.
+    /// A method with none of its own (or only a `///` comment, which jdtls
+    /// does not read) shows what the method it overrides says.
     pub fn javadoc_of(&self, found: &Found<'_>) -> Option<String> {
-        self.javadoc_comment(found)
-            .map(javadoc_markdown)
-            .filter(|markdown| !markdown.is_empty())
+        if let Some(comment) = self.javadoc_comment(found) {
+            let markdown = crate::feature::javadoc::javadoc_markdown(comment, &Linker { snapshot: self, from: found });
+            return Some(markdown).filter(|markdown| !markdown.is_empty());
+        }
+        if found.file.language != Language::Java || found.node.kind != "method_declaration" {
+            return None;
+        }
+        let overridden = self.overridden(found)?;
+        let comment = self.javadoc_comment(&overridden)?;
+        let linker = Linker { snapshot: self, from: &overridden };
+        let markdown = if markdown_commented(found) {
+            crate::feature::javadoc::javadoc_inherited(comment, &linker)
+        } else {
+            crate::feature::javadoc::javadoc_markdown(comment, &linker)
+        };
+        Some(markdown).filter(|markdown| !markdown.is_empty())
     }
 
-    /// A Java declaration's Javadoc as a completion item shows it
-    /// ([`javadoc_summary`]).
+    /// A Java declaration's Javadoc as a completion item shows it.
     pub fn javadoc_summary_of(&self, found: &Found<'_>) -> Option<String> {
         self.javadoc_comment(found)
-            .map(javadoc_summary)
+            .map(|comment| crate::feature::javadoc::javadoc_summary(comment, &Linker { snapshot: self, from: found }))
             .filter(|markdown| !markdown.is_empty())
     }
 
@@ -3069,9 +3083,75 @@ impl Snapshot {
         if found.file.language != Language::Java {
             return None;
         }
-        self.comment_above(found.file, found.node)
+        // A field's comment is above its declaration, not its declarator.
+        let declaration = if found.node.kind == "variable_declarator" {
+            path_to(&found.file.tree, found.node.start)
+                .into_iter()
+                .rev()
+                .find(|node| matches!(node.kind.as_str(), "field_declaration" | "constant_declaration"))
+                .unwrap_or(found.node)
+        } else {
+            found.node
+        };
+        self.comment_above(found.file, declaration)
             .filter(|comment| comment.text.starts_with("/**"))
             .map(|comment| comment.text.as_str())
+    }
+}
+
+/// Whether the line above a declaration is a Markdown comment (`///`).
+fn markdown_commented(found: &Found<'_>) -> bool {
+    let line = found.node.start.line as usize;
+    line > 0
+        && found
+            .file
+            .text
+            .lines()
+            .nth(line - 1)
+            .is_some_and(|above| above.trim_start().starts_with("///"))
+}
+
+/// What a declaration's Javadoc names, looked up from the declaration.
+struct Linker<'a, 'b> {
+    snapshot: &'a Snapshot,
+    from: &'b Found<'b>,
+}
+
+impl Linker<'_, '_> {
+    /// The declaration `target` (`#area()`, `Shape#area`, `String`) names.
+    fn named(&self, target: &str) -> Option<Found<'_>> {
+        let (type_name, member) = target.split_once('#').unwrap_or((target, ""));
+        let owner = if type_name.is_empty() {
+            if is_type_declaration(self.from.node) {
+                self.snapshot.declared(self.from.file, self.from.node)?
+            } else {
+                self.snapshot.enclosing(self.from.file, self.from.node.start)?
+            }
+        } else {
+            self.snapshot.type_named(type_name, self.from.file)?
+        };
+        if member.is_empty() {
+            return Some(owner);
+        }
+        let name = member.split('(').next().unwrap_or(member).trim();
+        self.snapshot.member(&owner, name, None)
+    }
+}
+
+impl crate::feature::javadoc::Resolve for Linker<'_, '_> {
+    fn link(&self, target: &str) -> Option<String> {
+        let found = self.named(target)?;
+        Some(format!("{}#{}", found.file.uri, found.name.start.line + 1))
+    }
+
+    fn value(&self, target: &str) -> Option<(String, String)> {
+        let found = self.named(target)?;
+        let declarator = found
+            .node
+            .all("variable_declarator")
+            .find(|declarator| declarator.child("name").is_some_and(|named| named.text == found.name.text))?;
+        let value = declarator.child("value")?;
+        Some((value.text.clone(), format!("{}#{}", found.file.uri, found.name.start.line + 1)))
     }
 }
 
@@ -3148,333 +3228,6 @@ fn type_arguments_text(written: &str) -> String {
         text.push_str(piece.trim());
     }
     text.replace("< ", "<").replace(" >", ">")
-}
-
-/// A javadoc comment as markdown, the way jdtls renders one: the text with
-/// its `*` margins gone, inline tags as code or plain names, and the block
-/// tags (`@param`, `@return`, …) as lists under a heading each.
-pub fn javadoc_markdown(comment: &str) -> String {
-    let (mut markdown, tags) = javadoc_parts(comment);
-    markdown = inline_tags(&html_to_markdown(markdown.trim()));
-    javadoc_with_tags(markdown, &tags)
-}
-
-/// A Javadoc comment as a completion item's documentation shows it, as
-/// jdtls's: a `@deprecated` note first, then the description; the other
-/// tags are left to the hover.
-pub fn javadoc_summary(comment: &str) -> String {
-    let (description, tags) = javadoc_parts(comment);
-    let mut parts: Vec<String> = tags
-        .iter()
-        .filter(|(name, _)| name == "deprecated")
-        .map(|(_, text)| format!("**Deprecated.** *{}*", inline_tags(&html_to_markdown(text))))
-        .collect();
-    let description = inline_tags(&html_to_markdown(description.trim()));
-    if !description.is_empty() {
-        parts.push(description);
-    }
-    parts.join("\n\n")
-}
-
-/// A Javadoc comment's description and its block tags, each with its
-/// text on one line.
-fn javadoc_parts(comment: &str) -> (String, Vec<(String, String)>) {
-    let body = comment
-        .trim_start_matches("/**")
-        .trim_end_matches("*/");
-    let lines: Vec<&str> = body
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim_start();
-            let trimmed = trimmed.strip_prefix('*').unwrap_or(trimmed);
-            trimmed.strip_prefix(' ').unwrap_or(trimmed).trim_end()
-        })
-        .collect();
-    let mut description = String::new();
-    let mut tags: Vec<(String, String)> = Vec::new();
-    for line in lines {
-        let starts_tag = line.trim_start().starts_with('@')
-            && line.trim_start()[1..].starts_with(|character: char| character.is_ascii_alphabetic());
-        if starts_tag {
-            let line = line.trim_start();
-            let (tag, rest) = line[1..].split_once(char::is_whitespace).unwrap_or((&line[1..], ""));
-            tags.push((tag.to_owned(), rest.trim().to_owned()));
-        } else if let Some((_, text)) = tags.last_mut() {
-            if !line.trim().is_empty() {
-                if !text.is_empty() {
-                    text.push(' ');
-                }
-                text.push_str(line.trim());
-            }
-        } else {
-            description.push_str(line);
-            description.push('\n');
-        }
-    }
-    (description, tags)
-}
-
-/// The block tags under their jdtls headings, after `markdown`.
-fn javadoc_with_tags(mut markdown: String, tags: &[(String, String)]) -> String {
-    // jdtls's headings, in its order; `@exception` is `@throws`.
-    const HEADINGS: &[(&[&str], &str)] = &[
-        (&["param"], "Parameters:"),
-        (&["return"], "Returns:"),
-        (&["throws", "exception"], "Throws:"),
-        (&["since"], "Since:"),
-        (&["see"], "See Also:"),
-        (&["author"], "Author:"),
-        (&["deprecated"], "Deprecated."),
-    ];
-    for (names, heading) in HEADINGS {
-        let entries: Vec<String> = tags
-            .iter()
-            .filter(|(name, _)| names.contains(&name.as_str()))
-            .map(|(name, text)| {
-                let text = inline_tags(&html_to_markdown(text));
-                match name.as_str() {
-                    "param" | "throws" | "exception" => match text.split_once(' ') {
-                        Some((first, rest)) => format!("**{first}** {rest}"),
-                        None => format!("**{text}**"),
-                    },
-                    _ => text,
-                }
-            })
-            .collect();
-        if entries.is_empty() {
-            continue;
-        }
-        if !markdown.is_empty() {
-            markdown.push_str("\n\n");
-        }
-        markdown.push_str(&format!("* **{heading}**"));
-        for entry in entries {
-            markdown.push_str(&format!("\n  * {entry}"));
-        }
-    }
-    markdown.trim().to_owned()
-}
-
-/// The few HTML tags javadoc is written with, as markdown. A `<pre>`
-/// keeps its lines, fenced, and a `<blockquote>` is quoted with `> `, as
-/// jdtls's converter writes them: a fence is never on a line of prose.
-fn html_to_markdown(text: &str) -> String {
-    let lowered = lowercase_tags(text);
-    let text = lowered.as_str();
-    const BLOCK_TAGS: [&str; 4] = ["<pre>", "</pre>", "<blockquote>", "</blockquote>"];
-    let mut blocks: Vec<(bool, String)> = Vec::new();
-    let mut in_pre = false;
-    let mut quoted = 0usize;
-    let mut rest = text;
-    loop {
-        let next = BLOCK_TAGS
-            .iter()
-            .filter_map(|tag| rest.find(tag).map(|at| (at, *tag)))
-            .min();
-        let (segment, tag) = match next {
-            Some((at, tag)) => (&rest[..at], Some(tag)),
-            None => (rest, None),
-        };
-        if in_pre {
-            let code = preformatted(segment);
-            if !code.is_empty() {
-                blocks.push((quoted > 0, format!("```\n{code}\n```")));
-            }
-        } else {
-            for paragraph in inline_html_to_markdown(segment) {
-                blocks.push((quoted > 0, paragraph));
-            }
-        }
-        let Some(tag) = tag else { break };
-        match tag {
-            "<pre>" => in_pre = true,
-            "</pre>" => in_pre = false,
-            "<blockquote>" => quoted += 1,
-            _ => quoted = quoted.saturating_sub(1),
-        }
-        rest = &rest[segment.len() + tag.len()..];
-    }
-    blocks
-        .into_iter()
-        .map(|(quoted, block)| {
-            if quoted {
-                block.lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n")
-            } else {
-                block
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-/// `text` with each HTML tag's name in lower case (`<PRE>` is `<pre>`):
-/// HTML does not tell them apart, and older javadoc writes them in capitals.
-fn lowercase_tags(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut rest = text;
-    while let Some(open) = rest.find('<') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let slash = usize::from(after.starts_with('/'));
-        let name_length = after[slash..]
-            .find(|character: char| !character.is_ascii_alphanumeric())
-            .unwrap_or(after.len() - slash);
-        out.push('<');
-        out.push_str(&after[..slash]);
-        out.push_str(&after[slash..slash + name_length].to_ascii_lowercase());
-        rest = &after[slash + name_length..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// The lines of a `<pre>` block, without the blank lines around them or
-/// the indentation they all share.
-fn preformatted(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
-    let first = lines.iter().position(|line| !line.trim().is_empty());
-    let last = lines.iter().rposition(|line| !line.trim().is_empty());
-    let (Some(first), Some(last)) = (first, last) else {
-        return String::new();
-    };
-    let lines = &lines[first..=last];
-    let indent = lines
-        .iter()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
-        .min()
-        .unwrap_or(0);
-    lines
-        .iter()
-        .map(|line| decode_entities(line.get(indent..).unwrap_or_default()))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn decode_entities(text: &str) -> String {
-    text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
-}
-
-/// Prose with its inline HTML as markdown, one string a paragraph.
-fn inline_html_to_markdown(text: &str) -> Vec<String> {
-    let mut out = text.to_owned();
-    for (tag, replacement) in [
-        ("<p>", "\n\n"),
-        ("</p>", "\n\n"),
-        ("<P>", "\n\n"),
-        ("<br>", "\n"),
-        ("<br/>", "\n"),
-        ("<code>", "`"),
-        ("</code>", "`"),
-        ("<b>", "**"),
-        ("</b>", "**"),
-        ("<strong>", "**"),
-        ("</strong>", "**"),
-        ("<i>", "*"),
-        ("</i>", "*"),
-        ("<em>", "*"),
-        ("</em>", "*"),
-        ("<ul>", "\n"),
-        ("</ul>", "\n"),
-        ("<li>", "\n* "),
-        ("</li>", ""),
-    ] {
-        out = out.replace(tag, replacement);
-    }
-    let out = decode_entities(&out);
-    out.split("\n\n")
-        .map(|paragraph| {
-            paragraph
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .filter(|joined| !joined.is_empty())
-        .collect()
-}
-
-#[cfg(test)]
-mod html_to_markdown_tests {
-    use super::html_to_markdown;
-
-    #[test]
-    fn a_quoted_pre_block_keeps_its_lines_behind_the_quote() {
-        let javadoc = "is equivalent to:\n<blockquote><pre>\n    char data[] = {'a', 'b'};\n    \
-                       String str = new String(data);\n</pre></blockquote><p>\nHere are more.";
-        assert_eq!(
-            html_to_markdown(javadoc),
-            "is equivalent to:\n\n> ```\n> char data[] = {'a', 'b'};\n> \
-             String str = new String(data);\n> ```\n\nHere are more."
-        );
-    }
-
-    #[test]
-    fn a_tag_in_capitals_is_the_same_tag() {
-        assert_eq!(
-            html_to_markdown("Classes use:\n<PRE>\n Object readResolve();\n</PRE><P>\nMore."),
-            "Classes use:\n\n```\nObject readResolve();\n```\n\nMore."
-        );
-    }
-
-    #[test]
-    fn a_pre_block_is_fenced_on_lines_of_its_own() {
-        assert_eq!(
-            html_to_markdown("Use it so: <pre>\n  List&lt;String&gt; names;\n</pre> and done."),
-            "Use it so:\n\n```\nList<String> names;\n```\n\nand done."
-        );
-    }
-}
-
-/// `{@code x}` and `{@literal x}` as code, `{@link Type#member label}` as
-/// its label or the name it links to.
-fn inline_tags(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("{@") {
-        out.push_str(&rest[..start]);
-        let inside = &rest[start + 2..];
-        // Braces nest in `{@code Map<K, V> {}}`.
-        let mut depth = 1;
-        let mut end = None;
-        for (index, character) in inside.char_indices() {
-            match character {
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = Some(index);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        let Some(end) = end else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let tag = &inside[..end];
-        let (name, argument) = tag.split_once(char::is_whitespace).unwrap_or((tag, ""));
-        let argument = argument.trim();
-        match name {
-            "code" | "literal" | "value" => out.push_str(&format!("`{argument}`")),
-            "link" | "linkplain" => {
-                let (target, label) = argument.split_once(char::is_whitespace).unwrap_or((argument, ""));
-                if label.trim().is_empty() {
-                    let target = target.trim_start_matches('#').replace('#', ".");
-                    out.push_str(&format!("`{target}`"));
-                } else {
-                    out.push_str(label.trim());
-                }
-            }
-            _ => out.push_str(argument),
-        }
-        rest = &inside[end + 1..];
-    }
-    out.push_str(rest);
-    out
 }
 
 /// How a declaration reads on hover, as jdtls words it.
